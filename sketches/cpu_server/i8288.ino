@@ -21,6 +21,21 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+#include "arduinoX86.h"
+
+#define STRINGIFY(x) #x
+#define EXPAND_AND_STRINGIFY(x) STRINGIFY(x)
+
+void i8288_status() {
+  #if EMULATE_8288
+    debugPrintlnColor(ansi::bright_cyan, "8288 emulation enabled!");
+    debugPrintlnColor(ansi::bright_cyan, EXPAND_AND_STRINGIFY(READ_MRDC_PIN));
+
+  #else
+    debugPrintlnColor(ansi::bright_cyan, "8288 emulation disabled!");
+  #endif
+}
+
 void tick_i8288() {
   #if EMULATE_8288
     I8288.last_status = (s_state)I8288.status;
@@ -93,6 +108,7 @@ void tick_i8288() {
 
 void reset_i8288() {
   #if EMULATE_8288
+    SER_DEBUG.println("Resetting 8288 emulation!");
     I8288.last_status = PASV;
     I8288.status = PASV;
     I8288.status_latch = PASV;

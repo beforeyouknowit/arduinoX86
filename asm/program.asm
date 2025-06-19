@@ -4,5 +4,9 @@
 cpu	8086
 org	0h
 
-    nop
+start:
+    mov ax, 0x0001
+    mov bx, 0x0002
+    add ax, bx
     hlt
+

@@ -59,7 +59,7 @@ impl From<ServerCpuType> for CpuWidth {
 impl TryFrom<u8> for ServerCpuType {
     type Error = CpuClientError;
     fn try_from(value: u8) -> Result<ServerCpuType, CpuClientError> {
-        match value & 0x7F {
+        match value & 0x3F {
             0x00 => Ok(ServerCpuType::Intel8088),
             0x01 => Ok(ServerCpuType::Intel8086),
             0x02 => Ok(ServerCpuType::NecV20),
@@ -177,6 +177,7 @@ pub enum ServerCommand {
     CmdCpuType = 0x18,
     CmdEmulate8080 = 0x19,
     CmdPrefetch = 0x1A,
+    CmdInitScreen = 0x1B,
     CmdInvalid,
 }
 
@@ -400,7 +401,7 @@ impl CpuClient {
                         matched_port = true;
                     }
                     println!("Trying port: {}", port.port_name);
-                    if let Some(rtk_port) = CpuClient::try_port(port, 1000) {
+                    if let Some(rtk_port) = CpuClient::try_port(port, 5000) {
                         return Ok(CpuClient {
                             port: Rc::new(RefCell::new(rtk_port)),
                         });
@@ -475,7 +476,7 @@ impl CpuClient {
                     }
                 }
 
-                let bytes_read = match new_port.read(&mut buf) {
+                match new_port.read_exact(&mut buf[..8]) {
                     Ok(bytes) => bytes,
                     Err(e) => {
                         log::error!("try_port: Read error from {}: {:?}", port_info.port_name, e);
@@ -484,31 +485,21 @@ impl CpuClient {
                 };
 
                 new_port.clear(serialport::ClearBuffer::Input).unwrap();
-                if bytes_read == 9 {
-                    let ver_text = str::from_utf8(&buf).unwrap();
-                    if ver_text.contains("ardX86 ") {
-                        let proto_ver = buf[7];
-                        log::trace!(
-                            "Found an ArduinoX86 server, protocol verison: {} on port {}",
-                            proto_ver,
-                            port_info.port_name
-                        );
-
-                        if proto_ver != REQUIRED_PROTOCOL_VER {
-                            log::error!("Unsupported protocol version.");
-                            return None;
-                        }
-                    }
-                    return Some(new_port);
-                } else {
+                let ver_text = str::from_utf8(&buf).unwrap();
+                if ver_text.contains("ardX86 ") {
+                    let proto_ver = buf[7];
                     log::trace!(
-                        "Invalid response from discovery command. Read {} bytes (Expected 9).",
-                        bytes_read
+                        "Found an ArduinoX86 server, protocol verison: {} on port {}",
+                        proto_ver,
+                        port_info.port_name
                     );
-                    let ver_text = str::from_utf8(&buf).unwrap();
-                    log::trace!("First 9 bytes of response: {:?}", ver_text);
+
+                    if proto_ver != REQUIRED_PROTOCOL_VER {
+                        log::error!("Unsupported protocol version.");
+                        return None;
+                    }
                 }
-                None
+                Some(new_port)
             }
             Err(e) => {
                 log::error!(
@@ -568,21 +559,17 @@ impl CpuClient {
     }
 
     pub fn recv_buf(&mut self, buf: &mut [u8]) -> Result<bool, CpuClientError> {
-        match self.port.borrow_mut().read(buf) {
-            Ok(bytes) => {
-                if bytes != buf.len() {
-                    // We didn't read entire buffer worth of data, fail
-                    log::error!("recv_buf: Only read {} bytes of {}.", bytes, buf.len());
+        self.port
+            .borrow_mut()
+            .read_exact(buf)
+            .map_err(|_| CpuClientError::ReadFailure)
+            .and_then(|_| {
+                if buf.len() == 0 {
                     Err(CpuClientError::ReadFailure)
                 } else {
                     Ok(true)
                 }
-            }
-            Err(e) => {
-                log::error!("recv_buf: read operation failed: {}", e);
-                Err(CpuClientError::ReadFailure)
-            }
-        }
+            })
     }
 
     /// Receive a buffer of dynamic size (don't expect the entire buffer read like recv_buf does)
@@ -624,13 +611,23 @@ impl CpuClient {
         self.read_result_code()
     }
 
-    pub fn cpu_type(&mut self) -> Result<ServerCpuType, CpuClientError> {
+    pub fn cpu_type(&mut self) -> Result<(ServerCpuType, bool), CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdCpuType)?;
         self.recv_buf(&mut buf)?;
         self.read_result_code()?;
 
-        ServerCpuType::try_from(buf[0])
+        let cpu_type = ServerCpuType::try_from(buf[0])?;
+        Ok((cpu_type, buf[0] & 0x40 != 0))
+    }
+
+    pub fn init_screen(&mut self) -> Result<bool, CpuClientError> {
+        self.send_command_byte(ServerCommand::CmdInitScreen)?;
+        let mut buf: [u8; 1] = [0; 1];
+        self.recv_buf(&mut buf)?;
+        self.read_result_code()?;
+
+        Ok(buf[0] != 0)
     }
 
     pub fn read_address_latch(&mut self) -> Result<u32, CpuClientError> {

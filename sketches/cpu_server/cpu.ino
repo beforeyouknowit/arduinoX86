@@ -38,16 +38,16 @@ uint8_t reverse_byte(uint8_t b) {
 // Execute one clock pulse to the CPU
 void clock_tick() {
   WRITE_CLK(1);
-  delayMicroseconds(CLOCK_PIN_HIGH_DELAY);
+  CLOCK_PIN_HIGH_DELAY;
   WRITE_CLK(0);
   // 186 input clock is 2x output (CPU) clock
   #if CPU_186
-    delayMicroseconds(CLOCK_PIN_HIGH_DELAY);
+    CLOCK_PIN_HIGH_DELAY;
     WRITE_CLK(1);
-    delayMicroseconds(CLOCK_PIN_HIGH_DELAY);
+    CLOCK_PIN_LOW_DELAY;
     WRITE_CLK(0);
   #endif
-  delayMicroseconds(CLOCK_PIN_LOW_DELAY);
+  CLOCK_PIN_LOW_DELAY;
   tick_i8288();
 }
 
@@ -103,6 +103,8 @@ bool cpu_reset() {
 
   static char buf[7];
 
+  reset_i8288();
+
   digitalWrite(TEST_PIN, LOW);
   digitalWrite(INTR_PIN, LOW); 
   digitalWrite(NMI_PIN, LOW);
@@ -135,7 +137,8 @@ bool cpu_reset() {
     if (READ_ALE_PIN == false) {
       ale_went_off = true;
     }
-    cycle();
+    clock_tick();
+    //debugPrintlnColor(ansi::green, " ## RESET: Ticking CPU with RESET asserted.");
   }
 
   // For < 186, ALE should have gone off during RESET hold. 
@@ -171,12 +174,8 @@ bool cpu_reset() {
         bhe_went_off = true;
     }
 
+    //debugPrintlnColor(ansi::green, "read status");
     read_status0();
-    #if MODE_ASCII  
-      snprintf(buf, 3, "%01X", CPU.status0 & 0x07);
-      SERIAL.print(buf);
-    #endif
-    //clock_tick();
     ale_cycles++;      
 
     if (ale_went_off && READ_ALE_PIN) {
@@ -219,17 +218,15 @@ bool cpu_reset() {
 
   // ALE did not turn on within the specified cycle timeout, so we failed to reset the cpu.
   #if DEBUG_RESET
-    Serial1.println("## Failed to reset CPU! ##");
+    debugPrintlnColor(ansi::bright_red, "## Failed to reset CPU! ##");
   #endif
   set_error("CPU failed to reset: No ALE!");   
-
 
   #if CPU_186
     // Don't leave the reset pin high - we can try removing power to the CPU if it fails
     // to reset properly.  Reset must be asserted (low) when CPU receives power.
     WRITE_RESET(RESET_ASSERT);
   #endif
-
   return false;
 }
 

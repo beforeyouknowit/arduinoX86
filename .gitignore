@@ -4,6 +4,7 @@
 /asm/*.bin
 /sketches/convert_me/
 /sketches/cpu_server_old/
+/sketches/cpu_server_last/
 /sketches/due_test/
 
 # Arduino stuff

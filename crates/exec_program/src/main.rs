@@ -5,6 +5,8 @@ use ard808x_cpu::ard808x_client;
 use ard808x_cpu::*;
 use clap::Parser;
 
+const SCREEN_INIT_TIME: u64 = 3; // Seconds to wait for the screen to initialize.
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -53,6 +55,9 @@ struct Args {
     // Run the CPU for a single instruction.
     #[arg(long, default_value_t = false)]
     single_step: bool,
+
+    #[arg(long, default_value_t = false)]
+    reset_only: bool,
 }
 
 fn main() {
@@ -85,7 +90,7 @@ fn main() {
     }
 
     // Create a cpu_client connection to cpu_server.
-    let cpu_client = match CpuClient::init(args.com_port.clone()) {
+    let mut cpu_client = match CpuClient::init(args.com_port.clone()) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -113,6 +118,23 @@ fn main() {
         }
     };
 
+    match cpu_client.init_screen() {
+        Ok(screen_present) if screen_present => {
+            println!(
+                "Display screen detected, waiting ({}) seconds for initialization...",
+                SCREEN_INIT_TIME
+            );
+            // Wait for the screen to initialize.
+            std::thread::sleep(std::time::Duration::from_secs(SCREEN_INIT_TIME));
+        }
+        Ok(_) => {
+            println!("No display screen detected.");
+        }
+        Err(e) => {
+            eprintln!("Error initializing screen: {e}");
+        }
+    }
+
     // Create a remote cpu instance using the cpu_client which should now be connected.
     let mut cpu = RemoteCpu::new(
         cpu_client,
@@ -125,7 +147,17 @@ fn main() {
     );
 
     let cpu_type = cpu.cpu_type();
-    log::debug!("Detected CPU type: {:?}", cpu_type);
+    println!("Detected CPU type: {:?}", cpu_type);
+
+    let have_fpu = cpu.have_fpu();
+    if have_fpu {
+        println!("Detected FPU!");
+    }
+
+    if args.reset_only {
+        println!("Reset only flag passed, exiting.");
+        return;
+    }
 
     // Capture initial regs before adjustment.
     let initial_regs = RemoteCpuRegisters::from(reg_bytes.as_slice());

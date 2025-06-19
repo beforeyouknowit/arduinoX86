@@ -18,5 +18,5 @@ repository = "https://github.com/dbalsom/arduino_808x"
 clap = { version = "4.0", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
-#serialport = { git = "https://github.com/LukaOber/serialport-rs", branch = "pr/34" }
-serialport = { git = "https://github.com/dbalsom/serialport-rs", branch = "arduino-fix" }
+serialport = "4.7.2"
+#serialport = { git = "https://github.com/dbalsom/serialport-rs", branch = "arduino-fix" }

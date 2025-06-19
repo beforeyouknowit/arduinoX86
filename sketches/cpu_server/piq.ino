@@ -82,8 +82,6 @@ bool pop_queue(uint8_t *byte, uint8_t *dtype) {
 
 // Return true if we have room in the queue for a
 bool queue_has_room(data_width_t width) {
-  bool has_room = false;
-
   if((width == EightLow) || (width == EightHigh)) {
     return CPU.queue.len + 1 <= CPU.queue.size;
   }

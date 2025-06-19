@@ -31,7 +31,10 @@
 #define _CPU_SERVER_H
 
 // Define this for either a 186 or a 188, we will detect the bus width.
-#define CPU_186 1
+#define CPU_186 0
+
+// Define this if you have connected an 8087 FPU
+#define FPU_8087 1
 
 // Baud rate is ignored for Arduino DUE as it uses native SerialUSB. This is legacy.
 // YOU SHOULD BE USING A DUE.
@@ -47,12 +50,10 @@
 // for maximum rated speed. Exceeding it will cause dropped characters or other corruption.
 // The popular MAX3232 module has a maximum rate of 250Kbps, so should use a baud rate of 230400.
 // The TRS3122E module specified in the BOM can support 1Mbit. I have been using 460800 with it.
-#define DEBUG_BAUD_RATE 460800 // Use for TRS3122E 
+#define DEBUG_BAUD_RATE 460800
 
 #define CMD_TIMEOUT 100 // Command timeout in milliseconds
 #define MAX_COMMAND_BYTES 28 // Maximum length of command parameter input
-
-#define MODE_ASCII 0 // Use ASCII response codes (for interactive debugging only, client won't support)
 
 // What vector to use for the BRKEM call. No reason to change this really.
 #define BRKEM_VECTOR ((uint8_t)0x00)
@@ -62,8 +63,10 @@
 // Print a character to the debugging output on each store command.
 #define STORE_INDICATOR 1
 
+#define RELEASE_MODE 0 // If set, disables all traces and debugs.
+
 #define TRACE_ALL 1 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
-#define TRACE_NONE 0 // TRACE_NONE will override all set traces
+#define TRACE_NONE (0 | RELEASE_MODE) // TRACE_NONE will override all set traces
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
@@ -79,12 +82,13 @@
 #define TRACE_FINALIZE  ((0 | TRACE_ALL) & ~TRACE_NONE)
 
 #define DEBUG_ALL 0  // DEBUG_ALL will enable all debugs (DEBUG_NONE overrides)
-#define DEBUG_NONE 0 // DEBUG_NONE will override all set debugs
+#define DEBUG_NONE (0 | RELEASE_MODE) // DEBUG_NONE will override all set debugs
 
 #define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Report state changes and time spent in each state
 #define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about the reset process
 #define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about the CPU setup routine, if applicable
 #define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about jump vector program execution
+#define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about CPU identification
 #define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE)
 #define DEBUG_LOAD_DONE ((0 | DEBUG_ALL) & ~DEBUG_NONE)
 #define DEBUG_EXECUTE   ((1 | DEBUG_ALL) & ~DEBUG_NONE)
@@ -92,13 +96,19 @@
 #define DEBUG_FINALIZE  ((1 | DEBUG_ALL) & ~DEBUG_NONE)
 #define DEBUG_INSTR     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Print instruction mnemonics as they are executed from queue
 #define DEBUG_EMU       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Print debugging information concerning 8080 emulation mode state
-#define DEBUG_LOCK      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Print a message when the LOCK pin is asserted on a cycle
 #define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Debugging output for queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
-#define DEBUG_BUS       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc)
+#define DEBUG_BUS       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
 #define DEBUG_PROTO 0 // Insert debugging messages into serial output (Escaped by ##...##)
 #define DEBUG_CMD 0
+
+#define DEBUG_BUS_COLOR (ansi::bright_green)
+#define DEBUG_QUEUE_COLOR (ansi::bright_yellow)
+#define DEBUG_STORE_COLOR (ansi::magenta)
+#define DEBUG_VECTOR_COLOR (ansi::cyan)
+#define DEBUG_ID_COLOR (ansi::green)
+#define ERROR_COLOR (ansi::bright_red)
 
 #define MAX_ERR_LEN 50 // Maximum length of an error string
 
@@ -233,37 +243,6 @@ typedef bool (*command_func)();
 
 #define RESPONSE_FAIL 0x00
 #define RESPONSE_OK 0x01
-
-// ASCII aliases for commands, mostly for interactive debugging
-const uint8_t CMD_ALIASES[] = {
-  0, // CmdNone
-  'v', // CmdVersion
-  'r', // CmdReset
-  'l', // CmdLoad
-  'c', // CmdCycle
-  'a', // CmdReadAddressLatch
-  's', // CmdReadStatus
-  't', // CmdRead8288Command
-  'u', // CmdRead8288Control
-  'r', // CmdReadDataBus
-  'w', // CmdWriteDataBus,
-  'z', // CmdFinalize
-  'm', // CmdBeginStore,
-  'w', // CmdStore,
-  'q', // CmdQueueLen,
-  'b', // CmdQueueBytes,
-  'x', // CmdWritePin,
-  'y', // CmdReadPin,
-  'g', // CmdGetProgramState
-  'e', // CmdGetLastError
-  'f', // CmdGetCycleStatus
-  'k', // CmdPrefetchStore
-  'i', // CmdReadAddress
-  'd', // CmdCpuType
-  'h', // CmdEmulate8080
-  'p', // CmdPrefetch
-  0 // CmdInvalid
-};
 
 // List of valid arguments to CmdWritePin. Only these specific pins
 // can have state written to.

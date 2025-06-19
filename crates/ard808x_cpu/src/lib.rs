@@ -270,6 +270,7 @@ pub enum RunState {
 
 pub struct RemoteCpu<'a> {
     cpu_type: ServerCpuType,
+    have_fpu: bool,
     width: CpuWidth,
     client: CpuClient,
     regs: RemoteCpuRegisters,
@@ -341,19 +342,22 @@ impl RemoteCpu<'_> {
     ) -> RemoteCpu<'static> {
         // Determine CPU type/width
 
-        let (server_cpu_type, width) = match client.cpu_type() {
-            Ok(server_cpu_type) => {
+        let (server_cpu_type, width, have_fpu) = match client.cpu_type() {
+            Ok((server_cpu_type, have_fpu)) => {
                 let width = CpuWidth::from(server_cpu_type);
 
-                (server_cpu_type, width)
+                (server_cpu_type, width, have_fpu)
             }
             Err(e) => {
-                log::warn!("Failed to get CPU width!");
-                (ServerCpuType::default(), CpuWidth::default())
+                log::error!("Failed to get CPU type!");
+                std::process::exit(1);
             }
         };
 
         log::debug!("Detected CPU type: {:?}", server_cpu_type);
+        if have_fpu {
+            log::debug!("Detected FPU");
+        }
 
         let have_queue_status = match server_cpu_type {
             ServerCpuType::Intel8088 | ServerCpuType::Intel8086 => true,
@@ -428,6 +432,7 @@ impl RemoteCpu<'_> {
 
         RemoteCpu {
             cpu_type: server_cpu_type,
+            have_fpu,
             width,
             client,
             regs: Default::default(),
@@ -523,6 +528,10 @@ impl RemoteCpu<'_> {
 
     pub fn cpu_type(&self) -> ServerCpuType {
         self.cpu_type
+    }
+
+    pub fn have_fpu(&self) -> bool {
+        self.have_fpu
     }
 
     pub fn pc(&self) -> usize {
@@ -991,7 +1000,11 @@ impl RemoteCpu<'_> {
                 match self.mcycle_state {
                     BusState::MEMR => {
                         // CPU is reading data from bus. Provide value from memory.
+                        log::trace!("Reading memory at address: [{:05X}]", self.address_latch);
                         self.data_bus = self.read_memory(self.address_latch);
+                        self.client
+                            .write_data_bus(self.data_bus)
+                            .expect("Failed to write data bus.");
                     }
                     BusState::CODE => {
                         // CPU is reading code from bus. Provide value from memory if we are not past the

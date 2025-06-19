@@ -23,9 +23,10 @@
 #ifndef _ARDUINO_X86_H
 #define _ARDUINO_X86_H
 
+#include "hats/Hat8088.h"
+
 #include "cpu_server.h"
 #include "gpio_pins.h"
-#include "ansi_color.h"
 
 // Nothing in here should need modification. User parameters can be set in cpu_server.h
 
@@ -58,7 +59,7 @@
   // How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
   #define RESET_CYCLE_COUNT 7
   // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 14
+  #define RESET_CYCLE_TIMEOUT 20
   // What logic level RESET is when asserted
   #define RESET_ASSERT 1
   // What logic level RESET is when deasserted
@@ -73,24 +74,13 @@
   #define SETUP_PROGRAM_PATCH_OFFSET 0
 #endif
 
+#include "hat_config.h"
+#include "ansi_color.h"
+
 // Define board type 
 #define ARDUINO_MEGA 1
 #define ARDUINO_DUE 2
 #define ARDUINO_GIGA 3
-
-#if defined(__SAM3X8E__) // If Arduino DUE
-  #define BOARD_TYPE ARDUINO_DUE
-  #define SERIAL SerialUSB
-  #define FLUSH SERIAL.flush()
-#elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-  #define BOARD_TYPE ARDUINO_MEGA
-  #define SERIAL Serial
-  #define FLUSH 
-#elif defined(ARDUINO_GIGA) // If Arduino GIGA
-  #define BOARD_TYPE ARDUINO_GIGA
-  #define SERIAL SerialUSB
-  #define FLUSH 
-#endif
 
 // Code segment to use for load program.
 const uint16_t LOAD_SEG = 0xD000;
@@ -135,6 +125,18 @@ const char *CPU_TYPE_STRINGS[] = {
   "i80188",
   "i80186"
 };
+
+
+typedef enum {
+  noFpu,
+  i8087,
+} fpu_type_t;
+
+const char *FPU_TYPE_STRINGS[] = {
+  "None",
+  "i8087",
+};
+
 
 const char CPU_TYPE_COUNT = sizeof(CPU_TYPE_STRINGS) / sizeof(CPU_TYPE_STRINGS[0]);
 
@@ -193,8 +195,8 @@ const char *SEGMENT_STRINGS[] = {
   "ES", "SS", "CS", "DS"
 };
 
-// CPU Registers (note: new organization for protocol v3)
-typedef struct registers {
+// CPU Registers - for new NMI STORE routine
+typedef struct registers1 {
   uint16_t ax;
   uint16_t bx;
   uint16_t cx;
@@ -209,7 +211,25 @@ typedef struct registers {
   uint16_t bp;
   uint16_t si;
   uint16_t di;
-} registers_t __attribute__((packed));
+} registers1_t __attribute__((packed));
+
+// CPU Registers - for original STORE routine
+typedef struct registers2 {
+  uint16_t ax;
+  uint16_t bx;
+  uint16_t cx;
+  uint16_t dx;
+  uint16_t ss;
+  uint16_t sp;
+  uint16_t flags;
+  uint16_t ip;
+  uint16_t cs;
+  uint16_t ds;
+  uint16_t es;
+  uint16_t bp;
+  uint16_t si;
+  uint16_t di;
+} registers2_t __attribute__((packed));
 
 // Processor instruction queue
 typedef struct queue {
@@ -256,6 +276,7 @@ typedef struct cpu {
   bool doing_reset;
   bool doing_id;
   cpu_type_t cpu_type; // Detected type of the CPU.
+  fpu_type_t fpu_type; // Detected type of FPU (0 if none)
   cpu_width_t width; // Native bus width of the CPU. Detected on reset from BHE line.
   bool do_emulation; // Flag that determines if we enter 8080 emulation mode after Load
   bool in_emulation; // Flag set when we have entered 8080 emulation mode and cleared when we have left
@@ -284,8 +305,8 @@ typedef struct cpu {
   uint16_t stack_w_op_ct; // Number of stack write operations in current state
   uint16_t pre_emu_flags; // Flags pushed to stack by BRKEM
   uint8_t emu_flags; // Flags pushed to stack by PUSH PSW during EmuExit program
-  registers_t load_regs; // Register state set by Load command
-  registers_t post_regs; // Register state retrieved from Store program
+  registers1_t load_regs; // Register state set by Load command
+  volatile registers1_t post_regs; // Register state retrieved from Store program
   uint8_t *readback_p;
   bool have_queue_status; // Whether we have access to the queue status lines. Can be detected during RESET.
   Queue queue; // Instruction queue
@@ -295,8 +316,13 @@ typedef struct cpu {
   uint8_t qt; // Last data type read from queue
   bool q_ff; // Did we fetch a first instruction byte from the queue this cycle?
   uint8_t q_fn; // What # byte of instruction did we fetch?
+  bool nmi_terminate; // Whether we are entering ExecuteFinalize via NMI termination.
   uint8_t nmi_checkpoint; // How many reads we have done at the NMI IVT address.
   uint16_t nmi_buf_cursor;
+
+  const uint8_t *program;
+  size_t program_len;
+  uint16_t *program_pc;
 } Cpu;
 
 typedef struct i8288 {
@@ -332,21 +358,28 @@ const uint16_t CPU_FLAG_OVERFLOW   = 0b0000100000000000;
 #define CPU_FLAG_DEFAULT_CLEAR 0xFFD7
 // ----------------------------- GPIO PINS ----------------------------------//
 
+#define SPIN_DELAY(count) do { \
+    volatile unsigned int _i; \
+    for (_i = 0; _i < (count); _i++) { \
+        __asm__ __volatile__("nop"); \
+    } \
+} while(0)
+
 // Time in microseconds to wait after setting clock HIGH or LOW
 
 #if defined(__AVR_ATmega2560__) // Arduino MEGA
-  
-  #define CLOCK_PIN_HIGH_DELAY 0
-  #define CLOCK_PIN_LOW_DELAY 0
+  #define CLOCK_PIN_DELAY 0
+  #define CLOCK_PIN_HIGH_DELAY (delayMicroseconds(0))
+  #define CLOCK_PIN_LOW_DELAY (delayMicroseconds(0))
 
 #elif defined(__SAM3X8E__) // If Arduino DUE
-
-  #define CLOCK_PIN_HIGH_DELAY 1
-  #define CLOCK_PIN_LOW_DELAY 1
+  #define CLOCK_PIN_DELAY 0
+  #define CLOCK_PIN_HIGH_DELAY SPIN_DELAY(1000)
+  #define CLOCK_PIN_LOW_DELAY SPIN_DELAY(1000)
 
 #elif defined(ARDUINO_GIGA) 
-
-  #define CLOCK_PIN_HIGH_DELAY 1
+  #define CLOCK_PIN_DELAY 0
+  #define CLOCK_PIN_HIGH_DELAY 0
   #define CLOCK_PIN_LOW_DELAY 0
 
 #endif
@@ -356,337 +389,17 @@ const uint16_t CPU_FLAG_OVERFLOW   = 0b0000100000000000;
 // different board - some types need longer delays
 
 #if defined(__AVR_ATmega2560__) // Arduino MEGA
-  
   #if BOARD_TYPE == ELEGOO_MEGA 
-    #define PIN_CHANGE_DELAY 3
+    #define PIN_CHANGE_DELAY (delayMicroseconds(3))
   #elif BOARD_TYPE == ARDUINO_MEGA
-    #define PIN_CHANGE_DELAY 1
+    #define PIN_CHANGE_DELAY (delayMicroseconds(1))
   #endif
-
 #elif defined(__SAM3X8E__) // If Arduino DUE
-
   #define PIN_CHANGE_DELAY 0
-
 #elif defined(ARDUINO_GIGA)
-
   #define PIN_CHANGE_DELAY 0
-
 #endif
 
-// -----------------------------Buzzer ----------------------------------------
-#define BUZZER_PIN 2
-
-// ------------------------- CPU Control pins ---------------------------------
-
-#define CLK_PIN = 4;
-#define RESET_PIN = 5;
-
-#if defined(__AVR_ATmega2560__) // If Arduino MEGA
-  
-  #define WRITE_BUZZER(x) ((x) ? (PORTE |= (1 << 4)) : (PORTE &= ~(1 << 4)))
-
-#elif defined(__SAM3X8E__) // If Arduino DUE
-
-  #define WRITE_BUZZER(x) ((x) ? (PIOB->PIO_SODR = PIO_PB25) : (PIOB->PIO_CODR = PIO_PB25))
-
-#elif defined(ARDUINO_GIGA)
-
-  // do buzzer here
-  #define WRITE_BUZZER(x) ((X))
-#endif
-
-// -------------------------- CPU Input pins ----------------------------------
-#define BHE_PIN 17
-#define READ_BHE_PIN READ_PIN_D17
-#define READ_READY_PIN READ_PIN_D06
-#define READ_S0_PIN READ_PIN_D14
-#define READ_S1_PIN READ_PIN_D15
-#define READ_S2_PIN READ_PIN_D16
-#define READ_S3_PIN READ_PIN_D38
-#define READ_S4_PIN READ_PIN_D39
-#define READ_S5_PIN READ_PIN_D40
-#define READ_QS0_PIN READ_PIN_D09
-#define READ_QS1_PIN READ_PIN_D08
-#define READ_INTR_PIN READ_PIN_D12
-#define READ_NMI_PIN READ_PIN_D13
-
-#define READY_PIN 6
-#define TEST_PIN 7
-#define LOCK_PIN 10
-#define INTR_PIN 12
-#define NMI_PIN 13
-
-// -------------------------- CPU Output pins ---------------------------------
-#define RQ_PIN 3
-
-// --------------------------8288 Control Inputs ------------------------------
-#define AEN_PIN 54
-#define CEN_PIN 55
-
-// --------------------------8288 Control lines -------------------------------
-#define ALE_PIN 50
-#define DTR_PIN 49
-#define MCEPDEN_PIN 43
-#define DEN_PIN 44
-
-// --------------------------8288 Command lines -------------------------------
-#define MRDC_PIN 51
-#define AMWC_PIN 52
-#define MWTC_PIN 53
-#define IORC_PIN 46
-#define AIOWC_PIN 48
-#define IOWC_PIN 47
-#define INTA_PIN 45
-
-// -------------------------- Macro definitions  ---------------------------------
-
-#define BIT00  (1u << 0)
-#define BIT01  (1u << 1)
-#define BIT02  (1u << 2)
-#define BIT03  (1u << 3)
-#define BIT04  (1u << 4)
-#define BIT05  (1u << 5)
-#define BIT06  (1u << 6)
-#define BIT07  (1u << 7)
-#define BIT08  (1u << 8)
-#define BIT09  (1u << 9)
-#define BIT10  (1u << 10)
-#define BIT11  (1u << 11)
-#define BIT12  (1u << 12)
-#define BIT13  (1u << 13)
-#define BIT14  (1u << 14)
-#define BIT15  (1u << 15)
-#define BIT16  (1u << 16)
-#define BIT17  (1u << 17)
-#define BIT18  (1u << 18)
-#define BIT19  (1u << 19)
-#define BIT20  (1u << 20)
-#define BIT21  (1u << 21)
-#define BIT22  (1u << 22)
-#define BIT23  (1u << 23)
-#define BIT24  (1u << 24)
-#define BIT25  (1u << 25)
-#define BIT26  (1u << 26)
-#define BIT27  (1u << 27)
-#define BIT28  (1u << 28)
-#define BIT29  (1u << 29)
-#define BIT30  (1u << 30)
-#define BIT31  (1u << 31)
-
-#define SET_BIT00  (1u << 0)
-#define SET_BIT01  (1u << 1)
-#define SET_BIT02  (1u << 2)
-#define SET_BIT03  (1u << 3)
-#define SET_BIT04  (1u << 4)
-#define SET_BIT05  (1u << 5)
-#define SET_BIT06  (1u << 6)
-#define SET_BIT07  (1u << 7)
-#define SET_BIT08  (1u << 8)
-#define SET_BIT09  (1u << 9)
-#define SET_BIT10  (1u << 10)
-#define SET_BIT11  (1u << 11)
-#define SET_BIT12  (1u << 12)
-#define SET_BIT13  (1u << 13)
-#define SET_BIT14  (1u << 14)
-#define SET_BIT15  (1u << 15)
-
-#define CLR_BIT00  ((1u << 0) << 16)
-#define CLR_BIT01  ((1u << 1) << 16)
-#define CLR_BIT02  ((1u << 2) << 16)
-#define CLR_BIT03  ((1u << 3) << 16)
-#define CLR_BIT04  ((1u << 4) << 16)
-#define CLR_BIT05  ((1u << 5) << 16)
-#define CLR_BIT06  ((1u << 6) << 16)
-#define CLR_BIT07  ((1u << 7) << 16)
-#define CLR_BIT08  ((1u << 8) << 16)
-#define CLR_BIT09  ((1u << 9) << 16)
-#define CLR_BIT10  ((1u << 10) << 16)
-#define CLR_BIT11  ((1u << 11) << 16)
-#define CLR_BIT12  ((1u << 12) << 16)
-#define CLR_BIT13  ((1u << 13) << 16)
-#define CLR_BIT14  ((1u << 14) << 16)
-#define CLR_BIT15  ((1u << 15) << 16)
-
-
-// Write macros
-#if defined(__SAM3X8E__) // If Arduino DUE
-  // D4: PC26* (some references say PA29 - didn't work)
-  #define WRITE_CLK(x) ((x) ? (PIOC->PIO_SODR = BIT26) : (PIOC->PIO_CODR = BIT26))
-  // D5: PC25
-  #define WRITE_RESET(x) ((x) ? (PIOC->PIO_SODR = PIO_PC25) : (PIOC->PIO_CODR = PIO_PC25))
-  // D6: PC24
-  #define WRITE_READY_PIN(x) ((x) ? (PIOC->PIO_SODR = BIT24) : (PIOC->PIO_CODR = BIT24))
-  // D7: PC23
-  #define WRITE_TEST_PIN(x) ((x) ? (PIOC->PIO_SODR = BIT23) : (PIOC->PIO_CODR = BIT23))
-  // D10: PC29*
-  #define WRITE_LOCK_PIN(x) ((x) ? (PIOC->PIO_SODR = BIT29) : (PIOC->PIO_CODR = BIT29))
-  // D12: PD8
-  #define WRITE_INTR_PIN(x) ((x) ? (PIOD->PIO_SODR = BIT08) : (PIOD->PIO_CODR = BIT08))
-  // D13: PB27
-  #define WRITE_NMI_PIN(x) ((x) ? (PIOB->PIO_SODR = BIT27) : (PIOB->PIO_CODR = BIT27))
-  // A0: PA16
-  #define WRITE_AEN_PIN(x) ((x) ? (PIOA->PIO_SODR = BIT16) : (PIOA->PIO_CODR = BIT16))
-  // A1: PA24
-  #define WRITE_CEN_PIN(x) ((x) ? (PIOA->PIO_SODR = BIT24) : (PIOA->PIO_CODR = BIT24))
-
-#elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-  // D4
-  #define WRITE_CLK(x) ((x) ? (PORTG |= (1 << 5)) : (PORTG &= ~(1 << 5))) // CLK is PG5
-  // D5
-  #define WRITE_RESET(x) ((x) ? (PORTE |= (1 << 3)) : (PORTE &= ~(1 << 3))) // RESET is PE3
-  // D6
-  #define WRITE_READY_PIN(x) ((x) ? (PORTH |= (1 << 3)) : (PORTH &= ~(1 << 3)))
-  // D7
-  #define WRITE_TEST_PIN(x) ((x) ? (PORTH |= (1 << 4)) : (PORTH &= ~(1 << 4)))
-  // D10
-  #define WRITE_LOCK_PIN(x) ((x) ? (PORTB |= (1 << 4)) : (PORTB &= ~(1 << 4)))
-  // D12
-  #define WRITE_INTR_PIN(x) ((x) ? (PORTB |= (1 << 6)) : (PORTB &= ~(1 << 6)))
-  // D13
-  #define WRITE_NMI_PIN(x) ((x) ? (PORTB |= (1 << 7)) : (PORTB &= ~(1 << 7)))
-  // A0
-  #define WRITE_AEN_PIN(x) ((x) ? (PORTF |= 0x01) : (PORTF &= ~0x01))
-  // A1
-  #define WRITE_CEN_PIN(x) ((x) ? (PORTF |= (1 << 1)) : (PORTF &= ~(1 << 1)))
-
-#elif defined (ARDUINO_GIGA)
-
-  // D4: PJ8
-  #define WRITE_CLK(x) WRITE_PIN_D04(x)
-  // D5: PA7
-  #define WRITE_RESET(x) WRITE_PIN_D04(x)
-  // D6: PD13
-  #define WRITE_READY_PIN(x) WRITE_PIN_D06(x)
-  // D7: PB4
-  #define WRITE_TEST_PIN(x) WRITE_PIN_D07(x)
-  // D10: PK1
-  #define WRITE_LOCK_PIN(x) WRITE_PIN_D10(x)
-  // D12: PJ11
-  #define WRITE_INTR_PIN(x) WRITE_PIN_D12(x)
-  // D13: PH6
-  #define WRITE_NMI_PIN(x) WRITE_PIN_D13(x)
-  // A0: PC4
-  #define WRITE_AEN_PIN(x) WRITE_PIN_A0(x)
-  // A1: PC5
-  #define WRITE_CEN_PIN(x) WRITE_PIN_A1(x)
-
-#endif 
-
-// Read macros
-
-#if defined(__SAM3X8E__) // If Arduino DUE
-  #define READ_LOCK_PIN READ_PIN_D10
-#elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-  #define READ_LOCK_PIN 0
-#elif defined(ARDUINO_GIGA)
-  #define READ_LOCK_PIN READ_PIN_D10
-#endif
-
-
-#if EMULATE_8288
-  // D50: PC13
-  #if CPU_186
-    // The 186 has its own ALE pin, so we will defer to that
-    #define READ_ALE_PIN  READ_PIN_D50
-  #else
-    #define READ_ALE_PIN  (I8288.ale)
-  #endif
-  // D51: PC12
-  #define READ_MRDC_PIN   (!I8288.mrdc)
-  // D52: PB21
-  #define READ_AMWC_PIN   (!I8288.amwc)
-  // D53: PB14
-  #define READ_MWTC_PIN   (!I8288.mwtc)
-  // D46: PC17
-  #define READ_IORC_PIN   (!I8288.iorc)
-  // D48: PC15
-  #define READ_AIOWC_PIN  (!I8288.aiowc)
-  // D47: PC16
-  #define READ_IOWC_PIN   (!I8288.iowc)
-  // D45: PC18
-  #define READ_INTA_PIN   (!I8288.inta)
-#else
-  #if defined(__SAM3X8E__) // If Arduino DUE
-    
-    #if CPU_186
-      // The L186 doesn't use an 8288 and can produce its own bus signals, but they need to be 
-      // decoded 
-      #define READ_ALE_PIN      READ_PIN_D50
-      #define READ_MRDC_PIN     !(!READ_PIN_D51 && READ_PIN_D16)    // We hook !RD up to D51. Mem read when S2 (D16) is high.
-      #define READ_AMWC_PIN     1                                   // There is no AMWC signal. Simulate inactive-high.
-      #define READ_MWTC_PIN     !(!READ_PIN_D53 && READ_PIN_D16)    // We hook !WR up to D53. Mem write when S2 (D16) is high.
-      #define READ_IORC_PIN     !(!READ_PIN_D51 && !READ_PIN_D16)   // We hook !RD up to D51. IO read when S2 (D16) is low.
-      #define READ_AIOWC_PIN    1                                   // There is no AIOWC signal. Simulate inactive-high.
-      #define READ_IOWC_PIN     !(!READ_PIN_D53 && !READ_PIN_D16)   // We hook !WR up to D53. IO write when S2 (D16) is low.
-      #define READ_INTA_PIN     READ_PIN_D45
-    #else
-      #define READ_AEN_PIN      ((PIOD->PIO_PDSR & BIT10) != 0)
-      #define READ_CEN_PIN      ((PIOD->PIO_PDSR & BIT09) != 0)
-
-      // D50: PC13
-      #define READ_ALE_PIN      READ_PIN_D50
-      #define READ_DTR_PIN      ((PIOC->PIO_PDSR & BIT03) != 0)
-      #define READ_MCEPDEN_PIN  ((PIOC->PIO_PDSR & BIT01) != 0)
-      #define READ_DEN_PIN      ((PIOC->PIO_PDSR & BIT02) != 0)
-
-      #define READ_MRDC_PIN     READ_PIN_D51
-      #define READ_AMWC_PIN     READ_PIN_D52
-      #define READ_MWTC_PIN     READ_PIN_D53
-      #define READ_IORC_PIN     READ_PIN_D46
-      #define READ_AIOWC_PIN    READ_PIN_D48
-      #define READ_IOWC_PIN     READ_PIN_D47
-      #define READ_INTA_PIN     READ_PIN_D45
-    #endif
-
-  #elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-
-    // TODO: implement me
-    #define READ_LOCK_PIN 0
-
-    #define READ_AEN_PIN ((PINF & 0x01) != 0)
-    #define READ_CEN_PIN ((PINF & 0x02) != 0)
-
-    #define READ_ALE_PIN ((PINB & 0x08) != 0)
-    #define READ_DTR_PIN ((PINL & 0x01) != 0)
-    #define READ_MCEPDEN_PIN ((PINL & 0x40) != 0) 
-    #define READ_DEN_PIN ((PINL & 0x20) != 0)
-
-    #define READ_MRDC_PIN ((PINB & 0x04) != 0)
-    #define READ_AMWC_PIN ((PINB & 0x02) != 0)
-    #define READ_MWTC_PIN ((PINB & 0x01) != 0)
-    #define READ_IORC_PIN ((PINL & 0x08) != 0)
-    #define READ_AIOWC_PIN ((PINL & 0x02) != 0)
-    #define READ_IOWC_PIN ((PINL & 0x04) != 0)
-    #define READ_INTA_PIN ((PINL & 0x10) != 0)
-  #elif defined(ARDUINO_GIGA)
-    #define TODO
-  #endif
-#endif
-
-// Address pins, used for slow address reading via digitalRead()
-const int ADDRESS_PINS[] = {
-  22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41
-};
-const int ADDRESS_LINES = 20;
-
-// All output pins, used to set pin direction on setup
-const int OUTPUT_PINS[] = {
-  4,  // CLK
-  5,  // RESET
-  6,  // READY
-  7,  // TEST
-  12, // INTR
-  13, // NMI,
-  54, // AEN,
-  55, // CEN
-};
-
-// All input pins, used to set pin direction on setup
-const int INPUT_PINS[] = {
-  3,8,9,10,11,14,15,16,17,
-  22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,
-  43,44,45,46,47,48,49,50,51,52,53
-};
 
 // High word of cycle count
 unsigned long CYCLE_NUM_H = 0;
