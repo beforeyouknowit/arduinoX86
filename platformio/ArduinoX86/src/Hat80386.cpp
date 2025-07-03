@@ -3,7 +3,7 @@
     https://github.com/dbalsom/arduinoX86
 
     Permission is hereby granted, free of charge, to any person obtaining a
-    copy of this software and associated documentation files (the “Software”),
+    copy of this software and associated documentation files (the "Software"),
     to deal in the Software without restriction, including without limitation
     the rights to use, copy, modify, merge, publish, distribute, sublicense,
     and/or sell copies of the Software, and to permit persons to whom the
@@ -12,7 +12,7 @@
     The above copyright notice and this permission notice shall be included in
     all copies or substantial portions of the Software.
 
-    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
@@ -21,17 +21,11 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-#pragma once
-#include "arduinoX86.h"
+#include <config.h>
+#if defined(HAT_386_3V_V1)
+#include <hats/Hat80386.h>
 
-extern Cpu CPU;
-extern Intel8288 I8288;
-extern CpuServer SERVER;
-
-// cpu_server.cpp
-extern const char RESPONSE_CHRS[];
-extern const char VERSION_DAT[];
-extern const size_t VERSION_DAT_LEN;
-extern const char MACHINE_STATE_CHARS[];
-extern const char * const MACHINE_STATE_STRINGS[];
-extern const char * const CMD_STRINGS[];
+// Define the static constexpr members of Hat80286
+constexpr std::array<int,7> Hat80386::OUTPUT_PINS;
+constexpr std::array<int,28> Hat80386::INPUT_PINS;
+#endif

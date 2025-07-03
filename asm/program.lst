@@ -1,12 +1,11 @@
      1                                  ; program.asm
      2                                  ; Compile with nasm to build program.bin for cpu_client
      3                                  ; nasm program.asm -o program.bin
-     4                                  cpu	8086
+     4                                  cpu	286
      5                                  org	0h
      6                                  
      7                                  start:
-     8 00000000 B80100                      mov ax, 0x0001
-     9 00000003 BB0200                      mov bx, 0x0002
-    10 00000006 01D8                        add ax, bx
-    11 00000008 F4                          hlt
-    12                                  
+     8 00000000 D50A                        aad
+     9 00000002 50                          push ax
+    10 00000003 F4                          hlt
+    11                                  

@@ -22,7 +22,7 @@
 */
 
 #include "arduinoX86.h"
-#include "globals.h"
+#include <globals.h>
 
 // Functions for reading and writing the CPU bus.
 
@@ -31,7 +31,7 @@
 
 
 // Write a value to the CPU's data bus
-void data_bus_write(uint16_t data, data_width_t width) {
+void data_bus_write(uint16_t data, ActiveBusWidth width) {
 
   #if defined(__SAM3X8E__) // If Arduino DUE
 
@@ -82,9 +82,10 @@ void data_bus_write(uint16_t data, data_width_t width) {
     // else {
     //   SET_DATA_BUS_TO_WRITE;
     // }
-    SET_DATA_BUS_TO_WRITE;
+    
+    //SET_DATA_BUS_TO_WRITE;
 
-    if ((width == EightLow) || (width == Sixteen)) {
+    if ((width == ActiveBusWidth::EightLow) || (width == ActiveBusWidth::Sixteen)) {
       WRITE_BIT(data, 0x01, SET_DBUS_00, CLEAR_DBUS_00);
       WRITE_BIT(data, 0x02, SET_DBUS_01, CLEAR_DBUS_01);
       WRITE_BIT(data, 0x04, SET_DBUS_02, CLEAR_DBUS_02);
@@ -95,7 +96,7 @@ void data_bus_write(uint16_t data, data_width_t width) {
       WRITE_BIT(data, 0x80, SET_DBUS_07, CLEAR_DBUS_07);
     }
 
-    if ((width == EightHigh) || (width == Sixteen)) {
+    if ((width == ActiveBusWidth::EightHigh) || (width == ActiveBusWidth::Sixteen)) {
       WRITE_BIT(data, 0x0100, SET_DBUS_08, CLEAR_DBUS_08);
       WRITE_BIT(data, 0x0200, SET_DBUS_09, CLEAR_DBUS_09);
       WRITE_BIT(data, 0x0400, SET_DBUS_10, CLEAR_DBUS_10);
@@ -121,7 +122,7 @@ void data_bus_write(uint16_t data, data_width_t width) {
 }
 
 // Read a value from the CPU's data bus
-uint16_t data_bus_read(data_width_t width) {
+uint16_t data_bus_read(ActiveBusWidth width) {
 
   uint16_t data = 0;
   #if defined(__SAM3X8E__) // If Arduino DUE  
@@ -163,9 +164,10 @@ uint16_t data_bus_read(data_width_t width) {
     }
     return data;
   #elif defined(ARDUINO_GIGA)
-    SET_DATA_BUS_TO_READ;
 
-    if ((width == EightLow) || (width == Sixteen)) {
+    //SET_DATA_BUS_TO_READ;
+
+    if ((width == ActiveBusWidth::EightLow) || (width == ActiveBusWidth::Sixteen)) {
       // Read data from bus pins
       if (READ_DBUS_00) data |= 0x0001;
       if (READ_DBUS_01) data |= 0x0002;
@@ -176,7 +178,7 @@ uint16_t data_bus_read(data_width_t width) {
       if (READ_DBUS_06) data |= 0x0040;
       if (READ_DBUS_07) data |= 0x0080;
     }
-    if ((width == EightHigh) || (width == Sixteen)) {
+    if ((width == ActiveBusWidth::EightHigh) || (width == ActiveBusWidth::Sixteen)) {
       if (READ_DBUS_08) data |= 0x0100;
       if (READ_DBUS_09) data |= 0x0200;
       if (READ_DBUS_10) data |= 0x0400;
@@ -205,12 +207,14 @@ uint16_t data_bus_read(data_width_t width) {
   #endif
 }
 
+/*
 uint32_t peek_address() {
   return read_address_pins(true);
 }
+*/
 
 void latch_address() {
-  uint32_t addr = read_address_pins(false);
+  uint32_t addr = Controller.readAddressBus(false);
   CPU.address_bus = addr;
   CPU.address_latch = addr;
 }
@@ -262,7 +266,8 @@ uint32_t read_address_pins(bool peek) {
     // So we don't change pin direction if peek is true.
     if(!peek) {
       // Set data bus pins to INPUT
-      SET_DATA_BUS_TO_READ;
+
+      //SET_DATA_BUS_TO_READ;
     }
     if (READ_PIN_D22) address |= 0x00000001;  // AD0  Pin 22
     if (READ_PIN_D23) address |= 0x00000002;  // AD1  Pin 23

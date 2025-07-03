@@ -24,7 +24,7 @@
 #include <Arduino.h>
 
 #include "ansi_color.h"
-#include "DebugFilter.h"
+#include <DebugFilter.h>
 
 constexpr const char* getColor(DebugType stage) {
   using namespace ansi;
@@ -47,7 +47,7 @@ constexpr const char* getColor(DebugType stage) {
     case DebugType::PIN_CMD:   return green;
     case DebugType::BUS:       return cyan;
     case DebugType::PROTO:     return yellow;
-    case DebugType::CMD:       return red;
+    case DebugType::CMD:       return bright_cyan;
     default:                  return reset;
   }
 }
@@ -69,7 +69,7 @@ public:
   template<typename T>
   // String overload
   inline void debugPrint(DebugType stage, const char* text) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.print(text);
     serial.print(ansi::reset);
@@ -78,16 +78,17 @@ public:
   // Generic value overload
   template<typename T>
   inline void debugPrint(DebugType stage, T value) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.print(value);
     serial.print(ansi::reset);
   }
 
   // Generic value with base (for integers)
+  
   template<typename T>
   inline void debugPrint(DebugType stage, T value, int base) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.print(value, base);
     serial.print(ansi::reset);
@@ -97,7 +98,7 @@ public:
 
   // String overload
   inline void debugPrintln(DebugType stage, const char* text) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.println(text);
     serial.print(ansi::reset);
@@ -106,7 +107,7 @@ public:
   // Generic value overload
   template<typename T>
   inline void debugPrintln(DebugType stage, T value) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.println(value);
     serial.print(ansi::reset);
@@ -115,7 +116,7 @@ public:
   // Generic value with base
   template<typename T>
   inline void debugPrintln(DebugType stage, T value, int base) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.println(value, base);
     serial.print(ansi::reset);
@@ -123,7 +124,7 @@ public:
 
   // Println with no arguments, just newline with color
   inline void debugPrintln(DebugType stage) {
-    if (!filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage)) return;
     serial.print(getColor(stage));
     serial.println();
     serial.print(ansi::reset);

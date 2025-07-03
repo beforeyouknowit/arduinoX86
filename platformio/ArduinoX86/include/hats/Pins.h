@@ -15,7 +15,7 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
@@ -23,16 +23,21 @@
 
 #pragma once
 
-template<typename Board, typename Hat>
-class BoardController {
-  Board& board;
+#include <Arduino.h>
 
-public:
-  explicit BoardController(Board& b) : board(b) {}
-
-  void cpuClockTick() {
-    for (unsigned i = 0; i < Hat::ClockDivisor; ++i) {
-      Hat::template cpuTick<Board>(board);
-    }
-  }
+/// @brief Enumeration of input pins used by the CPU.
+/// These pins can be referenced as parameters to a Hat's writePin() or readPin() methods,
+/// but there is no guarantee that all pins are implemented on all Hats.
+enum class OutputPin : uint8_t {
+  Ready,
+  Test,
+  Intr,
+  Nmi,
+  Invalid, // Invalid pin variant is used as only previous pins in the list can be sent as 
+           // parameters to cmd_write_pin().
+  Reset,
+  Clock,
+  Hold,
+  Busy,
 };
+

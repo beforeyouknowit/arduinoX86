@@ -78,9 +78,18 @@
 #define CLR_BIT15  ((1u << 15) << 16)
 
 #if defined (ARDUINO_GIGA)
-    // If Arduino GIGA
+    #define READ_PIN_D00            ((GPIOB->IDR & BIT07) != 0)
+    #define SET_PIN_D00              (GPIOB->BSRR = BIT07)
+    #define CLEAR_PIN_D00            (GPIOB->BSRR = CLR_BIT07)
+    #define WRITE_PIN_D00(x)  ((x) ? (SET_PIN_D00) : (CLEAR_PIN_D00))
+
+    #define READ_PIN_D01            ((GPIOA->IDR & BIT09) != 0)
+    #define SET_PIN_D01              (GPIOA->BSRR = BIT09)
+    #define CLEAR_PIN_D01            (GPIOA->BSRR = CLR_BIT09)
+    #define WRITE_PIN_D01(x)  ((x) ? (SET_PIN_D01) : (CLEAR_PIN_D01))
+
     #define READ_PIN_D02            ((GPIOA->IDR & BIT03) != 0)
-    #define WRITE_PIN_D02(x)  ((x) ? (GPIOA->ODR |= BIT02) : (GPIOA->ODR &= ~BIT03))     
+    #define WRITE_PIN_D02(x)  ((x) ? (GPIOA->ODR |= BIT03) : (GPIOA->ODR &= ~BIT03))     
     #define READ_PIN_D03            ((GPIOA->IDR & BIT02) != 0)
     #define WRITE_PIN_D03(x)  ((x) ? (GPIOA->ODR |= BIT02) : (GPIOA->ODR &= ~BIT02))    
     #define READ_PIN_D04            ((GPIOJ->IDR & BIT08) != 0)
@@ -154,43 +163,43 @@
 
     #define READ_PIN_D22    ((GPIOJ->IDR & BIT12) != 0)
     #define SET_PIN_D22     (GPIOJ->BSRR = BIT12)
-    #define CLEAR_PIN_D22   (GPIOJ->BSRR = (BIT12 << 16))
+    #define CLEAR_PIN_D22   (GPIOJ->BSRR = CLR_BIT12)
 
     #define READ_PIN_D23    ((GPIOG->IDR & BIT13) != 0)
     #define SET_PIN_D23     (GPIOG->BSRR = BIT13)
-    #define CLEAR_PIN_D23   (GPIOG->BSRR = (BIT13 << 16))
+    #define CLEAR_PIN_D23   (GPIOG->BSRR = CLR_BIT13)
 
     #define READ_PIN_D24    ((GPIOG->IDR & BIT12) != 0)
     #define SET_PIN_D24     (GPIOG->BSRR = BIT12)
-    #define CLEAR_PIN_D24   (GPIOG->BSRR = (BIT12 << 16))
+    #define CLEAR_PIN_D24   (GPIOG->BSRR = CLR_BIT12)
 
     #define READ_PIN_D25    ((GPIOJ->IDR & BIT00) != 0)
     #define SET_PIN_D25     (GPIOJ->BSRR = BIT00)
-    #define CLEAR_PIN_D25   (GPIOJ->BSRR = (BIT00 << 16))
+    #define CLEAR_PIN_D25   (GPIOJ->BSRR = CLR_BIT00)
 
     #define READ_PIN_D26    ((GPIOJ->IDR & BIT14) != 0)
     #define SET_PIN_D26     (GPIOJ->BSRR = BIT14)
-    #define CLEAR_PIN_D26   (GPIOJ->BSRR = (BIT14 << 16))
+    #define CLEAR_PIN_D26   (GPIOJ->BSRR = CLR_BIT14)
 
     #define READ_PIN_D27    ((GPIOJ->IDR & BIT01) != 0)
     #define SET_PIN_D27     (GPIOJ->BSRR = BIT01)
-    #define CLEAR_PIN_D27   (GPIOJ->BSRR = (BIT01 << 16))
+    #define CLEAR_PIN_D27   (GPIOJ->BSRR = CLR_BIT01)
 
     #define READ_PIN_D28    ((GPIOJ->IDR & BIT15) != 0)
     #define SET_PIN_D28     (GPIOJ->BSRR = BIT15)
-    #define CLEAR_PIN_D28   (GPIOJ->ODR &= ~BIT15)
+    #define CLEAR_PIN_D28   (GPIOJ->BSRR = CLR_BIT15)
 
     #define READ_PIN_D29    ((GPIOJ->IDR & BIT02) != 0)
     #define SET_PIN_D29     (GPIOJ->BSRR = BIT02)
-    #define CLEAR_PIN_D29   (GPIOJ->BSRR = (BIT02 << 16))
+    #define CLEAR_PIN_D29   (GPIOJ->BSRR = CLR_BIT02)
 
     #define READ_PIN_D30    ((GPIOK->IDR & BIT03) != 0)
     #define SET_PIN_D30     (GPIOK->BSRR = BIT03)
-    #define CLEAR_PIN_D30   (GPIOK->BSRR = (BIT03 << 16))
+    #define CLEAR_PIN_D30   (GPIOK->BSRR = CLR_BIT03)
 
     #define READ_PIN_D31    ((GPIOJ->IDR & BIT03) != 0)
     #define SET_PIN_D31     (GPIOJ->BSRR = BIT03)
-    #define CLEAR_PIN_D31   (GPIOJ->BSRR = (BIT03 << 16))
+    #define CLEAR_PIN_D31   (GPIOJ->BSRR = CLR_BIT03)
 
     #define READ_PIN_D32    ((GPIOK->IDR & BIT04) != 0)
     #define SET_PIN_D32     (GPIOK->BSRR = BIT04)
@@ -198,23 +207,23 @@
 
     #define READ_PIN_D33    ((GPIOJ->IDR & BIT04) != 0)
     #define SET_PIN_D33     (GPIOJ->BSRR = BIT04)
-    #define CLEAR_PIN_D33   (GPIOJ->BSRR = (BIT04 << 16))
+    #define CLEAR_PIN_D33   (GPIOJ->BSRR = CLR_BIT04)
 
     #define READ_PIN_D34    ((GPIOK->IDR & BIT05) != 0)
     #define SET_PIN_D34     (GPIOK->BSRR = BIT05)
-    #define CLEAR_PIN_D34   (GPIOK->BSRR = (BIT05 << 16))
+    #define CLEAR_PIN_D34   (GPIOK->BSRR = CLR_BIT05)
 
     #define READ_PIN_D35    ((GPIOJ->IDR & BIT05) != 0)
     #define SET_PIN_D35     (GPIOJ->BSRR = BIT05)
-    #define CLEAR_PIN_D35   (GPIOJ->BSRR = (BIT05 << 16))
+    #define CLEAR_PIN_D35   (GPIOJ->BSRR = CLR_BIT05)
 
     #define READ_PIN_D36    ((GPIOK->IDR & BIT06) != 0)
     #define SET_PIN_D36     (GPIOK->BSRR = BIT06)
-    #define CLEAR_PIN_D36   (GPIOK->BSRR = (BIT06 << 16))
+    #define CLEAR_PIN_D36   (GPIOK->BSRR = CLR_BIT06)
 
     #define READ_PIN_D37    ((GPIOJ->IDR & BIT06) != 0)
     #define SET_PIN_D37     (GPIOJ->BSRR = BIT06)
-    #define CLEAR_PIN_D37   (GPIOJ->BSRR = (BIT06 << 16))
+    #define CLEAR_PIN_D37   (GPIOJ->BSRR = CLR_BIT06)
     // End data bus
     #define READ_PIN_D38            ((GPIOJ->IDR & BIT07) != 0)
     #define WRITE_PIN_D38(x)  ((x) ? (GPIOJ->ODR |= BIT07) : (GPIOJ->ODR &= ~BIT07))
@@ -249,10 +258,40 @@
     #define READ_PIN_D53            ((GPIOG->IDR & BIT07) != 0)
     #define WRITE_PIN_D53(x)  ((x) ? (GPIOG->ODR |= BIT07) : (GPIOG->ODR &= ~BIT07))
 
+    // Analog pins A0-A7 (3.3v tolerant)
     #define READ_PIN_A0             ((GPIOC->IDR & BIT04) != 0)
     #define WRITE_PIN_A0(x)   ((x) ? (GPIOC->ODR |= BIT04) : (GPIOC->ODR &= ~BIT04))
     #define READ_PIN_A1             ((GPIOC->IDR & BIT05) != 0)
     #define WRITE_PIN_A1(x)   ((x) ? (GPIOC->ODR |= BIT05) : (GPIOC->ODR &= ~BIT05))    
+    #define READ_PIN_A2             ((GPIOB->IDR & BIT00) != 0)
+    #define WRITE_PIN_A2(x)   ((x) ? (GPIOB->ODR |= BIT00) : (GPIOB->ODR &= ~BIT00))  
+    #define READ_PIN_A3             ((GPIOB->IDR & BIT01) != 0)
+    #define WRITE_PIN_A3(x)   ((x) ? (GPIOB->ODR |= BIT01) : (GPIOB->ODR &= ~BIT01))  
+    #define READ_PIN_A4             ((GPIOC->IDR & BIT03) != 0)
+    #define WRITE_PIN_A4(x)   ((x) ? (GPIOC->ODR |= BIT03) : (GPIOC->ODR &= ~BIT03))  
+    #define READ_PIN_A5             ((GPIOC->IDR & BIT02) != 0)
+    #define WRITE_PIN_A5(x)   ((x) ? (GPIOC->ODR |= BIT02) : (GPIOC->ODR &= ~BIT02))  
+    #define READ_PIN_A6             ((GPIOC->IDR & BIT00) != 0)
+    #define WRITE_PIN_A6(x)   ((x) ? (GPIOC->ODR |= BIT00) : (GPIOC->ODR &= ~BIT00))  
+    #define READ_PIN_A7             ((GPIOA->IDR & BIT00) != 0)
+    #define WRITE_PIN_A7(x)   ((x) ? (GPIOA->ODR |= BIT00) : (GPIOA->ODR &= ~BIT00))  
+
+    #define READ_PIN_D76 READ_PIN_A0
+    #define READ_PIN_D77 READ_PIN_A1
+    #define READ_PIN_D78 READ_PIN_A2
+    #define READ_PIN_D79 READ_PIN_A3
+    #define READ_PIN_D80 READ_PIN_A4
+    #define READ_PIN_D81 READ_PIN_A5
+    #define READ_PIN_D82 READ_PIN_A6
+    #define READ_PIN_D83 READ_PIN_A7
+    #define WRITE_PIN_D76(x) WRITE_PIN_A0(x)
+    #define WRITE_PIN_D77(x) WRITE_PIN_A1(x)
+    #define WRITE_PIN_D78(x) WRITE_PIN_A2(x)
+    #define WRITE_PIN_D79(x) WRITE_PIN_A3(x)
+    #define WRITE_PIN_D80(x) WRITE_PIN_A4(x)
+    #define WRITE_PIN_D81(x) WRITE_PIN_A5(x)
+    #define WRITE_PIN_D82(x) WRITE_PIN_A6(x)
+    #define WRITE_PIN_D83(x) WRITE_PIN_A7(x)
 
     // These three pins are used to control the RGB status led
     #define SET_PIN_D86     (GPIOI->BSRR = BIT12)

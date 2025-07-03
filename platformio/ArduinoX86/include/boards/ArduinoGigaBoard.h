@@ -24,11 +24,11 @@
 #pragma once
 
 #include <Arduino.h>
-#include "../gpio_pins.h"    // Your GPIO macros like WRITE_PIN_D04, etc.
-#include "../hat_config.h"   // Board-specific configuration and pin mappings
-
-#include "../DebugPrint.h"   // Debug print mixin
-#include "../hats/HatTraits.h" // Hat-specific traits
+#include <config.h>
+#include <gpio_pins.h>
+#include <hat_config.h>
+#include <DebugPrint.h>
+#include "../hats/HatTraits.h"
 
 template<typename Hat>
 class ArduinoGigaBoard : public DebugPrintMixin<decltype(Serial2)> {
@@ -36,7 +36,13 @@ public:
   ArduinoGigaBoard() : DebugPrintMixin(Serial2) {}
 
   void init() {
+    // Initialize GPIO via the hat
+    Hat::initPins();
+
+    // Initialize the Serial2 port for debugging.
     Serial2.begin(HatTraits<Hat>::kDebugBaudRate);
+    while (!Serial2)
+      ;
 
     // Initialize the board's debugging states. 
     setDebugType(DebugType::STATE,     DEBUG_STATE);
@@ -57,29 +63,8 @@ public:
     setDebugType(DebugType::BUS,       DEBUG_BUS);
     setDebugType(DebugType::PROTO,     DEBUG_PROTO);
     setDebugType(DebugType::CMD,       DEBUG_CMD);
-
-    // Wait for the serial port to be ready.
-    while (!Serial2)
-      ;
   }
 
-  
-
-  inline void clockHighDelay() {
-    // Board-specific tuning. in this case do nothing!
-  }
-
-  inline void clockLowDelay() {
-    // Board-specific timing. In this case do nothing!
-  }
-
-  void digitalWritePin(int pin, bool val) {
-    digitalWrite(pin, val ? HIGH : LOW);
-  }
-
-  bool digitalReadPin(int pin) {
-    return digitalRead(pin) == HIGH;
-  }
 
 
 };

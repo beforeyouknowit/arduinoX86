@@ -41,7 +41,7 @@ fn test_das() {
     for af in 0..2 {
         for i in 0..256 {
             //println!("i:{}", i);
-            let mut regs = RemoteCpuRegisters {
+            let mut regs = RemoteCpuRegistersV1 {
                 ax: i as u16,
                 bx: 0,
                 cx: 0,
@@ -83,11 +83,11 @@ fn test_das() {
                     Ok(regs) => {
                         let idx = i + (256 * af);
                         println!("idx: {}", idx);
-                        results[idx].ax = regs.ax;
-                        results[idx].flags = regs.flags;
-                        results[idx].af = regs.flags & CPU_FLAG_AUX_CARRY != 0;
-                        results[idx].cf = regs.flags & CPU_FLAG_CARRY != 0;
-                        results[idx].of = regs.flags & CPU_FLAG_OVERFLOW != 0;
+                        results[idx].ax = regs.ax();
+                        results[idx].flags = regs.flags();
+                        results[idx].af = regs.flags() & CPU_FLAG_AUX_CARRY != 0;
+                        results[idx].cf = regs.flags() & CPU_FLAG_CARRY != 0;
+                        results[idx].of = regs.flags() & CPU_FLAG_OVERFLOW != 0;
                         //RemoteCpu::print_regs(&regs);
                     }
                     Err(_) => {

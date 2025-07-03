@@ -7,16 +7,44 @@ use serialport::{ClearBuffer, SerialPort};
 
 pub const ARDUINO_BAUD: u32 = 1000000;
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum TState {
+    Ti,
+    T1,
+    T2,
+    T3,
+    T4,
+    Tw,
+}
+
+impl TryFrom<u8> for TState {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(TState::Ti),
+            1 => Ok(TState::T1),
+            2 => Ok(TState::T2),
+            3 => Ok(TState::T3),
+            4 => Ok(TState::T4),
+            5 => Ok(TState::Tw),
+            _ => Err(format!("Invalid bus cycle value: {}", value)),
+        }
+    }
+}
+
 /// [ServerCpuType] maps to the CPU types that can be detected by the Arduino808X server.
 #[derive(Copy, Clone, Debug, Default)]
 pub enum ServerCpuType {
     #[default]
+    Undetected,
     Intel8088,
     Intel8086,
     NecV20,
     NecV30,
     Intel80188(bool),
     Intel80186(bool),
+    Intel80286,
 }
 
 impl ServerCpuType {
@@ -26,7 +54,8 @@ impl ServerCpuType {
             ServerCpuType::Intel8088
             | ServerCpuType::Intel8086
             | ServerCpuType::Intel80188(_)
-            | ServerCpuType::Intel80186(_) => true,
+            | ServerCpuType::Intel80186(_)
+            | ServerCpuType::Intel80286 => true,
             _ => false,
         }
     }
@@ -43,13 +72,44 @@ impl ServerCpuType {
             _ => false,
         }
     }
+
+    pub fn tstate_to_string(&self, state: TState) -> String {
+        match self {
+            ServerCpuType::Intel80286 => match state {
+                TState::Ti => "Ti".to_string(),
+                TState::T1 => "Ts".to_string(),
+                TState::T2 => "Tc".to_string(),
+                TState::Tw => "Tw".to_string(),
+                _ => "T?".to_string(),
+            },
+            _ => match state {
+                TState::Ti => "Ti".to_string(),
+                TState::T1 => "T1".to_string(),
+                TState::T2 => "T2".to_string(),
+                TState::T3 => "T3".to_string(),
+                TState::T4 => "T4".to_string(),
+                TState::Tw => "Tw".to_string(),
+            },
+        }
+    }
+
+    // Return true if the specified TState should trigger a read or write.
+    // For 80286, we have very tight timings so we must write the bus in advance of T2/Tc.
+    pub fn is_write_cycle(&self, state: TState) -> bool {
+        match self {
+            ServerCpuType::Intel80286 => matches!(state, TState::T1),
+            _ => matches!(state, TState::T2),
+        }
+    }
 }
 
 /// Derive the [CpuWidth] from a [ServerCpuType].
 impl From<ServerCpuType> for CpuWidth {
     fn from(cpu_type: ServerCpuType) -> Self {
         match cpu_type {
-            ServerCpuType::Intel8088 | ServerCpuType::Intel80188(_) => CpuWidth::Eight,
+            ServerCpuType::NecV20 | ServerCpuType::Intel8088 | ServerCpuType::Intel80188(_) => {
+                CpuWidth::Eight
+            }
             _ => CpuWidth::Sixteen,
         }
     }
@@ -60,12 +120,14 @@ impl TryFrom<u8> for ServerCpuType {
     type Error = CpuClientError;
     fn try_from(value: u8) -> Result<ServerCpuType, CpuClientError> {
         match value & 0x3F {
-            0x00 => Ok(ServerCpuType::Intel8088),
-            0x01 => Ok(ServerCpuType::Intel8086),
-            0x02 => Ok(ServerCpuType::NecV20),
-            0x03 => Ok(ServerCpuType::NecV30),
-            0x04 => Ok(ServerCpuType::Intel80188((value & 0x80) != 0)),
-            0x05 => Ok(ServerCpuType::Intel80186((value & 0x80) != 0)),
+            0x00 => Ok(ServerCpuType::Undetected),
+            0x01 => Ok(ServerCpuType::Intel8088),
+            0x02 => Ok(ServerCpuType::Intel8086),
+            0x03 => Ok(ServerCpuType::NecV20),
+            0x04 => Ok(ServerCpuType::NecV30),
+            0x05 => Ok(ServerCpuType::Intel80188((value & 0x80) != 0)),
+            0x06 => Ok(ServerCpuType::Intel80186((value & 0x80) != 0)),
+            0x07 => Ok(ServerCpuType::Intel80286),
             _ => Err(CpuClientError::BadValue),
         }
     }
@@ -147,6 +209,32 @@ impl From<CpuWidth> for usize {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub enum RegisterSetType {
+    #[default]
+    Intel8088,
+    Intel286,
+}
+
+impl From<u8> for RegisterSetType {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => RegisterSetType::Intel8088,
+            1 => RegisterSetType::Intel286,
+            _ => RegisterSetType::Intel8088, // Default to Intel8088 if unknown
+        }
+    }
+}
+
+impl From<RegisterSetType> for u8 {
+    fn from(value: RegisterSetType) -> u8 {
+        match value {
+            RegisterSetType::Intel8088 => 0,
+            RegisterSetType::Intel286 => 1,
+        }
+    }
+}
+
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
 #[derive(Copy, Clone, Debug)]
 pub enum ServerCommand {
@@ -171,7 +259,7 @@ pub enum ServerCommand {
     CmdGetProgramState = 0x12,
     CmdGetLastError = 0x13,
     CmdGetCycleState = 0x14,
-    CmdCGetCycleState = 0x15,
+    CmdNull2 = 0x15,
     CmdPrefetchStore = 0x16,
     CmdReadAddressU = 0x17,
     CmdCpuType = 0x18,
@@ -264,6 +352,17 @@ pub enum CpuPin {
     TEST,
     INTR,
     NMI,
+}
+
+#[derive(Clone, Debug)]
+pub struct ServerCycleState {
+    pub program_state: ProgramState,
+    pub cpu_state_bits: u8,
+    pub cpu_status_bits: u8,
+    pub bus_control_bits: u8,
+    pub bus_command_bits: u8,
+    pub address_bus: u32,
+    pub data_bus: u16,
 }
 
 pub const REQUIRED_PROTOCOL_VER: u8 = 3;
@@ -476,7 +575,7 @@ impl CpuClient {
                     }
                 }
 
-                match new_port.read_exact(&mut buf[..8]) {
+                match new_port.read_exact(&mut buf[..9]) {
                     Ok(bytes) => bytes,
                     Err(e) => {
                         log::error!("try_port: Read error from {}: {:?}", port_info.port_name, e);
@@ -514,9 +613,14 @@ impl CpuClient {
 
     pub fn send_command_byte(&mut self, cmd: ServerCommand) -> Result<(), CpuClientError> {
         let cmd: [u8; 1] = [cmd as u8];
+        let mut flush_buf: [u8; 100] = [0; 100];
+        let mut port = self.port.borrow_mut();
+        port.clear(ClearBuffer::Input).unwrap();
+        if port.bytes_to_read().unwrap() > 0 {
+            let _flushed_bytes = port.read(&mut flush_buf).unwrap();
+        }
 
-        self.port.borrow_mut().clear(ClearBuffer::Input).unwrap();
-        match self.port.borrow_mut().write(&cmd) {
+        match port.write(&cmd) {
             Ok(_) => Ok(()),
             Err(_) => Err(CpuClientError::WriteFailure),
         }
@@ -525,16 +629,13 @@ impl CpuClient {
     pub fn read_result_code(&mut self) -> Result<bool, CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
 
-        match self.port.borrow_mut().read(&mut buf) {
-            Ok(bytes) => {
-                if bytes == 0 {
-                    log::error!("read_result_code: 0 bytes read");
-                    Err(CpuClientError::ReadFailure)
-                } else if (buf[0] & 0x01) != 0 {
+        match self.port.borrow_mut().read_exact(&mut buf) {
+            Ok(()) => {
+                if (buf[0] & 0x01) != 0 {
                     // LSB set in return code == success
                     Ok(true)
                 } else {
-                    log::error!("read_result_code: command returned failure");
+                    log::error!("read_result_code: command returned failure: {:02X}", buf[0]);
                     Err(CpuClientError::CommandFailed)
                 }
             }
@@ -589,8 +690,15 @@ impl CpuClient {
     /// Registers should be loaded in the following order, little-endian:
     ///
     /// AX, BX, CX, DX, SS, SP, FLAGS, IP, CS, DS, ES, BP, SI, DI
-    pub fn load_registers_from_buf(&mut self, reg_data: &[u8]) -> Result<bool, CpuClientError> {
+    pub fn load_registers_from_buf(
+        &mut self,
+        reg_type: RegisterSetType,
+        reg_data: &[u8],
+    ) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdLoad)?;
+        let mut buf: [u8; 1] = [0; 1];
+        buf[0] = reg_type.into();
+        self.send_buf(&buf)?;
         self.send_buf(reg_data)?;
         self.read_result_code()
     }
@@ -737,38 +845,35 @@ impl CpuClient {
         self.read_result_code()
     }
 
-    /// Get the per-cycle state of the CPU
-    pub fn get_cycle_state(&mut self) -> Result<(ProgramState, u8, u8, u8, u16), CpuClientError> {
-        let mut buf: [u8; 5] = [0; 5];
+    /// Get the per-cycle state of the CPU.
+    /// Arguments:
+    ///   `cycle`: If true, instruct the server to cycle the CPU once before returning the state.
+    /// Returns:
+    ///     A [ServerCycleState] struct containing the current state of the CPU.
+    pub fn get_cycle_state(&mut self, cycle: bool) -> Result<ServerCycleState, CpuClientError> {
+        let mut send_buf: [u8; 1] = [0; 1];
+        if cycle {
+            send_buf[0] = 1;
+        }
+        let mut recv_buf: [u8; 11] = [0; 11];
         self.send_command_byte(ServerCommand::CmdGetCycleState)?;
-        self.recv_buf(&mut buf)?;
+        self.send_buf(&mut send_buf)?;
+        self.recv_buf(&mut recv_buf)?;
         self.read_result_code()?;
 
-        let state_bits: u8 = buf[0] >> 4;
-        let state = ProgramState::try_from(state_bits)?;
+        let cycle_state = ServerCycleState {
+            program_state: ProgramState::try_from(recv_buf[0])?,
+            cpu_state_bits: recv_buf[1],
+            cpu_status_bits: recv_buf[2],
+            bus_control_bits: recv_buf[3],
+            bus_command_bits: recv_buf[4],
+            address_bus: u32::from_le_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]]),
+            data_bus: u16::from_le_bytes([recv_buf[9], recv_buf[10]]),
+        };
 
-        let control_bits = buf[0] & 0x0F;
+        //log::trace!("received buffer: {:0X?}", recv_buf);
 
-        let data_bus = u16::from_le_bytes([buf[3], buf[4]]);
-        Ok((state, control_bits, buf[1], buf[2], data_bus))
-    }
-
-    /// Like `get_cycle_state`, but also cycles the CPU. Saves a command.
-    pub fn cycle_get_cycle_state(
-        &mut self,
-    ) -> Result<(ProgramState, u8, u8, u8, u16), CpuClientError> {
-        let mut buf: [u8; 5] = [0; 5];
-        self.send_command_byte(ServerCommand::CmdCGetCycleState)?;
-        self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
-
-        let state_bits: u8 = buf[0] >> 4;
-        let state = ProgramState::try_from(state_bits)?;
-
-        let control_bits = buf[0] & 0x0F;
-
-        let data_bus = u16::from_le_bytes([buf[3], buf[4]]);
-        Ok((state, control_bits, buf[1], buf[2], data_bus))
+        Ok(cycle_state)
     }
 
     pub fn emu8080(&mut self) -> Result<bool, CpuClientError> {

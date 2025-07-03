@@ -35,9 +35,13 @@ public:
   ArduinoDueBoard() : DebugPrintMixin(Serial1) {}
 
   void init() {
+    // Initialize GPIO via the hat
+    Hat::initPins();
+
     // Initialize the Serial1 port for debugging.
     Serial1.begin(HatTraits<Hat>::kDebugBaudRate);
-
+    while (!Serial1)
+      ;
     // Initialize the board's debugging states. 
     setDebugType(DebugType::STATE,     DEBUG_STATE);
     setDebugType(DebugType::RESET,     DEBUG_RESET);
@@ -58,8 +62,7 @@ public:
     setDebugType(DebugType::PROTO,     DEBUG_PROTO);
     setDebugType(DebugType::CMD,       DEBUG_CMD);
 
-    while (!Serial1)
-      ;
+
   }
 
   inline void clockHighDelay() {

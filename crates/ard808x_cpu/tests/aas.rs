@@ -43,7 +43,7 @@ fn test_aas() {
     for af in 0..2 {
         for i in 0..256 {
             //println!("i:{}", i);
-            let mut regs = RemoteCpuRegisters {
+            let mut regs = RemoteCpuRegistersV1 {
                 ax: i as u16,
                 bx: 0,
                 cx: 0,
@@ -85,12 +85,12 @@ fn test_aas() {
                     Ok(regs) => {
                         let idx = i + (256 * af);
                         println!("idx: {}", idx);
-                        results[idx].ax = regs.ax;
-                        results[idx].flags = regs.flags;
-                        results[idx].of = regs.flags & CPU_FLAG_OVERFLOW != 0;
-                        results[idx].sf = regs.flags & CPU_FLAG_SIGN != 0;
-                        results[idx].zf = regs.flags & CPU_FLAG_ZERO != 0;
-                        results[idx].pf = regs.flags & CPU_FLAG_PARITY != 0;
+                        results[idx].ax = regs.ax();
+                        results[idx].flags = regs.flags();
+                        results[idx].of = regs.flags() & CPU_FLAG_OVERFLOW != 0;
+                        results[idx].sf = regs.flags() & CPU_FLAG_SIGN != 0;
+                        results[idx].zf = regs.flags() & CPU_FLAG_ZERO != 0;
+                        results[idx].pf = regs.flags() & CPU_FLAG_PARITY != 0;
                         //RemoteCpu::print_regs(&regs);
                     }
                     Err(_) => {

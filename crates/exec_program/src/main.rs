@@ -160,7 +160,13 @@ fn main() {
     }
 
     // Capture initial regs before adjustment.
-    let initial_regs = RemoteCpuRegisters::from(reg_bytes.as_slice());
+    let initial_regs = match RemoteCpuRegisters::try_from(reg_bytes.as_slice()) {
+        Ok(regs) => regs,
+        Err(e) => {
+            eprintln!("Error parsing register binary: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Copy the binary to memory
     log::debug!("Mounting program code at: {:05X}", mount_addr);

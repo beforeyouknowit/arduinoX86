@@ -24,6 +24,8 @@
 #ifndef _CPU_SERVER_H
 #define _CPU_SERVER_H
 
+#include <Arduino.h>
+
 // Protocol version number.
 #define VERSION_NUM ((uint8_t)3)
 
@@ -104,26 +106,26 @@ const uint8_t CMD_INPUTS[] = {
   0,  // CmdNone
   0,  // CmdVersion
   0,  // CmdReset
-  28, // CmdLoad
-  0,  // CmdCycle
+  1,  // CmdLoad - Parameter: Type of register file to load.
+  1,  // CmdCycle - Parameter: Number of cycles to execute.
   0,  // CmdReadAddressLatch
   0,  // CmdReadStatus
   0,  // CmdRead8288Command 
   0,  // CmdRead8288Control 
   0,  // CmdReadDataBus 
-  2,  // CmdWriteDataBus
+  2,  // CmdWriteDataBus - Parameter: 16-bit value to write.
   0,  // CmdFinalize
-  0,  // CmdBeginStore,
-  0,  // CmdStore,
-  0,  // CmdQueueLen,
-  0,  // CmdQueueBytes,
-  2,  // CmdWritePin,
-  1,  // CmdReadPin,
-  0,  // CmdGetProgramState,
-  0,  // CmdGetLastError,
-  0,  // CmdGetCycleState,
-  0,  // CmdCycleGetCycleState,
-  0,  // CmdPrefetchStore,
+  0,  // CmdBeginStore
+  0,  // CmdStore
+  0,  // CmdQueueLen
+  0,  // CmdQueueBytes
+  2,  // CmdWritePin - Parameters: Pin to read, value to write.
+  1,  // CmdReadPin - Parammeter: Pin to read.
+  0,  // CmdGetProgramState
+  0,  // CmdGetLastError
+  1,  // CmdGetCycleState - Parameter: Flags. Bit 0 set to 1 will cycle CPU first. 
+  0,  // Null
+  0,  // CmdPrefetchStore
   0,  // CmdReadAddress
   0,  // CmdCpuType
   0,  // CmdEmulate8080
@@ -166,7 +168,6 @@ bool cmd_read_pin(void);
 bool cmd_get_program_state(void);
 bool cmd_get_last_error(void);
 bool cmd_get_cycle_state(void);
-bool cmd_cycle_get_cycle_state(void);
 bool cmd_prefetch_store(void);
 bool cmd_read_address(void);
 bool cmd_cpu_type(void);
@@ -174,5 +175,6 @@ bool cmd_invalid(void);
 bool cmd_emu8080(void);
 bool cmd_prefetch(void);
 bool cmd_init_screen(void);
+bool cmd_null(void);
 
 #endif

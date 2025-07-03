@@ -15,33 +15,28 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
 
 #pragma once
-// Define the baud rate to use for the RS232 module plugged into your hat
-// (or possibly directly into your Arduino, but in this case our "hat" is
-// the specific pinout template.
 
-struct Hat8088;
-struct Hat80186;
+#include <Hat.h>
 
-template<typename Hat>
-struct HatTraits {
-  static constexpr unsigned long kDebugBaudRate = 115200; // Default baud rate
-};
+#include "boards/ArduinoDueBoard.h"
+#include "boards/ArduinoGigaBoard.h"
 
-// Specialize for Hat8088
-template<>
-struct HatTraits<Hat8088> {
-  static constexpr unsigned long kDebugBaudRate = 460800;
-};
+// Select Board base (templated on Hat)
+#if defined(__SAM3X8E__) // If Arduino DUE
+  template<typename Hat>
+  using BoardTypeBase = ArduinoDueBoard<Hat>;
+#elif defined(ARDUINO_GIGA)
+  template<typename Hat>
+  using BoardTypeBase = ArduinoGigaBoard<Hat>;
+#else
+  #error "Unsupported board type!"
+#endif
 
-// Specialize for Hat80186
-template<>
-struct HatTraits<Hat80186> {
-  static constexpr unsigned long kDebugBaudRate = 460800;
-};
+using BoardType = BoardTypeBase<HatType>;

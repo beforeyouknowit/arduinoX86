@@ -24,8 +24,9 @@
 // This module has some helpers for emitting ANSI color on the debugging 
 // serial port on the Arduino DUE, SER_DEBUG
 
-#ifndef _ARDUINO_ANSI_COLOR_H
-#define _ARDUINO_ANSI_COLOR_H
+#pragma once
+
+#include <hat_config.h>
 
 namespace ansi {
   // Normal colors
@@ -105,5 +106,3 @@ inline void debugPrintlnColor(const char* color) {
   DEBUG_SERIAL.println();
   DEBUG_SERIAL.print(ansi::reset);
 }
-
-#endif //_ARDUINO_ANSI_COLOR_H

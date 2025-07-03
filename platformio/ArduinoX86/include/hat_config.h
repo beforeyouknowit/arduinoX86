@@ -15,7 +15,7 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
@@ -23,31 +23,13 @@
 
 #pragma once
 
-#include "../hat_config.h"
-#include "../gpio_pins.h"
+#if defined(__SAM3X8E__) // If Arduino DUE
+  #define INBAND_SERIAL SerialUSB
+  #define DEBUG_SERIAL Serial1
+  #define FLUSH SERIAL.flush()
+#elif defined(ARDUINO_GIGA) // If Arduino GIGA
+  #define INBAND_SERIAL Serial
+  #define DEBUG_SERIAL Serial2
+  #define FLUSH 
+#endif
 
-struct Hat80188 {
-  static constexpr unsigned ClockDivisor = 2;
-  static constexpr unsigned ClockHighDelay = 0;
-  static constexpr unsigned ClockLowDelay = 0;
-
-  template<typename Board>
-  inline static void cpuTick(Board& board) {
-    WRITE_PIN_D04(1);
-    if (ClockHighDelay > 0) {
-      board.clockHighDelay();
-    }
-    WRITE_PIN_D04(0);
-    if (ClockLowDelay > 0) {
-      board.clockLowDelay();
-    }
-    WRITE_PIN_D04(1);
-    if (ClockHighDelay > 0) {
-      board.clockHighDelay();
-    }
-    WRITE_PIN_D04(0);
-    if (ClockLowDelay > 0) {
-      board.clockLowDelay();
-    }
-  }
-};

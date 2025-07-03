@@ -2,15 +2,28 @@
 
 // Define this if you are using the Display Shield for the Arduino Giga.
 // Warning: greatly increases compile time.
-#define GIGA_DISPLAY_SHIELD 1
+#define GIGA_DISPLAY_SHIELD 0
 #define SCREEN_UPDATE_FPS 30
 #define SCREEN_UPDATE_MS (1000 / SCREEN_UPDATE_FPS)
 
-// Define this for either a 186 or a 188, we will detect the bus width.
-#define CPU_186 0
-
 // Define this if you have connected an 8087 FPU
-#define FPU_8087 1
+#define FPU_8087
+
+// The main AruduinoX86 boards are:
+// HAT_8088_V1 - Hat8088 rev 1.1 - Due & Giga compatible, supporting the 8088, 8086, NEC V20 and NEC V30 CPUs
+// HAT_80186_3V_V1 - Hat80186 3V rev 1 - Due & Giga compatible, supporting 3V 186 CPUs (80L186)
+// HAT_286_3V_V1 - Hat286_3V - Due & Giga compatible. Uses shifters to operate at 3V. (Never produced)
+// HAT_286_5V_V1 - Hat286_5V - Giga only, allowing 5V 286 CPUs (80C286) to be used without shifters.
+
+// Only define one of these!
+//#define HAT_8088_V1
+//#define HAT_80186_3V_V1
+#define HAT_286_5V_V1
+//#define HAT_386_3V_V1
+
+#if (defined(HAT_8088_V1) + defined(HAT_80186_V1) + defined(HAT_286_5V_V1) + defined(HAT_386_3V_V1)) != 1
+  #error "You must define only one hat type!"
+#endif
 
 // Baud rate is ignored for Arduino DUE as it uses native SerialUSB. This is legacy.
 // YOU SHOULD BE USING A DUE.
@@ -29,7 +42,7 @@
 #define DEBUG_BAUD_RATE 460800
 
 #define CMD_TIMEOUT 100 // Command timeout in milliseconds
-#define MAX_COMMAND_BYTES 28 // Maximum length of command parameter input
+#define MAX_COMMAND_BYTES 255 // Maximum length of command parameter input
 
 // What vector to use for the BRKEM call. No reason to change this really.
 #define BRKEM_VECTOR ((uint8_t)0x00)
@@ -76,9 +89,9 @@
 #define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Debugging output for queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
-#define DEBUG_BUS       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
-#define DEBUG_PROTO 0 // Insert debugging messages into serial output (Escaped by ##...##)
-#define DEBUG_CMD 0
+#define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
+#define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Debug the serial cpu_server protocol
+#define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE)
 
 #define DEBUG_BUS_COLOR (ansi::bright_green)
 #define DEBUG_QUEUE_COLOR (ansi::bright_yellow)
@@ -92,6 +105,7 @@
 #define FINALIZE_TIMEOUT 30
 #define FINALIZE_EMU_TIMEOUT 90 // We need more time to exit emulation mode
 #define STORE_TIMEOUT 300
+#define LOAD_TIMEOUT 1000
 
 #if CPU_186
   // 186 CPU
@@ -117,16 +131,7 @@
   #define SETUP_PROGRAM_PATCH_OFFSET SETUP_PATCH_VECTOR_OFFSET_186
 #else
   // Non-186 CPU
-  // How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
-  #define RESET_HOLD_CYCLE_COUNT 5
-  // How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
-  #define RESET_CYCLE_COUNT 7
-  // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 20
-  // What logic level RESET is when asserted
-  #define RESET_ASSERT 1
-  // What logic level RESET is when deasserted
-  #define RESET_DEASSERT 0
+
   // Set this to 1 to use i8288 emulation
   #define EMULATE_8288 1
   // Leave this at 1 for non-186 CPUs as they will always have the queue status lines.

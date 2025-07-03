@@ -18,7 +18,7 @@ fn test_flag_init() {
     // Create a remote cpu instance using the cpu_client which should now be connected.
     let mut cpu = RemoteCpu::new(cpu_client, false, false, 0, 0, 0, 0);
 
-    let regs = RemoteCpuRegisters {
+    let regs = RemoteCpuRegistersV1 {
         ax: 0,
         bx: 0,
         cx: 0,
@@ -48,7 +48,7 @@ fn test_flag_init() {
         cpu.test();
         match cpu.run(Some(100), &PrintOptions::default()) {
             Ok(regs) => {
-                println!("Flags: {:04X}", regs.flags);
+                println!("Flags: {:04X}", regs.flags());
             }
             Err(_) => {
                 log::error!("Program execution failed!");

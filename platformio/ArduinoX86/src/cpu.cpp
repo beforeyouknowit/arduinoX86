@@ -38,24 +38,25 @@ uint8_t reverse_byte(uint8_t b) {
 // -------------------------- CPU Interface -----------------------------------
 
 // Execute one clock pulse to the CPU
-void clock_tick() {
-  WRITE_CLK(1);
-  CLOCK_PIN_HIGH_DELAY;
-  WRITE_CLK(0);
-  // 186 input clock is 2x output (CPU) clock
-  #if CPU_186
-    CLOCK_PIN_HIGH_DELAY;
-    WRITE_CLK(1);
-    CLOCK_PIN_LOW_DELAY;
-    WRITE_CLK(0);
-  #endif
-  CLOCK_PIN_LOW_DELAY;
-  tick_i8288();
-}
+// void clock_tick() {
+//   WRITE_CLK(1);
+//   CLOCK_PIN_HIGH_DELAY;
+//   WRITE_CLK(0);
+//   // 186 input clock is 2x output (CPU) clock
+//   #if CPU_186
+//     CLOCK_PIN_HIGH_DELAY;
+//     WRITE_CLK(1);
+//     CLOCK_PIN_LOW_DELAY;
+//     WRITE_CLK(0);
+//   #endif
+//   CLOCK_PIN_LOW_DELAY;
+//   tick_i8288();
+// }
 
 // Read the status lines S0-S5 as well as queue status lines QS0-QS1.
+
+#if 0
 uint8_t read_status0_raw() {
-  
   uint8_t status0 = 0;
   status0 |= READ_PIN_D14 ? 0x01 : 0;     // S0  - Pin 14
   status0 |= READ_PIN_D15 ? 0x02 : 0;     // S1  - Pin 15
@@ -65,7 +66,6 @@ uint8_t read_status0_raw() {
   status0 |= READ_PIN_D40 ? 0x20 : 0;     // S5  - Pin 40
   status0 |= READ_PIN_D09 ? 0x40 : 0;     // QS0 - Pin 9
   status0 |= READ_PIN_D08 ? 0x80 : 0;     // QS1 - Pin 8
-
   return status0;
 }
 
@@ -98,14 +98,17 @@ void read_8288_control_bits() {
   control |= READ_PIN_D44 ? 0x08 : 0;     // DEN      - Pin 44
   CPU.control_bits = control;
 }
+#endif
 
+
+#if 0
 // Resets the CPU by asserting RESET line for a period. 
 // Successful RESET should be indicated by an ALE signalling start of the first CODE fetch.
 bool cpu_reset() {
 
   reset_i8288();
 
-  digitalWrite(TEST_PIN, LOW);
+  //digitalWrite(TEST_PIN, LOW);
   digitalWrite(INTR_PIN, LOW); 
   digitalWrite(NMI_PIN, LOW);
 
@@ -228,112 +231,16 @@ bool cpu_reset() {
   #endif
   return false;
 }
-
-
-// bool cpu_reset2() {
-
-//   reset_i8288();
-//   reset_cpu_struct(false);
-
-//   bool ale_went_off = false;
-//   bool bhe_went_off = false;
-//   bool qs0_high = false;
-
-//   // Assert RESET high for hold count.
-//   WRITE_RESET(RESET_ASSERT);
-
-//   for (int i = 0; i < RESET_HOLD_CYCLE_COUNT; i++) {
-//     if (READ_ALE_PIN == false) {
-//       ale_went_off = true;
-//     }
-//     clock_tick();
-//     //debugPrintlnColor(ansi::green, " ## RESET: Ticking CPU with RESET asserted.");
-//   }
-
-//   // For < 186, ALE should have gone off during RESET hold. 
-//   // For 186, it happens a bit after.
-//   #if !CPU_186
-//     // CPU didn't reset for some reason.
-//     if (ale_went_off == false) {
-//       set_error("CPU failed to reset: ALE not off!");   
-//       return false;
-//     }
-//   #endif
-
-//   WRITE_RESET(RESET_DEASSERT);
-
-//   // Clock CPU while waiting for ALE
-//   int ale_cycles = 0;
-
-//   // Reset takes 7 cycles, bit we can try for longer
-//   for ( int i = 0; i < RESET_CYCLE_TIMEOUT; i++ ) {
-//     cycle2();
-
-//     if (READ_QS0_PIN) {
-//       qs0_high = true;
-//     }
-
-//     if (!READ_ALE_PIN) {
-//       if (!ale_went_off) {
-//         ale_went_off = true;
-//       }
-//     }
-
-//     if (!READ_BHE_PIN) {
-//         bhe_went_off = true;
-//     }
-
-//     //debugPrintlnColor(ansi::green, "read status");
-//     read_status0();
-
-//     ale_cycles++;      
-
-//     if (ale_went_off && READ_ALE_PIN) {
-//       // ALE is active! CPU has successfully reset
-//       CPU.doing_reset = false;
-//       #if DEBUG_RESET
-//           debugPrintlnColor(ansi::green, "###########################################");
-//         if (bhe_went_off) {
-//           debugPrintlnColor(ansi::green, "## Reset CPU: 16-bit bus detected        ##");
-//         }
-//         else {
-//           debugPrintlnColor(ansi::green, "## Reset CPU:  8-bit bus detected        ##");
-//         }
-//         if (qs0_high) {
-//           debugPrintlnColor(ansi::green, "## Queue status lines appear unavailable ##");
-//         }
-//         else {
-//           debugPrintlnColor(ansi::green, "## Queue status lines available          ##");
-//         }
-//           debugPrintlnColor(ansi::green, "###########################################");
-//       #endif
-//       if (bhe_went_off) {
-//         cpu_set_width(BusWidthSixteen);
-//       }
-//       else {
-//         cpu_set_width(BusWidthEight);
-//       }
-//       CPU.have_queue_status = !qs0_high;
-//       return true;
-//     }
-//   }
-
-//   // ALE did not turn on within the specified cycle timeout, so we failed to reset the cpu.
-//   #if DEBUG_RESET
-//     debugPrintlnColor(ansi::bright_red, "## Failed to reset CPU! ##");
-//   #endif
-
-//   return false;
-// }
+#endif
 
 void cpu_set_width(cpu_width_t width) {
   CPU.width = width;
 
   if (width == BusWidthEight) {
-    CPU.queue.size = 4;
+    CPU.queue = InstructionQueue(4, BusWidth::Eight);
   }
   else {
-    CPU.queue.size = 6;
+    CPU.queue = InstructionQueue(6, BusWidth::Sixteen);
   }
 }
 

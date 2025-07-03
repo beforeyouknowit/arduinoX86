@@ -1,6 +1,6 @@
 
-#include <Arduino.h>
-#include "globals.h"
+
+#include <cstddef>
 
 extern const char RESPONSE_CHRS[] = {
   '!', '.'
@@ -10,7 +10,7 @@ const char VERSION_DAT[] = {
   'a', 'r', 'd', 'x', '8', '6', ' '
 };
 
-const size_t VERSION_DAT_LEN = sizeof(VERSION_DAT);
+extern constexpr size_t VERSION_DAT_LEN = sizeof(VERSION_DAT);
 
 extern const char MACHINE_STATE_CHARS[] = {
   'R', 'I', 'C', 'J', 'L', 'M', '8', 'P', 'E', 'F', 'X', '9', 'S', 'T', 'D'
@@ -62,5 +62,6 @@ extern const char * const CMD_STRINGS[] = {
   "CPUTYPE",
   "EMULATE8080",
   "PREFETCH",
+  "INITSCREEN",
   "INVALID",
 };
