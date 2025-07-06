@@ -24,12 +24,13 @@
 #pragma once
 
 #include "HatBase.h"
-#include "../hat_config.h"
+#include "../serial_config.h"
 #include "../gpio_pins.h"
 
 #define CPU_186
 
 #define WRITE_CYCLE T3
+#define ADDRESS_SPACE_MASK 0xFFFFF
 
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)

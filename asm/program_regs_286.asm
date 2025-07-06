@@ -23,18 +23,18 @@ org	0h
 %define TR_REG    0x0000
 %define LDT_REG   0x0000
 
-%define AX_REG    0x0000
-%define BX_REG    0x0000
-%define CX_REG    0x0000
-%define DX_REG    0x0000
+%define AX_REG    0x1234
+%define BX_REG    0x5678
+%define CX_REG    0x9ABC
+%define DX_REG    0xDEF0
 
-%define DS_REG    0x0000
-%define SS_REG    0x0000
-%define ES_REG    0xC000
+%define DS_REG    0xDEAD
+%define SS_REG    0xBEEF
+%define ES_REG    0xEEEE
 
-%define DI_REG    0x0000
-%define SI_REG    0x0000
-%define BP_REG    0x0000
+%define DI_REG    0x1111
+%define SI_REG    0x2222
+%define BP_REG    0x3333
 %define SP_REG    0xFFF4
 
 %define X0_REG    0x0000
@@ -55,33 +55,33 @@ SECTION .data
 ;  Do not modify - set values above.
 ; -----------------------------------------------------------------------------
 loadall_data:
-    dw X0_REG
-    dw X1_REG
-    dw X2_REG
-    dw MSW          ; MSW = 0 → real mode
-    dw X3_REG
-    dw X4_REG
-    dw X5_REG
-    dw X6_REG
-    dw X7_REG
-    dw X8_REG
-    dw X9_REG
-    dw TR_REG       ; TR
-    dw FLAGS_REG    ; FLAGS (bit1=1)
-    dw IP_REG       ; IP
-    dw LDT_REG      ; LDT
-    dw DS_REG       ; DS
-    dw SS_REG       ; SS
-    dw CS_REG       ; CS
-    dw ES_REG       ; ES
-    dw DI_REG       ; DI
-    dw SI_REG       ; SI
-    dw BP_REG       ; BP
-    dw SP_REG       ; SP
-    dw BX_REG       ; BX
-    dw DX_REG       ; DX
-    dw CX_REG       ; CX
-    dw AX_REG       ; AX
+    dw X0_REG       ; X0    800h
+    dw X1_REG       ; X1    802h
+    dw X2_REG       ; X2    804h
+    dw MSW          ; MSW   806h
+    dw X3_REG       ; X3    808h
+    dw X4_REG       ; X4    80Ah
+    dw X5_REG       ; X5    80Ch
+    dw X6_REG       ; X6    80Eh
+    dw X7_REG       ; X7    810h
+    dw X8_REG       ; X8    812h
+    dw X9_REG       ; X9    814h
+    dw TR_REG       ; TR    816h
+    dw FLAGS_REG    ; FLAGS 818h
+    dw IP_REG       ; IP    81Ah
+    dw LDT_REG      ; LDT   81Ch
+    dw DS_REG       ; DS    81Eh
+    dw SS_REG       ; SS    820h
+    dw CS_REG       ; CS    822h
+    dw ES_REG       ; ES    824h
+    dw DI_REG       ; DI    826h
+    dw SI_REG       ; SI    828h
+    dw BP_REG       ; BP    82Ah
+    dw SP_REG       ; SP    82Ch
+    dw BX_REG       ; BX    82Eh
+    dw DX_REG       ; DX    830h
+    dw CX_REG       ; CX    832h
+    dw AX_REG       ; AX    834h
 
 ; -----------------------------------------------------------------------------
 ;  8 x 6-byte descriptors

@@ -25,13 +25,14 @@
 
 #include <Board.h>
 #include <Hat.h>
-#include <BoardController.h>
+
+template<typename BoardType, typename HatType> class BoardController;
+template<typename BoardType, typename HatType> class CommandServer;
 
 extern Cpu CPU;
 extern Intel8288 I8288;
-extern CpuServer SERVER;
-
 extern BoardController<BoardType,HatType> Controller;
+extern CommandServer<BoardType,HatType> Server;
 
 // cpu_server.cpp
 extern const char RESPONSE_CHRS[];

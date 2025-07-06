@@ -63,8 +63,11 @@ pub const CPU_FLAG_TRAP: u16 = 0b0000_0001_0000_0000;
 pub const CPU_FLAG_INT_ENABLE: u16 = 0b0000_0010_0000_0000;
 pub const CPU_FLAG_DIRECTION: u16 = 0b0000_0100_0000_0000;
 pub const CPU_FLAG_OVERFLOW: u16 = 0b0000_1000_0000_0000;
-// Emulation mode bit on V20
+pub const CPU_FLAG_F15: u16 = 0b1000_0000_0000_0000; // Reserved bit 15
 pub const CPU_FLAG_MODE: u16 = 0b1000_0000_0000_0000;
+pub const CPU_FLAG_NT: u16 = 0b0100_0000_0000_0000; // Nested Task
+pub const CPU_FLAG_IOPL0: u16 = 0b0001_0000_0000_0000; // Nested Task
+pub const CPU_FLAG_IOPL1: u16 = 0b0010_0000_0000_0000; // Nested Task
 
 const ADDRESS_SPACE: usize = 0x10_0000;
 const ADDRESS_SPACE_MASK: usize = 0x0F_FFFF;
@@ -775,7 +778,7 @@ impl RemoteCpu<'_> {
             }
             TState::T1 => {
                 // Capture the state of the bus transfer in T1, as the state will go PASV in t3-t4
-                self.mcycle_state = get_bus_state!(self.status);
+                self.mcycle_state = self.cpu_type.decode_status(self.status);
                 log::trace!("Got bus state : {:?}", self.mcycle_state);
             }
             TState::T2 => {
@@ -906,7 +909,7 @@ impl RemoteCpu<'_> {
 
         // Do reads & writes if we are in execute state.
         if self.program_state == ProgramState::Execute {
-            if let BusState::HALT = get_bus_state!(self.status) {
+            if let BusState::HALT = self.cpu_type.decode_status(self.status) {
                 cycle_comment!(self, "CPU halted!");
                 self.halted = true;
             }
@@ -1271,7 +1274,7 @@ impl RemoteCpu<'_> {
             '.'
         };
 
-        let bus_state = get_bus_state!(self.status);
+        let bus_state = self.cpu_type.decode_status(self.status);
         let bus_str = match bus_state {
             BusState::INTA => "INTA",
             BusState::IOR => "IOR ",
@@ -1352,26 +1355,9 @@ impl RemoteCpu<'_> {
         };
 
         let rs_str = format!("{:?}", self.run_state);
-        // format!(
-        //     "[{:8}] {:08} {:02}[{:05X}:{:05X}] {:02} M:{}{}{} I:{}{}{} P:{}{} {:04} {:02} {:06} {:1}[{:width$}] {} {}",
-        //     rs_str,
-        //     self.cycle_num,
-        //     ale_str,
-        //     self.address_latch,
-        //     self.address_bus,
-        //     seg_str,
-        //     rs_chr, aws_chr, ws_chr, ior_chr, aiow_chr, iow_chr,
-        //     intr_chr, inta_chr,
-        //     bus_str,
-        //     t_str,
-        //     xfer_str,
-        //     q_op_chr,
-        //     self.queue.to_string(),
-        //     q_read_str,
-        //     ccomment
-        // )
+        let bus_chr_width = self.cpu_type.bus_chr_width();
         format!(
-            "[{rs_str:8}] {cycle_num:08} {ale_str:02}[{addr_latch:05X}:{addr_bus:05X}] \
+            "[{rs_str:8}] {cycle_num:08} {ale_str:02}[{addr_latch:0bus_chr_width$X}:{addr_bus:0bus_chr_width$X}] \
             {seg_str:02} M:{rs_chr}{aws_chr}{ws_chr} I:{ior_chr}{aiow_chr}{iow_chr} \
             P:{intr_chr}{inta_chr}{bhe_chr} {bus_str:04} {t_str:02} {xfer_str:06} {q_op_chr:1}[{q_str:width$}] {q_read_str} {c_comment}",
             rs_str = rs_str,
@@ -1379,6 +1365,7 @@ impl RemoteCpu<'_> {
             ale_str = ale_str,
             addr_latch = self.address_latch,
             addr_bus = self.address_bus,
+            bus_chr_width  = bus_chr_width,
             seg_str = seg_str,
             rs_chr = rs_chr,
             aws_chr = aws_chr,
@@ -1447,7 +1434,7 @@ impl RemoteCpu<'_> {
             log::warn!("Execution is not starting on T1.");
         } else {
             self.address_latch = self.address_bus;
-            self.mcycle_state = get_bus_state!(self.status);
+            self.mcycle_state = self.cpu_type.decode_status(self.status);
         }
 
         self.print_run_state(&print_opts);
@@ -1518,8 +1505,8 @@ impl RemoteCpu<'_> {
             RemoteCpuRegisters::V1(regs_v1) => {
                 Self::print_regs_v1(regs_v1, cpu_type);
             }
-            _ => {
-                log::error!("Unsupported register version for printing: {:?}", regs);
+            RemoteCpuRegisters::V2(regs_v2) => {
+                Self::print_regs_v2(regs_v2, cpu_type);
             }
         }
     }
@@ -1573,7 +1560,15 @@ impl RemoteCpu<'_> {
         };
         let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
         let m_chr = if cpu_type.is_intel() {
-            '1'
+            if matches!(cpu_type, ServerCpuType::Intel80286) {
+                if CPU_FLAG_F15 & f != 0 {
+                    '1'
+                } else {
+                    '0'
+                }
+            } else {
+                '1'
+            }
         } else {
             if f & CPU_FLAG_MODE != 0 {
                 'M'
@@ -1582,10 +1577,62 @@ impl RemoteCpu<'_> {
             }
         };
 
+        let nt_chr = if matches!(cpu_type, ServerCpuType::Intel80286) {
+            if f & CPU_FLAG_NT != 0 {
+                '1'
+            } else {
+                '0'
+            }
+        } else {
+            '1'
+        };
+
+        let nt_chr = if f & CPU_FLAG_NT != 0 { '1' } else { '0' };
+        let iopl0_chr = if f & CPU_FLAG_IOPL0 != 0 { '1' } else { '0' };
+        let iopl1_chr = if f & CPU_FLAG_IOPL1 != 0 { '1' } else { '0' };
+
         println!(
-            "{}111{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
+            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
+            m_chr,
+            nt_chr,
+            iopl1_chr,
+            iopl0_chr,
+            o_chr,
+            d_chr,
+            i_chr,
+            t_chr,
+            s_chr,
+            z_chr,
+            a_chr,
+            p_chr,
+            c_chr
         );
+    }
+
+    pub fn print_regs_v2(regs: &RemoteCpuRegistersV2, cpu_type: ServerCpuType) {
+        println!(
+            "X0: {:04X} X1: {:04X} X2: {:04X} X3: {:04X} X4: {:04X}\n\
+             X5: {:04X} X6: {:04X} X7: {:04X} X8: {:04X} X9: {:04X}",
+            regs.x0,
+            regs.x1,
+            regs.x2,
+            regs.x3,
+            regs.x4,
+            regs.x5,
+            regs.x6,
+            regs.x7,
+            regs.x8,
+            regs.x9
+        );
+
+        let v1_regs = RemoteCpuRegistersV1::from(regs);
+
+        println!(
+            "MSW: {:04X} TR: {:04X} LDT: {:04X}",
+            regs.msw, regs.tr, regs.ldt
+        );
+
+        Self::print_regs_v1(&v1_regs, cpu_type);
     }
 
     pub fn print_regs_delta(
@@ -1596,6 +1643,10 @@ impl RemoteCpu<'_> {
         match (initial, regs) {
             (RemoteCpuRegisters::V1(initial_v1), RemoteCpuRegisters::V1(regs_v1)) => {
                 Self::print_regs_delta_v1(initial_v1, regs_v1, cpu_type);
+            }
+            (RemoteCpuRegisters::V2(initial_v2), RemoteCpuRegisters::V1(final_v1)) => {
+                let initial_v1 = RemoteCpuRegistersV1::from(initial_v2);
+                Self::print_regs_delta_v1(&initial_v1, final_v1, cpu_type);
             }
             _ => {
                 log::error!(
@@ -1687,7 +1738,15 @@ impl RemoteCpu<'_> {
         };
         let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
         let m_chr = if cpu_type.is_intel() {
-            '1'
+            if matches!(cpu_type, ServerCpuType::Intel80286) {
+                if CPU_FLAG_F15 & f != 0 {
+                    '1'
+                } else {
+                    '0'
+                }
+            } else {
+                '1'
+            }
         } else {
             if f & CPU_FLAG_MODE != 0 {
                 'M'
@@ -1696,9 +1755,25 @@ impl RemoteCpu<'_> {
             }
         };
 
+        let nt_chr = if f & CPU_FLAG_NT != 0 { '1' } else { '0' };
+        let iopl0_chr = if f & CPU_FLAG_IOPL0 != 0 { '1' } else { '0' };
+        let iopl1_chr = if f & CPU_FLAG_IOPL1 != 0 { '1' } else { '0' };
+
         println!(
-            "{}111{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
+            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
+            m_chr,
+            nt_chr,
+            iopl1_chr,
+            iopl0_chr,
+            o_chr,
+            d_chr,
+            i_chr,
+            t_chr,
+            s_chr,
+            z_chr,
+            a_chr,
+            p_chr,
+            c_chr
         );
     }
 }

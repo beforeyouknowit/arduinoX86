@@ -160,6 +160,27 @@ impl RemoteCpuRegistersV1 {
     }
 }
 
+impl From<&RemoteCpuRegistersV2> for RemoteCpuRegistersV1 {
+    fn from(regs: &RemoteCpuRegistersV2) -> Self {
+        RemoteCpuRegistersV1 {
+            ax: regs.ax,
+            bx: regs.bx,
+            cx: regs.cx,
+            dx: regs.dx,
+            ss: regs.ss,
+            ds: regs.ds,
+            es: regs.es,
+            sp: regs.sp,
+            bp: regs.bp,
+            si: regs.si,
+            di: regs.di,
+            cs: regs.cs,
+            ip: regs.ip,
+            flags: regs.flags,
+        }
+    }
+}
+
 impl From<&[u8; 28]> for RemoteCpuRegistersV1 {
     fn from(buf: &[u8; 28]) -> Self {
         RemoteCpuRegistersV1 {
@@ -216,17 +237,17 @@ pub struct SegmentDescriptorV1 {
 /// This structure is loaded via the LOADALL instruction, 0F 05.
 #[derive(Default, Debug)]
 pub struct RemoteCpuRegistersV2 {
-    pub _unused0: u16,
-    pub _unused1: u16,
+    pub x0: u16,
+    pub x1: u16,
+    pub x2: u16,
     pub msw: u16,
-    pub _unused2: u16,
-    pub _unused3: u16,
-    pub _unused4: u16,
-    pub _unused5: u16,
-    pub _unused6: u16,
-    pub _unused7: u16,
-    pub _unused8: u16,
-    pub _unused9: u16,
+    pub x3: u16,
+    pub x4: u16,
+    pub x5: u16,
+    pub x6: u16,
+    pub x7: u16,
+    pub x8: u16,
+    pub x9: u16,
     pub tr: u16,
     pub flags: u16,
     pub ip: u16,
@@ -274,33 +295,39 @@ fn parse_v2(buf: &[u8]) -> Result<RemoteCpuRegistersV2, &'static str> {
     let mut new_regs = RemoteCpuRegistersV2::default();
     let mut cursor = std::io::Cursor::new(buf);
 
-    new_regs._unused0 = cursor.read_le().unwrap();
-    new_regs._unused1 = cursor.read_le().unwrap();
-    new_regs.msw = cursor.read_le().unwrap();
-    new_regs._unused2 = cursor.read_le().unwrap();
-    new_regs._unused3 = cursor.read_le().unwrap();
-    new_regs._unused4 = cursor.read_le().unwrap();
-    new_regs._unused5 = cursor.read_le().unwrap();
-    new_regs._unused6 = cursor.read_le().unwrap();
-    new_regs._unused7 = cursor.read_le().unwrap();
-    new_regs._unused8 = cursor.read_le().unwrap();
-    new_regs._unused9 = cursor.read_le().unwrap();
-    new_regs.tr = cursor.read_le().unwrap();
-    new_regs.flags = cursor.read_le().unwrap();
-    new_regs.ip = cursor.read_le().unwrap();
-    new_regs.ldt = cursor.read_le().unwrap();
-    new_regs.ds = cursor.read_le().unwrap();
-    new_regs.ss = cursor.read_le().unwrap();
-    new_regs.cs = cursor.read_le().unwrap();
-    new_regs.es = cursor.read_le().unwrap();
-    new_regs.di = cursor.read_le().unwrap();
-    new_regs.si = cursor.read_le().unwrap();
-    new_regs.bp = cursor.read_le().unwrap();
-    new_regs.sp = cursor.read_le().unwrap();
-    new_regs.bx = cursor.read_le().unwrap();
-    new_regs.dx = cursor.read_le().unwrap();
-    new_regs.cx = cursor.read_le().unwrap();
-    new_regs.ax = cursor.read_le().unwrap();
+    new_regs.x0 = cursor.read_le().unwrap(); // 800
+    new_regs.x1 = cursor.read_le().unwrap(); // 802
+    new_regs.x2 = cursor.read_le().unwrap(); // 804
+
+    new_regs.msw = cursor.read_le().unwrap(); // 806
+
+    new_regs.x3 = cursor.read_le().unwrap(); // 808
+    new_regs.x4 = cursor.read_le().unwrap(); // 80A
+    new_regs.x5 = cursor.read_le().unwrap(); // 80C
+    new_regs.x6 = cursor.read_le().unwrap(); // 80E
+    new_regs.x7 = cursor.read_le().unwrap(); // 810
+    new_regs.x8 = cursor.read_le().unwrap(); // 812
+    new_regs.x9 = cursor.read_le().unwrap(); // 814
+
+    new_regs.tr = cursor.read_le().unwrap(); // 816
+    new_regs.flags = cursor.read_le().unwrap(); // 818
+    new_regs.ip = cursor.read_le().unwrap(); // 81A
+    new_regs.ldt = cursor.read_le().unwrap(); // 81C
+
+    new_regs.ds = cursor.read_le().unwrap(); // 81E
+    new_regs.ss = cursor.read_le().unwrap(); // 820
+    new_regs.cs = cursor.read_le().unwrap(); // 822
+    new_regs.es = cursor.read_le().unwrap(); // 824
+
+    new_regs.di = cursor.read_le().unwrap(); // 826
+    new_regs.si = cursor.read_le().unwrap(); // 828
+    new_regs.bp = cursor.read_le().unwrap(); // 82A
+    new_regs.sp = cursor.read_le().unwrap(); // 82C
+
+    new_regs.bx = cursor.read_le().unwrap(); // 82E
+    new_regs.dx = cursor.read_le().unwrap(); // 830
+    new_regs.cx = cursor.read_le().unwrap(); // 832
+    new_regs.ax = cursor.read_le().unwrap(); // 834
 
     let idx = cursor.position();
     let desc_slice = &cursor.into_inner()[idx as usize..idx as usize + 48];

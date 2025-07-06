@@ -28,21 +28,24 @@
 
 
 #include <Arduino.h>
-#include <stdint.h>
+#include <cstdint>
+
 #include "arduinoX86.h"
 #include <globals.h>
-#include "cpu_server.h"
 #include "opcodes.h"
 #include "Display.h"
 
 #include <BoardController.h>
+#include <BusEmulator.h>
+#include <CommandServer.h>
 
 #ifdef GIGA_DISPLAY_SHIELD
 #include "Arduino_GigaDisplay_GFX.h"
 #include "GigaDisplay.h"
 #endif 
 
-CpuServer SERVER;
+#include <programs.h>
+
 Cpu CPU;
 Intel8288 I8288;
 
@@ -55,30 +58,6 @@ unsigned long frame_ms_accumulator = 0;
 unsigned long second_ms_accumulator = 0;
 unsigned long last_millis = 0;
 unsigned int fps_counter = 0;
-
-uint8_t SETUP_PROGRAM_86[] = { 0x90 };  // Not used
-
-uint8_t SETUP_PROGRAM_186[] = {
-  0xb8, 0x00, 0x00, 0xba, 0x18, 0xff, 0xef,  // MOV AX, 0 | MOV DX, FF18 | OUT DX, AX  ; Unmask Int0
-  0xEA, 0x00, 0x00, 0x00, 0x00,              // FAR JUMP to [patched segment:0000]
-};
-
-#define SETUP_PATCH_VECTOR_OFFSET_186 10
-
-// Register load routine. This program gets patched with the client supplied register values.
-// It uses MOVs and POPs to set the register state as specified before the main program execution
-// begins.
-uint8_t LOAD_PROGRAM[] = {
-  0x00, 0x00,
-  0xB8, 0x00, 0x00, 0x8E, 0xD0, 0x89, 0xC4, 0x9D, 0xBB, 0x00, 0x00, 0xB9, 0x00, 0x00,
-  0xBA, 0x00, 0x00, 0xB8, 0x00, 0x00, 0x8E, 0xD0, 0xB8, 0x00, 0x00, 0x8E, 0xD8, 0xB8, 0x00, 0x00,
-  0x8E, 0xC0, 0xB8, 0x00, 0x00, 0x89, 0xC4, 0xB8, 0x00, 0x00, 0x89, 0xC5, 0xB8, 0x00, 0x00, 0x89,
-  0xC6, 0xB8, 0x00, 0x00, 0x89, 0xC7, 0xB8, 0x00, 0x00, 0xEA, 0x00, 0x00, 0x00, 0x00
-};
-
-uint8_t LOAD_PROGRAM_286[] = {
-  0x0F, 0x05, // LOADALL
-};
 
 // Patch offsets for load program
 const size_t LOAD_BX = 0x0B;
@@ -95,130 +74,7 @@ const size_t LOAD_AX = 0x37;
 const size_t LOAD_IP = 0x3A;
 const size_t LOAD_CS = 0x3C;
 
-// CPU/FPU ID program.
-
-
-// FPU detection is performed by issuing a `fnstcw` instruction followed by wait.
-// If a write of 0x03FF is detected, then a FPU is present.
-//
-// CPU detection is pretty simple - Intel CPUs have the undocumented and very fast instruction
-// SALC at D6 - NEC CPUs have an undefined alias for XLAT that takes a lot longer. We can simply
-// measure the execution time to determine Intel vs NEC.
-// This routine is run first, in the reset vector, before the Jump program.
-const uint8_t CPUID_PROGRAM[] = {
-  0xD6,                    // SALC/Undefined
-  0xD9, 0x3E, 0x00, 0x00,  // fnstcw [0000]
-  0x90,                    // wait
-  0x90, 0x90,              // NOPs to absorb fetch while RQ/GT runs
-};
-
-// 8080 Emulation enter program. This program executes the BRKEM opcode to enter 8080 emulation
-// on a compatible NEC CPU such as the V20 or V30.
-// The first four bytes are used as the BRKEM vector segment and offset, and are patched with the
-// values of CS and IP.
-uint8_t EMU_ENTER_PROGRAM[] = {
-  0x00, 0x00, 0x00, 0x00, 0x0F, 0xFF, BRKEM_VECTOR
-};
-
-// 8080 Emulation exit program. This program executes PUSH PSW to preseve the 8080 flag state,
-// then POP PSW to restore BP, then executes RETEM to exit emulation mode.
-const uint8_t EMU_EXIT_PROGRAM[] = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 6 NOPs to hide program from client
-  0xF5, 0x00,                          // PUSH PSW, NOP
-  0x33, 0x33,                          // INX SP, INX SP to restore 8080 stack pointer
-  0xED, 0xFD,                          // RETEM
-};
-
-// Far Jump program. We feed this program to the CPU at the reset vector. On an 8088 the reset
-// vector is at FFFF:0000 or address FFFF0 - giving us only 16 bytes to the end of the address
-// space, where we will wrap around. We could wrap, but it gets a bit confusing, so instead
-// we'll jump to a clean new segment. The exact segment is configurable with LOAD_SEG which
-// will get patched into this routine as the destination segment.
-uint8_t JUMP_VECTOR[] = {
-  0xEA, 0x00, 0x00, 0x00, 0x00
-};
-
-// // STOREALL 
-// uint8_t JUMP_VECTOR[] = {
-//   0xF1, 0x0F, 0x04, 0x00, 0x00
-// };
-
-#define JUMP_VECTOR_PATCH_OFFSET 3
-
-// NMI vector. Not really a program, but using the program read function to read the vector
-// address is conveneient.
-uint8_t NMI_VECTOR[] = {
-  0x00, 0x00, 0x00, 0x00
-};
-#define NMI_VECTOR_PATCH_OFFSET 2
-
-// Storage to write to the stack during NMI
-uint8_t NMI_STACK_BUFFER[] = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
-
-// Register store routine.
-// Six NOPs have been padded to the front of the STORE routine to hide it from appearing in
-// client cycle traces.
-
-// The store program for NMI-based program termination.
-const uint8_t STORE_PROGRAM_NMI[] = {
-  0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-  0xE7, 0xFE, 0x89, 0xD8, 0xE7, 0xFE, 0x89, 0xC8, 0xE7, 0xFE, 0x89, 0xD0, 0xE7, 0xFE, 0x58, 0xE7,
-  0xFE, 0x58, 0xE7, 0xFE, 0x58, 0xE7, 0xFE, 0x8C, 0xD0, 0xE7, 0xFE, 0x89, 0xE0, 0xE7, 0xFE, 0x8C,
-  0xD8, 0xE7, 0xFE, 0x8C, 0xC0, 0xE7, 0xFE, 0x89, 0xE8, 0xE7, 0xFE, 0x89, 0xF0, 0xE7, 0xFE, 0x89,
-  0xF8, 0xE7, 0xFE, 0xB0, 0xFF, 0xE6, 0xFD
-};
-
-// The STORE program for inline program termination. This requires queue state availability.
-const uint8_t STORE_PROGRAM_INLINE[] = {
-  0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-  0xE7, 0xFE, 0x89, 0xD8, 0xE7, 0xFE, 0x89, 0xC8, 0xE7, 0xFE, 0x89, 0xD0, 0xE7, 0xFE, 0x8C, 0xD0,
-  0xE7, 0xFE, 0x89, 0xE0, 0xE7, 0xFE, 0xB8, 0x00, 0x00, 0x8E, 0xD0, 0xB8, 0x04, 0x00, 0x89, 0xC4,
-  0x9C, 0xE8, 0x00, 0x00, 0x8C, 0xC8, 0xE7, 0xFE, 0x8C, 0xD8, 0xE7, 0xFE, 0x8C, 0xC0, 0xE7, 0xFE,
-  0x89, 0xE8, 0xE7, 0xFE, 0x89, 0xF0, 0xE7, 0xFE, 0x89, 0xF8, 0xE7, 0xFE, 0xB0, 0xFF, 0xE6, 0xFD
-};
-
-const uint8_t NEC_PREFETCH_PROGRAM[] = {
-  0x63, 0xC0
-};
-
-uint8_t COMMAND_BUFFER[MAX_COMMAND_BYTES] = { 0 };
-
 uint32_t CYCLE_NUM = 0;
-
-command_func V_TABLE[] = {
-  &cmd_version,
-  &cmd_reset,
-  &cmd_load,
-  &cmd_cycle,
-  &cmd_read_address_latch,
-  &cmd_read_status,
-  &cmd_read_8288_command,
-  &cmd_read_8288_control,
-  &cmd_read_data_bus,
-  &cmd_write_data_bus,
-  &cmd_finalize,
-  &cmd_begin_store,
-  &cmd_store,
-  &cmd_queue_len,
-  &cmd_queue_bytes,
-  &cmd_write_pin,
-  &cmd_read_pin,
-  &cmd_get_program_state,
-  &cmd_get_last_error,
-  &cmd_get_cycle_state,
-  &cmd_null,
-  &cmd_prefetch_store,
-  &cmd_read_address,
-  &cmd_cpu_type,
-  &cmd_emu8080,
-  &cmd_prefetch,
-  &cmd_init_screen,
-  &cmd_invalid
-};
-
-const size_t MAX_CMD = (sizeof V_TABLE / sizeof(command_func));
 
 char LAST_ERR[MAX_ERR_LEN] = { 0 };
 
@@ -248,6 +104,11 @@ const char *SEGMENT_STRINGS[] = {
   "ES", "SS", "CS", "DS"
 };
 
+// Storage to write to the stack during NMI
+uint8_t NMI_STACK_BUFFER[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
 // Specialize BoardType for the chosen HatType
 using BoardType = BoardTypeBase<HatType>;
 
@@ -256,6 +117,12 @@ BoardType Board;
 BoardController<BoardType, HatType> Controller(Board); // Uses default Hat constructor
 // Or if you want to pass Hat constructor parameters:
 // BoardController<BoardType, HatType> Controller(Board, true); // Pass emulate_bus_controller = true
+
+// Instantiate the command server
+namespace ArduinoX86 {  
+  CommandServer<BoardType, HatType> Server(Controller);
+  BusEmulator *Bus = nullptr;
+}
 
 bool screen_initialized = false;
 bool screen_init_requested = false;
@@ -279,21 +146,22 @@ void setup() {
   delayMicroseconds(200);
 
   Board.debugPrintln(DebugType::SETUP, "In setup()...");
-  
 
-//  // Set all output pins to OUTPUT
-//  for (size_t p = 0; p < (sizeof OUTPUT_PINS / sizeof OUTPUT_PINS[0]); p++) {
-//    pinMode(OUTPUT_PINS[p], OUTPUT);
-//  }
-//  // Set all input pins to INPUT
-//  for (size_t p = 0; p < (sizeof INPUT_PINS / sizeof INPUT_PINS[0]); p++) {
-//#ifdef ARDUINO_GIGA
-//    //pinMode(INPUT_PINS[p], INPUT_PULLUP);
-//    pinMode(INPUT_PINS[p], INPUT);
-//#else
-//    pinMode(INPUT_PINS[p], INPUT);
-//#endif
-//  }
+  // Initialize the bus emulator
+  if (ArduinoX86::Bus == nullptr) {
+    ArduinoX86::Bus = create_bus_emulator();
+    if (ArduinoX86::Bus == nullptr) {
+      Board.debugPrintln(DebugType::SETUP, "Failed to create bus emulator!");
+      set_error("Failed to create bus emulator!");
+      return;
+    }
+    else {
+      Board.debugPrintln(DebugType::SETUP, "Bus emulator created successfully.");
+    }
+  }
+  else {
+    Board.debugPrintln(DebugType::SETUP, "Bus emulator pointer not null(???).");
+  }
 
 #ifdef ARDUINO_GIGA
   Board.debugPrintln(DebugType::SETUP, "Running on Arduino Giga...");
@@ -306,10 +174,10 @@ void setup() {
 #endif
 
   // Patch the jumps in programs that jump
-  patch_vector_pgm(JUMP_VECTOR, LOAD_SEG, JUMP_VECTOR_PATCH_OFFSET);
-  patch_vector_pgm(SETUP_PROGRAM, LOAD_SEG, SETUP_PROGRAM_PATCH_OFFSET);
-  patch_vector_pgm(NMI_VECTOR, STORE_SEG, NMI_VECTOR_PATCH_OFFSET);
-
+  JUMP_VECTOR.patch_vector(LOAD_SEG);
+  SETUP_PROGRAM.patch_vector(LOAD_SEG);
+  NMI_VECTOR.patch_vector(STORE_SEG);
+  
   debugPrintlnColor(ansi::bright_cyan, "Identifying CPU...");
   cpu_id();
 
@@ -336,9 +204,6 @@ void setup() {
       screen = &nullDisplay;
     #endif
   #endif
-
-  SERVER.c_state = WaitingForCommand;
-  CPU.v_state = Reset;
 
   //screen->init();
   //beep(100);
@@ -371,10 +236,11 @@ void reset_cpu_struct(bool reset_load_regs) {
   CPU.width = width;
   CPU.do_emulation = do_emulation;
 
-  CPU.state_begin_time = 0;
-  change_state(Reset);
-  CPU.data_bus = 0x00;
-  
+  // Recreate default program pointer
+  CPU.program = &JUMP_VECTOR;
+
+  ArduinoX86::Server.change_state(ServerState::Reset);
+  CPU.data_bus = 0x0000;
 }
 
 bool cpu_id() {
@@ -409,9 +275,9 @@ bool cpu_id() {
 #endif
   
 
-  change_state(CpuId);
+  ArduinoX86::Server.change_state(ServerState::CpuId);
   uint32_t timeout = 0;
-  while (CPU.v_state != Load) {
+  while (ArduinoX86::Server.state() != ServerState::Load) {
     cycle();
     timeout++;
     if (timeout > 200) {
@@ -436,7 +302,7 @@ bool cpu_id() {
 // Read a byte from the data bus. The half of the bus to read is determined
 // by BHE and A0.
 uint8_t data_bus_read_byte() {
-  CPU.data_bus = data_bus_read(CPU.data_width);
+  CPU.data_bus = Controller.readDataBus(CPU.data_width);
   if (!READ_BHE_PIN) {
     // High byte is active.
     return (uint8_t)(CPU.data_bus >> 8);
@@ -469,643 +335,29 @@ void set_error(const char *msg) {
   error_beep();
 }
 
-// Send a failure code byte in response to a failed command
-void send_fail() {
-  INBAND_SERIAL.write((uint8_t)RESPONSE_FAIL);
-}
-
-// Send the success code byte in response to a successful command
-void send_ok() {
-  INBAND_SERIAL.write((uint8_t)RESPONSE_OK);
-}
-
-void debug_proto(const char *msg) {
-#if DEBUG_PROTO
-  DEBUG_SERIAL.print("## ");
-  DEBUG_SERIAL.print(msg);
-  DEBUG_SERIAL.println(" ##");
-#endif
-}
-
-void debug_cmd(const char *cmd, const char *msg) {
-#if DEBUG_PROTO
-  DEBUG_SERIAL.print("## cmd ");
-  DEBUG_SERIAL.print(cmd);
-  DEBUG_SERIAL.print(": ");
-  DEBUG_SERIAL.print(msg);
-  DEBUG_SERIAL.println(" ##");
-#endif
-}
-
-// Server command - Version
-// Send server identifier 'ard8088' followed by protocol version number in binary
-bool cmd_version() {
-  debug_cmd("VERSION", "In cmd");
-
-  const char msg[] = "ardx86 ";
-  INBAND_SERIAL.write((const uint8_t *)msg, sizeof(msg) - 1);
-  //INBAND_SERIAL.write((uint8_t *)VERSION_DAT, VERSION_DAT_LEN);
-  INBAND_SERIAL.write(VERSION_NUM);
-  FLUSH;
-  delay(10);  // let USB complete the transaction
-  
-  Controller.getBoard().debugPrintln(DebugType::CMD, "Got version query!");
-  return true;
-}
-
-// Server command - Reset
-// Attempt to reset the CPU and report status.
-// This will be rarely used by itself as the register state is not set up. The Load
-// command will reset the CPU and set register state.
-bool cmd_reset() {
-  debug_cmd("RESET", "In cmd_reset()");
-  CpuResetResult result;
-  snprintf(LAST_ERR, MAX_ERR_LEN, "NO ERROR");
-
-  result = Controller.resetCpu();
-  if (result.success) {
-    change_state(Execute);
-  }
-  return result.success;
-}
-
-// Server command - Cpu type
-// Return the detected CPU type and the queue status availability bit in MSB
-bool cmd_cpu_type() {
-  debug_cmd("CPU_TYPE", "In cmd_cpu_type()");
-  snprintf(LAST_ERR, MAX_ERR_LEN, "NO ERROR");
-
-  uint8_t byte = (uint8_t)CPU.cpu_type;
-  // Set queue status available bit
-  if (CPU.have_queue_status) {
-    byte |= 0x80;
-  }
-
-  // Set FPU present bit
-  if (CPU.fpu_type != 0) {
-    byte |= 0x40;
-  }
-
-  INBAND_SERIAL.write(byte);
-  return true;
-}
-
-// Server command - Cycle
-// Execute the specified number of CPU cycles.
-bool cmd_cycle() {
-  uint8_t cycle_ct = COMMAND_BUFFER[0];
-  for (uint8_t i = 0; i < cycle_ct; i++) {
-    cycle();
-  }
-  return true;
-}
-
-// Server command - Load
-// Load the specified register state into the CPU.
-// 
-// This command takes one byte first, which indicates the type of registers to load.
-// On 8088-80186, this command takes 28 bytes, which correspond to the word values of each of the 14
-// CPU registers.
-// On 80286, this command takes 102 bytes, which correspond to the LOADALL structure.
-
-bool cmd_load() {
-
-  //DEBUG_SERIAL.println(">> Got load!");
-  snprintf(LAST_ERR, MAX_ERR_LEN, "NO ERROR");
-  volatile uint8_t *read_p = nullptr;
-  uint8_t reg_type = COMMAND_BUFFER[0];
-  bool read_result = false;
-
-  switch (reg_type) {
-    case 0:
-      Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 8088-80186");
-      // 8088-80186 register load
-      // This is the default register load type.
-      read_result = readParameterBytes(COMMAND_BUFFER, sizeof(COMMAND_BUFFER), sizeof(registers1_t));
-
-      if (!read_result) {
-        Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
-        set_error("Failed to read parameter bytes");
-        return false;
-      }
-
-      // Write raw command bytes over register struct.
-      // All possible bit representations are valid.
-      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.load_regs);
-      for (size_t i = 0; i < sizeof(registers1_t); i++) {
-        *read_p++ = COMMAND_BUFFER[i];
-      }
-
-      patch_load_pgm(LOAD_PROGRAM, &CPU.load_regs);
-      patch_brkem_pgm(EMU_ENTER_PROGRAM, &CPU.load_regs);
-
-      CPU.load_regs.flags &= CPU_FLAG_DEFAULT_CLEAR;
-      CPU.load_regs.flags |= CPU_FLAG_DEFAULT_SET_8086;
-    break;
-
-    case 1:
-      Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 80286 (LOADALL)");
-      read_result = readParameterBytes(COMMAND_BUFFER, sizeof(COMMAND_BUFFER), sizeof(Loadall286));
-      if (!read_result) {
-        Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
-        set_error("Failed to read parameter bytes");
-        return false;
-      }
-
-      // Write raw command bytes over register struct.
-      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.loadall_regs);
-      for (size_t i = 0; i < sizeof(Loadall286); i++) {
-        *read_p++ = COMMAND_BUFFER[i];
-      }
-
-      CPU.loadall_regs.FLAGS &= CPU_FLAG_DEFAULT_CLEAR;
-      CPU.loadall_regs.FLAGS |= CPU_FLAG_DEFAULT_SET_286;
-    break;
-
-    default:
-      set_error("Invalid register type");
-      return false;
-  }
-
-  CpuResetResult result = Controller.resetCpu();
-  if (!result.success) {
-    //set_error("Failed to reset CPU");
-    Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
-    return false;
-  }
-  change_state(JumpVector);
-
-  // Run CPU and wait for load to finish
-  int load_timeout = 0;
-  while (CPU.v_state != Execute) {
-    cycle();
-    load_timeout++;
-
-    if (load_timeout > LOAD_TIMEOUT) {
-      // Something went wrong in load program
-      set_error("Load timeout");
-      return false;
-    }
-  }
-
-#if LOAD_INDICATOR
-  DEBUG_SERIAL.print(".");
-#endif
-  debug_proto("LOAD DONE");
-  return true;
-}
-
-// Server command - ReadAddressLatch
-// Read back the contents of the address latch as a sequence of 3 bytes (little-endian)
-bool cmd_read_address_latch() {
-  INBAND_SERIAL.write((uint8_t)(CPU.address_latch & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 8) & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 16) & 0xFF));
-  return true;
-}
-
-// Server command - ReadAddress
-// Read back the contents of the address bus as a sequence of 3 bytes (little-endian)
-bool cmd_read_address() {
-  //read_address_pins(true);
-  CPU.address_bus = Controller.readAddressBus(true);
-  INBAND_SERIAL.write((uint8_t)(CPU.address_bus & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 8) & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 16) & 0xFF));
-  return true;
-}
-
-bool cmd_invalid() {
-  DEBUG_SERIAL.println("Called cmd_invalid!");
-  return false;
-}
-
-// Server command - ReadStatus
-// Return the value of the CPU status lines S0-S5 and QS0-QS1
-bool cmd_read_status() {
-  CPU.status0 = Controller.readCpuStatusLines();
-  INBAND_SERIAL.write(CPU.status0);
-  return true;
-}
-
-// Server command - Read8288Command
-bool cmd_read_8288_command() {
-  CPU.command_bits = Controller.readBusControllerCommandLines();
-  //read_8288_command_bits();
-  INBAND_SERIAL.write(CPU.command_bits);
-  return true;
-}
-
-// Server command - Read8288Control
-bool cmd_read_8288_control() {
-  Controller.readBusControllerControlLines();
-  //read_8288_control_bits();
-  INBAND_SERIAL.write(CPU.control_bits);
-  return true;
-}
-
-// Server command - ReadDataBus
-bool cmd_read_data_bus() {
-  INBAND_SERIAL.write((uint8_t)CPU.data_bus);
-  INBAND_SERIAL.write((uint8_t)(CPU.data_bus >> 8));
-  return true;
-}
-
-// Server command - WriteDataBus
-// Takes an argument of 2 bytes.
-// Sets the data bus to the provided value. On 8-bit CPUs the upper byte is ignored.
-// This should not be called for CODE fetches after we have called cmd_prefetch_store(),
-// unless a flow control operation occurs that flushes the queue and returns us to
-// within original program boundaries.
-bool cmd_write_data_bus() {
-  if (CPU.bus_state_latched == CODE) {
-    // We've just been instructed to write a normal fetch byte to the bus.
-    // If we were prefetching the store program, reset this status as a queue
-    // flush must have executed (or we goofed up...)
-    CPU.prefetching_store = false;
-    CPU.s_pc = 0;
-  }
-
-  CPU.data_bus = (uint16_t)COMMAND_BUFFER[0];
-  CPU.data_bus |= ((uint16_t)COMMAND_BUFFER[1] << 8);
-  CPU.data_type = QueueDataType::Program;
-
-  Controller.getBoard().debugPrint(DebugType::CMD, "## cmd_write_data_bus(): Writing data bus: ");
-  Controller.getBoard().debugPrintln(DebugType::CMD, CPU.data_bus, HEX);
-
-  return true;
-}
-
-// Server command - PrefetchStore
-// Instructs the CPU server to load the next byte of the Store (or EmuExit) program early
-// Should be called in place of cmd_write_data_bus() by host on T3/TwLast when
-// program bytes have been exhausted.
-// (When we are prefetching past execution boundaries during main program execution)
-bool cmd_prefetch_store() {
-
-  if (CPU.in_emulation) {
-    // Prefetch the EmuExit program
-    if (CPU.s_pc >= sizeof EMU_EXIT_PROGRAM) {
-      set_error("EmuExit program underflow");
-      return false;
-    }
-
-#if DEBUG_STORE
-    debugPrintColor(ansi::yellow, "## PREFETCH_EMU_EXIT: s_pc: ");
-#endif
-
-    CPU.prefetching_store = true;
-    CPU.data_bus = read_program(EMU_EXIT_PROGRAM, sizeof EMU_EXIT_PROGRAM, &CPU.s_pc, CPU.address_latch, CPU.data_width);
-    CPU.data_type = QueueDataType::ProgramEnd;
-  } else {
-    // Prefetch the Store program
-    if (CPU.s_pc >= sizeof STORE_PROGRAM_INLINE) {
-      set_error("## Store program underflow!");
-      return false;
-    }
-
-#if DEBUG_STORE
-    debugPrintColor(ansi::yellow, "## PREFETCH_STORE: s_pc: ");
-#endif
-
-    CPU.prefetching_store = true;
-    CPU.data_bus = read_program(STORE_PROGRAM_INLINE, sizeof STORE_PROGRAM_INLINE, &CPU.s_pc, CPU.address_latch, CPU.data_width);
-    CPU.data_type = QueueDataType::ProgramEnd;
-  }
-
-#if DEBUG_STORE
-  debugPrintColor(ansi::yellow, CPU.s_pc);
-  debugPrintColor(ansi::yellow, " addr: ");
-  debugPrintColor(ansi::yellow, CPU.address_latch, 16);
-  debugPrintColor(ansi::yellow, " data: ");
-  debugPrintlnColor(ansi::yellow, CPU.data_bus, 16);
-#endif
-
-  return true;
-}
-
-// Server command - Finalize
-// Sets the data bus flag to DATA_PROGRAM_END, so that the Execute state can terminate
-// on the next instruction queue fetch
-bool cmd_finalize() {
-  if (CPU.v_state == Execute) {
-    change_state(ExecuteFinalize);
-
-    // Wait for execute done state
-    int execute_ct = 0;
-    int timeout = FINALIZE_TIMEOUT;
-    if (CPU.in_emulation) {
-      // We need more time to exit emulation mode
-      timeout = FINALIZE_EMU_TIMEOUT;
-    }
-    while (CPU.v_state != ExecuteDone) {
-      cycle();
-      execute_ct++;
-
-
-
-      if (execute_ct > timeout) {
-        set_error("cmd_finalize(): state timeout");
-        return false;
-      }
-    }
-    return true;
-  } else {
-    error_beep();
-    set_error("cmd_finalize(): wrong state: ");
-    DEBUG_SERIAL.println(CPU.v_state);
-    return false;
-  }
-}
-
-// Server command - BeginStore
-// Execute state must be in ExecuteDone before intiating BeginStore command
-//
-bool cmd_begin_store(void) {
-  /*
-  char err_msg[30];
-
-  // Command only valid in ExecuteDone state
-  if(CPU.v_state != ExecuteDone) {
-    snprintf(err_msg, 30, "BeginStore: Wrong state: %d ", CPU.v_state);
-    set_error(err_msg);
-    return false;
-  }
-
-  change_state(Store);
-  */
-  return true;
-}
-
-// Server command - Store
-//
-// Returns values of registers in the following order, little-endian
-// AX, BX, CX, DX, SS, SP, FLAGS, IP, CS, DS, ES, BP, SI, DI
-// Execute state must be in StoreDone before executing Store command
-bool cmd_store(void) {
-
-#if DEBUG_STORE
-  debugPrintColor(ansi::bright_magenta, "## In STORE: s_pc is: ");
-  debugPrintlnColor(ansi::bright_magenta, CPU.s_pc);
-#endif
-
-  char err_msg[30];
-  // Command only valid in ExecuteDone state
-  if (CPU.v_state != ExecuteDone) {
-    snprintf(err_msg, 30, "## STORE: Wrong state: %d ", CPU.v_state);
-    set_error(err_msg);
-    return false;
-  }
-
-  change_state(Store);
-
-  int store_timeout = 0;
-
-  // Cycle CPU until Store complete
-  while (CPU.v_state != StoreDone) {
-    cycle();
-    store_timeout++;
-
-    if (store_timeout > 500) {
-      debugPrintlnColor(ansi::bright_red, "## STORE: Timeout! ##");
-      snprintf(err_msg, 30, "StoreDone timeout.");
-      error_beep();
-      return false;
-    }
-  }
-
-#if DEBUG_STORE
-  debugPrintColor(ansi::bright_magenta, "## STORE: Flags are: ");
-  debugPrintlnColor(ansi::bright_magenta, CPU.post_regs.flags, 16);
-
-  if (!CPU.nmi_terminate) {
-    // We didn't use NMI to terminate code. which means we used the inline STORE routine,
-    // which means we need to convert the registers struct.
-    debugPrintlnColor(ansi::bright_magenta, "## STORE: Converting registers from STORE INLINE format...");
-    convert_inline_registers(&CPU.post_regs);
-  }
-#endif
-
-  // Dump final register state to Serial port
-  uint8_t *reg_p = (uint8_t *)&CPU.post_regs;
-  for (size_t i = 0; i < sizeof CPU.post_regs; i++) {
-    INBAND_SERIAL.write(reg_p[i]);
-  }
-
-#if STORE_INDICATOR
-  DEBUG_SERIAL.print("?");
-#endif
-  change_state(Done);
-  return true;
-}
-
-
-// Server command - QueueLen
-// Return the length of the instruction queue in bytes
-bool cmd_queue_len(void) {
-  INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.len()));
-  return true;
-}
-
-// Server command - QueueBytes
-// Return the contents of the instruction queue, from 0-6 bytes.
-bool cmd_queue_bytes(void) {
-  for (size_t i = 0; i < CPU.queue.len(); i++) {
-    INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.read_byte(i)));
-  }
-  return true;
-}
-
-// Server command - Write pin
-// Sets the value of the specified CPU input pin
-bool cmd_write_pin(void) {
-
-  uint8_t pin_idx = COMMAND_BUFFER[0];
-  uint8_t pin_val = COMMAND_BUFFER[1] & 0x01;
-
-  if (pin_idx < sizeof WRITE_PINS) {
-    //uint8_t pin_no = WRITE_PINS[pin_idx];
-
-    switch (pin_idx) {
-      case 0: // READY pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting READY pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
-        Controller.writePin(OutputPin::Ready, pin_val);
-        break;
-
-      case 1: // TEST pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting TEST pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
-        Controller.writePin(OutputPin::Test, pin_val);
-        break;
-
-      case 2: // INTR pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting INTR pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
-        Controller.writePin(OutputPin::Intr, pin_val);
-        break;
-
-      case 3: // NMI pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting NMI pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
-        Controller.writePin(OutputPin::Nmi, pin_val);
-        break;
-
-      default:
-        error_beep();
-        return false;
-    }
-    return true;
-  } else {
-    // Invalid pin
-    error_beep();
-    return false;
-  }
-}
-
-// Server command - Read pin
-bool cmd_read_pin(void) {
-  // Not implemented
-  INBAND_SERIAL.write((uint8_t)0);
-  return true;
-}
-
-// Server command - Get program state
-bool cmd_get_program_state(void) {
-  INBAND_SERIAL.write((uint8_t)CPU.v_state);
-  return true;
-}
-
-// Server command - Get last error
-bool cmd_get_last_error(void) {
-  INBAND_SERIAL.write(LAST_ERR);
-  return true;
-}
-
-// Server command - Get Cycle State
-// Returns all the state info typically needed for a single cycle
-// Parameter: One byte, flags. Bit 0 set to 1 will cycle CPU first before 
-//            returning the state.
-// Returns 11 bytes
-bool cmd_get_cycle_state(void) {
-  bool do_cycle = (bool)(COMMAND_BUFFER[0] & 0x01);
-  if (do_cycle) {
-    // Perform a cycle if requested
-    cycle();
-  }
-
-  //CPU.status0 = Controller.readCpuStatusLines();
-  CPU.command_bits = Controller.readBusControllerCommandLines();
-  CPU.control_bits = Controller.readBusControllerControlLines();
-
-  //read_8288_command_bits();
-  //read_8288_control_bits();
-  uint8_t server_state = ((uint8_t)CPU.v_state) & 0x3F;
-  uint8_t cpu_state_byte = 0;
-
-  cpu_state_byte |= ((uint8_t)(CPU.last_bus_cycle)) & 0x07; // Bits 0-2: Bus cycle
-
-  INBAND_SERIAL.write(server_state); // Byte 0
-  INBAND_SERIAL.write(cpu_state_byte); // Byte 1
-  INBAND_SERIAL.write(CPU.status0); // Byte 2
-  INBAND_SERIAL.write(CPU.control_bits); // Byte 3
-  INBAND_SERIAL.write(CPU.command_bits); // Byte 4
-
-  INBAND_SERIAL.write((uint8_t)(CPU.address_bus & 0xFF)); // Bytes 5-8
-  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 8 ) & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 16) & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 24) & 0xFF));
-
-  INBAND_SERIAL.write((uint8_t)(CPU.data_bus & 0xFF)); // Bytes 9-10
-  INBAND_SERIAL.write((uint8_t)(CPU.data_bus >> 8));
-  return true;
-}
-
-// Server command - Enter emulation mode
-bool cmd_emu8080(void) {
-  if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
-    // Simply toggle the emulation flag
-    CPU.do_emulation = true;
-#if DEBUG_EMU
-    DEBUG_SERIAL.println("## cmd_emu8080(): Enabling 8080 emulation mode! ##");
-#endif
-    return true;
-  }
-// Unsupported CPU!
-#if DEBUG_EMU
-  DEBUG_SERIAL.println("## cmd_emu8080(): Bad CPU type ## ");
-#endif
-  return false;
-}
-
-// Server command - prefetch
-bool cmd_prefetch(void) {
-  if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
-    // Simply toggle the emulation flag
-    CPU.do_prefetch = true;
-#if DEBUG_EMU
-    DEBUG_SERIAL.println("## cmd_prefetch(): Enabling VX0 prefetch ##");
-#endif
-    return true;
-  }
-
-// Unsupported CPU!
-#if DEBUG_EMU
-  DEBUG_SERIAL.println("## cmd_prefetch(): Bad CPU type ## ");
-#endif
-  return false;
-}
-
-// The Giga display shield takes a few seconds to initialize, so we don't 
-// want to do it in setup. The client can request display initialization instead
-// once it has established a connection.  The client should wait approximately 
-// 3 seconds after sending the init command.
-// Returns one data byte. A value of 0 indicates no display is present.
-// A value of 1 indicates the display is present and will be initialized.
-bool cmd_init_screen() {
-  uint8_t byte0 = 0;
-  #if GIGA_DISPLAY_SHIELD
-    byte0 = 1;
-    screen_init_requested = true;
-  #endif
-  INBAND_SERIAL.write(byte0);
-  return true;
-}
-
-bool cmd_null() {
-  return true;
-}
 
 void patch_vector_pgm(uint8_t *pgm, uint16_t seg, size_t offset) {
   *((uint16_t *)&pgm[offset]) = seg;
 }
 
-void patch_load_pgm(uint8_t *pgm, volatile registers1_t *reg) {
-  *((uint16_t *)pgm) = reg->flags;
-  *((uint16_t *)&pgm[LOAD_BX]) = reg->bx;
-  *((uint16_t *)&pgm[LOAD_CX]) = reg->cx;
-  *((uint16_t *)&pgm[LOAD_DX]) = reg->dx;
-  *((uint16_t *)&pgm[LOAD_SS]) = reg->ss;
-  *((uint16_t *)&pgm[LOAD_DS]) = reg->ds;
-  *((uint16_t *)&pgm[LOAD_ES]) = reg->es;
-  *((uint16_t *)&pgm[LOAD_SP]) = reg->sp;
-  *((uint16_t *)&pgm[LOAD_BP]) = reg->bp;
-  *((uint16_t *)&pgm[LOAD_SI]) = reg->si;
-  *((uint16_t *)&pgm[LOAD_DI]) = reg->di;
-  *((uint16_t *)&pgm[LOAD_AX]) = reg->ax;
-  *((uint16_t *)&pgm[LOAD_IP]) = reg->ip;
-  *((uint16_t *)&pgm[LOAD_CS]) = reg->cs;
+void patch_load_pgm(InlineProgram *pgm, volatile registers1_t *reg) {
+  pgm->write_u16_at(0, reg->flags);
+  pgm->write_u16_at(LOAD_BX, reg->bx);
+  pgm->write_u16_at(LOAD_CX, reg->cx);
+  pgm->write_u16_at(LOAD_DX, reg->dx);
+  pgm->write_u16_at(LOAD_SS, reg->ss);
+  pgm->write_u16_at(LOAD_DS, reg->ds);
+  pgm->write_u16_at(LOAD_ES, reg->es);
+  pgm->write_u16_at(LOAD_SP, reg->sp);
+  pgm->write_u16_at(LOAD_BP, reg->bp);
+  pgm->write_u16_at(LOAD_SI, reg->si);
+  pgm->write_u16_at(LOAD_DI, reg->di);
+  pgm->write_u16_at(LOAD_AX, reg->ax);
+  pgm->write_u16_at(LOAD_IP, reg->ip);
+  pgm->write_u16_at(LOAD_CS, reg->cs);
 }
 
-void patch_brkem_pgm(uint8_t *pgm, volatile registers1_t *regs) {
+void patch_brkem_pgm(InlineProgram *pgm, volatile registers1_t *regs) {
 #if DEBUG_EMU
   static char buf[20];
   DEBUG_SERIAL.println("## Patching BRKEM program ##");
@@ -1115,9 +367,8 @@ void patch_brkem_pgm(uint8_t *pgm, volatile registers1_t *regs) {
            regs->ip);
   DEBUG_SERIAL.println(buf);
 #endif
-  uint16_t *word_ptr = (uint16_t *)pgm;
-  *word_ptr++ = regs->ip;
-  *word_ptr = regs->cs;
+  pgm->write_u16_at(0, regs->ip);
+  pgm->write_u16_at(2, regs->cs);
 }
 
 // Fix up the old-style inline regs by swapping fields.
@@ -1214,12 +465,14 @@ void print_cpu_state() {
   char nmi_chr = READ_NMI_PIN ? 'N' : '.';
   char bhe_chr = !READ_BHE_PIN ? 'B' : '.';
 
+#if defined(FPU_8087)
   char test_chr = READ_TEST_PIN ? 'T' : '.';
   char rq_chr = !READ_PIN_D03 ? 'R' : '.';
   char fint_chr = READ_PIN_D20 ? 'I' : '.';
   char lock_chr = !READ_LOCK_PIN ? 'L' : '.';
+#endif
 
-  char v_chr = MACHINE_STATE_CHARS[(size_t)CPU.v_state];
+  char v_chr = ArduinoX86::Server.get_state_char(ArduinoX86::Server.state());
   uint8_t q = (CPU.status0 >> 6) & 0x03;
   char q_char = QUEUE_STATUS_CHARS[q];
   //char s = CPU.status0 & 0x07;
@@ -1290,7 +543,7 @@ void print_cpu_state() {
   snprintf(
       buf,
       buf_len,
-      "%08ld %c %s[%0*lX][%0*lX]",
+      "%08ld %c %s%0*lX:%0*lX",
       CYCLE_NUM,
       v_chr,
       ale_str,
@@ -1306,7 +559,7 @@ void print_cpu_state() {
     snprintf(
       buf,
       buf_len,
-      "[%04X]",
+      ":%04X",
       Controller.readDataBus(ActiveBusWidth::Sixteen, true));
   }
 
@@ -1315,12 +568,11 @@ void print_cpu_state() {
   snprintf(
       buf,
       buf_len,    
-      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c F:%c%c%c%c ",
+      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c ",
       seg_str,
       rs_chr, aws_chr, ws_chr,
       ior_chr, aiow_chr, iow_chr,
-      reset_chr, intr_chr, inta_chr, nmi_chr, bhe_chr,
-      lock_chr, test_chr, rq_chr, fint_chr);
+      reset_chr, intr_chr, inta_chr, nmi_chr, bhe_chr);
 
   DEBUG_SERIAL.print(buf);
 
@@ -1379,123 +631,6 @@ void print_cpu_state() {
 #endif
 
   DEBUG_SERIAL.println("");
-}
-
-void change_state(machine_state_t new_state) {
-  switch (new_state) {
-    case Reset:
-      CPU.doing_reset = true;
-      CPU.cpuid_counter = 0;
-      CPU.cpuid_queue_reads = 0;
-      CPU.v_pc = 0;
-      CPU.s_pc = 0;
-      break;
-    case CpuSetup:
-      CPU.v_pc = 0;
-      break;
-    case CpuId:
-      CPU.doing_reset = false;
-      CPU.doing_id = true;
-      CPU.cpuid_counter = 0;
-      CPU.cpuid_queue_reads = 0;
-      CPU.v_pc = 0;
-      break;
-    case JumpVector:
-      CPU.doing_reset = false;
-      CPU.v_pc = 0;
-      break;
-    case Load:
-      
-      if (CPU.cpu_type == CpuType::i80286) {
-        CPU.program = LOAD_PROGRAM_286;
-        CPU.program_len = sizeof(LOAD_PROGRAM_286);
-        CPU.v_pc = 0;
-      }
-      else {
-        CPU.program = LOAD_PROGRAM;
-        CPU.program_len = sizeof(LOAD_PROGRAM);
-        // Set v_pc to 2 to skip flag bytes
-        CPU.v_pc = 2;
-      }
-
-      CPU.program_pc = &CPU.v_pc;
-
-      break;
-    case LoadDone:
-      break;
-    case EmuEnter:
-      CPU.stack_r_op_ct = 0;
-      CPU.stack_w_op_ct = 0;
-      // Set v_pc to 4 to skip IVT segment:offset
-      CPU.v_pc = 4;
-      break;
-    case Execute:
-      CPU.nmi_checkpoint = 0;
-      CPU.v_pc = 0;
-      CPU.s_pc = 0;
-      if (CPU.do_emulation) {
-        // Set v_pc to 4 to skip IVT segment:offset
-        CPU.s_pc = 4;
-      }
-      break;
-    case ExecuteFinalize:
-      CPU.nmi_checkpoint = 0;
-      CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
-      CPU.v_pc = 0;            // Reset PC for NMI vector "program"
-
-      if (CPU.in_emulation) {
-        CPU.program = EMU_EXIT_PROGRAM;
-        CPU.program_len = sizeof(EMU_EXIT_PROGRAM);
-        CPU.program_pc = &CPU.v_pc;
-      } else if (CPU.nmi_terminate) {
-        CPU.program = STORE_PROGRAM_NMI;
-        CPU.program_len = sizeof(STORE_PROGRAM_NMI);
-        CPU.program_pc = &CPU.s_pc;
-      } else {
-        CPU.program = STORE_PROGRAM_INLINE;
-        CPU.program_len = sizeof(STORE_PROGRAM_INLINE);
-        CPU.program_pc = &CPU.s_pc;
-      }
-
-      break;
-    case ExecuteDone:
-      break;
-    case EmuExit:
-      CPU.stack_r_op_ct = 0;
-      CPU.stack_w_op_ct = 0;
-      CPU.v_pc = 0;
-      break;
-    case Store:
-      reverse_stack_buf();
-      CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
-      // Take a raw uint8_t pointer to the register struct. Both x86 and Arduino are little-endian,
-      // so we can write raw incoming data over the struct. Faster than logic required to set
-      // specific members.
-      CPU.readback_p = (uint8_t *)&CPU.post_regs;
-      break;
-    case StoreDone:
-      break;
-    case Done:
-      break;
-    default:
-      // Unhandled state.
-      break;
-  }
-
-  uint32_t state_end_time = micros();
-
-  // Report time we spent in the previous state.
-  if (CPU.state_begin_time != 0) {
-    uint32_t elapsed = state_end_time - CPU.state_begin_time;
-    Controller.getBoard().debugPrint(DebugType::STATE, "## Changing to state: ");
-    Controller.getBoard().debugPrint(DebugType::STATE, MACHINE_STATE_STRINGS[(size_t)new_state]);
-    Controller.getBoard().debugPrint(DebugType::STATE, ". Spent (");
-    Controller.getBoard().debugPrint(DebugType::STATE, elapsed);
-    Controller.getBoard().debugPrintln(DebugType::STATE, " us in previous state. ##");
-  }
-
-  CPU.state_begin_time = micros();
-  CPU.v_state = new_state;
 }
 
 // Emulate a code fetch from the specified program.
@@ -1593,10 +728,20 @@ void set_data_bus_width() {
   }
 }
 
+void latch_address() {
+  uint32_t addr = Controller.readAddressBus(false);
+  CPU.address_bus = addr;
+  CPU.address_latch = addr;
+}
+
 void cycle() {
+  static bool cpu_mrdc;
+  static bool cpu_iodc;
+  static bool cpu_mwtc;
+  static bool cpu_iowc;
 
   // Resolve data bus from last cycle.
-  if (!READ_MRDC_PIN || !READ_IORC_PIN) {
+  if (!Controller.readMRDCPin() || !Controller.readIORCPin()) {
     Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);
   }
@@ -1692,7 +837,7 @@ void cycle() {
       }
     } else {
       // Queue read while queue empty? Bad condition.
-      if (CPU.v_state != Reset) {
+      if (ArduinoX86::Server.state() != ServerState::Reset) {
         // Sometimes we get a spurious queue read signal in Reset.
         // We can safely ignore any queue reads during the Reset state.
         debugPrintlnColor(ansi::bright_red, "## Error: Invalid Queue Length-- ##");
@@ -1770,34 +915,34 @@ void cycle() {
 
   uint32_t run_address = 0;
 
-  if (!READ_MWTC_PIN || !READ_IOWC_PIN) {
+  if (!Controller.readMWTCPin() || !Controller.readIOWCPin()) {
     // CPU is writing to the data bus, latch value
-    CPU.data_bus = data_bus_read(CPU.data_width);
+    CPU.data_bus = Controller.readDataBus(CPU.data_width);
   }
 
   // Handle state machine
-  switch (CPU.v_state) {
+  switch (ArduinoX86::Server.state()) {
 
-    case Reset:
+    case ServerState::Reset:
       // We are executing the CPU reset routine.
       // Nothing to do here.
       break;
-    case CpuId:
+    case ServerState::CpuId:
       // We are executing the CPU ID routine.
       handle_cpuid_state(q);
       break;
 
-    case CpuSetup:
+    case ServerState::CpuSetup:
       handle_cpu_setup_state();
       break;
 
-    case JumpVector:
+    case ServerState::JumpVector:
       // We are executing the initial jump from the reset vector FFFF:0000.
       // This is to avoid wrapping effective address during load procedure.
       handle_jump_vector_state(q);
       break;
 
-    case Load:
+    case ServerState::Load:
       // We are executing the register load routine.
       if (CPU.cpu_type == CpuType::i80286) {
         // 286 just uses LOADALL instead of a load program. 
@@ -1808,18 +953,18 @@ void cycle() {
       
       break;
 
-    case LoadDone:
+    case ServerState::LoadDone:
       // LoadDone is triggered by the queue flush following the jump in Load.
       // We wait for the next ALE and begin Execute.
       handle_load_done_state();
       break;
 
-    case Prefetch:
+    case ServerState::Prefetch:
       // We are executing the prefetch routine.
       // Currently placeholder.
       break;
 
-    case EmuEnter:
+    case ServerState::EmuEnter:
       // We are executing the BRKEM routine.
       handle_emu_enter_state(q);
       break;
@@ -1834,35 +979,36 @@ void cycle() {
     //    other end conditions are possible.
     //  - Executing a HALT
     //  - Asserting NMI before the end of the instruction
-    case Execute:
+    case ServerState::Execute:
 
-      if ((!READ_MRDC_PIN || !READ_IORC_PIN) && CPU.bus_cycle == WRITE_CYCLE) {
+      cpu_mrdc = !Controller.readMRDCPin();
+      cpu_iodc = !Controller.readIORCPin();
+      cpu_mwtc = !Controller.readMWTCPin();
+      cpu_iowc = !Controller.readIOWCPin();
+
+      if (cpu_mwtc) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator");
+        ArduinoX86::Bus->mem_write(CPU.address_latch, CPU.data_bus, Controller.readBHEPin());
+      }
+
+      if ((cpu_mrdc || cpu_iodc) && CPU.bus_cycle == WRITE_CYCLE) {
         // CPU is reading from data bus. We assume that the client has called CmdWriteDataBus to set
         // the value of CPU.data_bus. Write it.
-        //data_bus_write(CPU.data_bus, CPU.data_width);
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-        //CPU.data_bus_resolved = true;
-
-        #if DEBUG_EXECUTE
-          debugPrintColor(ansi::green, "## EXECUTE: Wrote bus: ");
-          debugPrintlnColor(ansi::green, CPU.data_bus, 16);
-        #endif
+        Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE: Wrote bus: ");
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.data_bus, 16);
 
         if ((CPU.bus_state_latched == CODE) && (CPU.prefetching_store)) {
           //CPU.s_pc++;
-          #if DEBUG_STORE
-            debugPrintColor(ansi::yellow, "## EXECUTE: Wrote STORE PGM BYTE to bus: ");
-            debugPrintColor(ansi::yellow, CPU.data_bus, 16);
-            debugPrintColor(ansi::yellow, " new s_pc: ");
-            debugPrintlnColor(ansi::yellow, CPU.s_pc);
-          #endif
+          Controller.getBoard().debugPrint(DebugType::STORE, "## EXECUTE: Wrote STORE PGM BYTE to bus: ");
+          Controller.getBoard().debugPrint(DebugType::STORE,  CPU.data_bus, 16);
+          Controller.getBoard().debugPrint(DebugType::STORE, " new s_pc: ");
+          Controller.getBoard().debugPrintln(DebugType::STORE, CPU.s_pc);
         }
       }
 
       if (CPU.bus_state == HALT) {
-        #if DEBUG_EXECUTE
-          debugPrintlnColor(ansi::green, "## EXECUTE: Detected HALT - Setting NMI high to end program execution.");
-        #endif
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.");
         Controller.writePin(OutputPin::Nmi, true);
         break;
       }
@@ -1871,20 +1017,18 @@ void cycle() {
         // Use checkpoint "1" to specify that NMI has been detected. This just prevents the debug message from
         // printing every cycle after NMI.
         if (CPU.nmi_checkpoint == 0) {
-          #if DEBUG_EXECUTE
-            debugPrintlnColor(ansi::green, "## EXECUTE: Detected NMI high - Execute will end at IVT fetch.");
-          #endif
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI pin high - Execute will end at IVT fetch.");
           CPU.nmi_checkpoint = 1;
         }
-        if (!CPU.data_bus_resolved && !READ_MRDC_PIN) {
-          // NMI is active and CPU is reading memory.  Let's check if it is the NMI handler.
-          if (CPU.address_latch == 0x00008) {
-#if DEBUG_EXECUTE
-            debugPrintlnColor(ansi::green, "## EXECUTE: NMI high and fetching NMI IVT. Entering ExecuteFinalize...");
-#endif
-            CPU.nmi_terminate = true;
-            change_state(ExecuteFinalize);
-          }
+      }
+
+      if (Controller.readALEPin() && CPU.bus_state == MEMR) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.");
+        // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
+        if (CPU.address_latch == 0x00008) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...");
+          CPU.nmi_terminate = true;
+          ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
         }
       }
 
@@ -1898,10 +1042,11 @@ void cycle() {
     // If NMI is high during ExecuteFinalize, reading the NMI vector completely will reset the store program
     // PC and also transition to ExecuteDone. This is the newer method of ending program execution that
     // supports the 80186 without queue status lines.
-    case ExecuteFinalize:
+    case ServerState::ExecuteFinalize:
 
       if (READ_NMI_PIN) {
-        if (!CPU.data_bus_resolved && !READ_MRDC_PIN) {
+        if (!CPU.data_bus_resolved && !Controller.readMRDCPin()) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: CPU is reading...");
           // NMI is active and CPU is reading memory.  Let's check if it is the NMI handler.
           if (CPU.address_latch == 0x00008) {
             CPU.nmi_checkpoint = 1;
@@ -1912,27 +1057,41 @@ void cycle() {
             // This should hopefully be at the address of the NMI vector, so we can enter ExecuteDone
             run_address = calc_flat_address(STORE_SEG, 0);
             if (CPU.address_latch == run_address) {
-#if DEBUG_EXECUTE
-              debugPrintlnColor(ansi::green, "## EXECUTE_FINALIZE: Fetch at STORE_SEG.");
-#endif
-              change_state(ExecuteDone);
+              Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Fetch at STORE_SEG.");
+
+              if(CPU.nmi_buf_cursor == 0) {
+                Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: NMI stack cursor is 0. Probably a 286 CPU. Popping from BusEmulator.");
+                CPU.nmi_stack_frame = ArduinoX86::Bus->log_peek_call_frame();
+
+                Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Popped NMI stack frame. Flags: ");
+                Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.flags, 16);
+                Controller.getBoard().debugPrint(DebugType::EXECUTE, " CS: ");
+                Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.cs, 16);
+                Controller.getBoard().debugPrint(DebugType::EXECUTE, " IP: ");
+                Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_stack_frame.ip, 16);
+
+                // Write the NMI stack frame to the NMI stack buffer.
+                CPU.nmi_buf_cursor = 0;
+                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.flags, 0x00000, CPU.data_width);
+                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.cs, 0x00002, CPU.data_width);
+                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.ip, 0x00004, CPU.data_width);
+              }
+
+              ArduinoX86::Server.change_state(ServerState::ExecuteDone);
             }
-          } else if (CPU.nmi_checkpoint > 0 && CPU.v_pc < sizeof(NMI_VECTOR)) {
+          } 
+          else if (CPU.nmi_checkpoint > 0 && NMI_VECTOR.has_remaining()) {
             // Feed the CPU the NMI vector.
-            CPU.data_bus = read_program(NMI_VECTOR, sizeof NMI_VECTOR, &CPU.v_pc, CPU.address_latch, CPU.data_width);
-#if DEBUG_EXECUTE
-            debugPrintColor(ansi::green, "## EXECUTE_FINALIZE: Feeding CPU reset vector data: ");
-            debugPrintColor(ansi::green, CPU.data_bus, 16);
-            debugPrintColor(ansi::green, " new v_pc: ");
-            debugPrintlnColor(ansi::green, CPU.v_pc);
-#endif
+            CPU.data_bus = NMI_VECTOR.read(CPU.address_latch, CPU.data_width);
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Feeding CPU reset vector data: ");
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, " new v_pc: ");
+            Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.v_pc);
             CPU.data_bus_resolved = true;
-            data_bus_write(CPU.data_bus, CPU.data_width);
+            Controller.writeDataBus(CPU.data_bus, CPU.data_width);
 
             if (CPU.nmi_checkpoint == 1 && CPU.address_latch == 0x0000A) {
-#if DEBUG_EXECUTE
-              debugPrintlnColor(ansi::green, "## EXECUTE_FINALIZE: Read of NMI IVT with NMI pin high - Resetting STORE PC");
-#endif
+              Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Read of NMI IVT with NMI pin high - Resetting STORE PC");
               CPU.nmi_checkpoint = 2;
               CPU.data_bus_resolved = true;
               CPU.s_pc = 0;
@@ -1941,37 +1100,33 @@ void cycle() {
           }
         }
 
-        if (!CPU.data_bus_resolved && !READ_MWTC_PIN && CPU.nmi_checkpoint > 1) {
+        if (!CPU.data_bus_resolved && !Controller.readMWTCPin() && CPU.nmi_checkpoint > 1) {
           // NMI is active and CPU is writing memory. Probably to stack.
           write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.data_bus, CPU.address_latch, CPU.data_width);
-#if DEBUG_EXECUTE
-          debugPrintColor(ansi::green, "## EXECUTE_FINALIZE: Stack write: ");
-          debugPrintColor(ansi::green, CPU.data_bus, 16);
-          debugPrintColor(ansi::green, " New buf cursor: ");
-          debugPrintlnColor(ansi::green, CPU.nmi_buf_cursor);
-#endif
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Stack write: ");
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, " New buf cursor: ");
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_buf_cursor);
           CPU.data_bus_resolved = true;
         }
       }
 
-      if (!READ_MRDC_PIN && CPU.bus_state == PASV) {
+      if (!Controller.readMRDCPin() && CPU.bus_state == PASV) {
         // CPU is reading (MRDC active-low)
-        if (CPU.bus_state_latched == CODE) {
+        if (CPU.bus_state_latched == CODE) { 
           // CPU is fetching code
 
           // Since client does not cycle the CPU in this state, we have to fetch from the
           // STORE or EMU_EXIT program ourselves
-          CPU.data_bus = read_program(CPU.program, CPU.program_len, CPU.program_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::ProgramEnd;
-          data_bus_write(CPU.data_bus, CPU.data_width);
-#if DEBUG_STORE
-          debugPrintColor(ansi::green, "## EXECUTE_FINALIZE: Wrote next PGM word to bus: ");
-          debugPrintColor(ansi::green, CPU.data_bus, 16);
-          debugPrintColor(ansi::green, " new s_pc: ");
-          debugPrintlnColor(ansi::green, CPU.s_pc);
-#endif
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Wrote next PGM word to bus: ");
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+          Controller.getBoard().debugPrint(DebugType::EXECUTE, " new s_pc: ");
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.s_pc);
         } else {
-          data_bus_write(CPU.data_bus, CPU.data_width);
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         }
       }
 
@@ -1979,33 +1134,31 @@ void cycle() {
         // We read a flagged NOP, meaning the previous instruction has completed and it is safe to
         // execute the Store routine.
         if (CPU.in_emulation) {
-          change_state(EmuExit);
+          ArduinoX86::Server.change_state(ServerState::EmuExit);
         } else {
-          change_state(ExecuteDone);
+          ArduinoX86::Server.change_state(ServerState::ExecuteDone);
         }
       }
       break;
 
-    case EmuExit:
-      if (!READ_MRDC_PIN) {
+    case ServerState::EmuExit:
+      if (!Controller.readMRDCPin()) {
         // CPU is reading (MRDC active-low)
         if ((CPU.bus_state_latched == CODE) && (CPU.bus_state == PASV)) {
           // CPU is doing code fetch
           if (CPU.s_pc < sizeof EMU_EXIT_PROGRAM) {
             // Read code byte from EmuExit program
-            CPU.data_bus = read_program(EMU_EXIT_PROGRAM, sizeof EMU_EXIT_PROGRAM, &CPU.s_pc, CPU.address_latch, CPU.data_width);
-#if DEBUG_EMU
-            DEBUG_SERIAL.print("## EMUEXIT: fetching byte: ");
-            DEBUG_SERIAL.print(CPU.data_bus, 16);
-            DEBUG_SERIAL.print(" new s_pc: ");
-            DEBUG_SERIAL.println(CPU.s_pc);
-#endif
+            CPU.data_bus = EMU_EXIT_PROGRAM.read(CPU.address_latch, CPU.data_width);
+            Controller.getBoard().debugPrint(DebugType::EMU, "## EMUEXIT: fetching byte: ");
+            Controller.getBoard().debugPrint(DebugType::EMU, CPU.data_bus, 16);
+            Controller.getBoard().debugPrint(DebugType::EMU, " new s_pc: ");
+            Controller.getBoard().debugPrintln(DebugType::EMU, CPU.s_pc);
             CPU.data_type = QueueDataType::Program;
           } else {
             CPU.data_bus = OPCODE_DOUBLENOP;
             CPU.data_type = QueueDataType::ProgramEnd;
           }
-          data_bus_write(CPU.data_bus, CPU.data_width);
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         }
 
         if ((CPU.bus_state_latched == MEMR) && (CPU.bus_state == PASV)) {
@@ -2015,38 +1168,35 @@ void cycle() {
           if (CPU.width == BusWidthEight) {
             // Stack values will be read in two operations
             if (CPU.stack_r_op_ct == 0) {
-
-            } else if (CPU.stack_r_op_ct == 1) {
-
-            } else if (CPU.stack_r_op_ct == 2) {
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM CS pop (1/2)! ##");
-              DEBUG_SERIAL.println(CPU.load_regs.cs);
-#endif
+              // Skip
+            } 
+            else if (CPU.stack_r_op_ct == 1) {
+              // Skip
+            } 
+            else if (CPU.stack_r_op_ct == 2) {
+              Controller.getBoard().debugPrint(DebugType::EMU, "## Reading RETEM CS pop (1/2): ");
+              Controller.getBoard().debugPrintln(DebugType::EMU, CPU.load_regs.cs, 16);
               // Write the low byte of CS to the data bus
               data_bus_set_byte((uint8_t)(CPU.load_regs.cs));
-            } else if (CPU.stack_r_op_ct == 3) {
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM CS pop (2/2)! ##");
-              DEBUG_SERIAL.println(CPU.load_regs.cs);
-#endif
+            } 
+            else if (CPU.stack_r_op_ct == 3) {
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM CS pop (2/2)! ##");
+              Controller.getBoard().debugPrintln(DebugType::EMU, CPU.load_regs.cs, 16);
               // Write the high byte of CS to the data bus
               data_bus_set_byte((uint8_t)(CPU.load_regs.cs >> 8));
-            } else if (CPU.stack_r_op_ct == 4) {
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM flag pop (1/2)! ##");
-#endif
+            } 
+            else if (CPU.stack_r_op_ct == 4) {
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM flag pop (1/2)! ##");
               // Write the low byte of flags to the data bus
               data_bus_set_byte((uint8_t)(CPU.pre_emu_flags));
-            } else if (CPU.stack_r_op_ct == 5) {
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM flag pop (2/2)! ##");
-#endif
+            } 
+            else if (CPU.stack_r_op_ct == 5) {
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM flag pop (2/2)! ##");
               // Write the high byte of flags to the data bus
               data_bus_set_byte((uint8_t)(CPU.pre_emu_flags >> 8));
               // Exit emulation mode
               CPU.in_emulation = false;
-              change_state(ExecuteFinalize);
+              ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
             } else {
               // Not flags, just write 0's so we jump back to CS:IP 0000:0000
               CPU.data_bus = 0;
@@ -2054,58 +1204,47 @@ void cycle() {
             CPU.stack_r_op_ct++;
           } else {
             // Sixteen-bit data bus
-
             if (CPU.stack_r_op_ct == 0) {
-// IP is read in one operation
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM IP pop! ##");
-#endif
+              // IP is read in one operation
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM IP pop! ##");
               CPU.data_bus = 0;
             } else if (CPU.stack_r_op_ct == 1) {
-// CS is read in one operation
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM CS pop! ##");
-              DEBUG_SERIAL.println(CPU.load_regs.cs);
-#endif
+              // CS is read in one operation
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM CS pop! ##");
+              Controller.getBoard().debugPrintln(DebugType::EMU, CPU.load_regs.cs);
               // We can restore CS from the loaded registers since CS cannot be modified in 8080 emulation mode
               CPU.data_bus = CPU.load_regs.cs;
             } else if (CPU.stack_r_op_ct == 2) {
-// Flags will be read in one operation
-#if DEBUG_EMU
-              DEBUG_SERIAL.println("## Reading RETEM Flag pop! ##");
-#endif
+              // Flags will be read in one operation
+              Controller.getBoard().debugPrintln(DebugType::EMU, "## Reading RETEM Flag pop! ##");
               // CPU is writing to the data bus, latch value
               CPU.data_bus = CPU.pre_emu_flags;
               // Exit emulation mode
               CPU.in_emulation = false;
-              change_state(ExecuteFinalize);
+              ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
             }
             CPU.stack_r_op_ct++;
           }
-          data_bus_write(CPU.data_bus, CPU.data_width);
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         }
       }
 
-      if (!READ_MWTC_PIN && (CPU.bus_state_latched == MEMW) && (CPU.bus_state == PASV)) {
+      if (!Controller.readMWTCPin() && (CPU.bus_state_latched == MEMW) && (CPU.bus_state == PASV)) {
         // CPU is writing. This should only happen during EmuExit when we PUSH PSW
         // to save the 8080 flags.
         if (CPU.width == BusWidthEight) {
           // 8-bit data bus
           if (CPU.stack_w_op_ct == 0) {
-// Flags will be in first byte written (second byte will be AL)
-#if DEBUG_EMU
-            DEBUG_SERIAL.println("## Capturing PUSH PSW stack write! ##");
-#endif
+            // Flags will be in first byte written (second byte will be AL)
+            Controller.getBoard().debugPrint(DebugType::EMU, "## Capturing PUSH PSW stack write! ##");
             CPU.emu_flags = (uint8_t)CPU.data_bus;
           }
           CPU.stack_w_op_ct++;
         } else {
           // 16-bit data bus
           if (CPU.stack_w_op_ct == 0) {
-// Flags were pushed in one operation.
-#if DEBUG_EMU
-            DEBUG_SERIAL.println("## Capturing PUSH PSW stack write! ##");
-#endif
+            // Flags were pushed in one operation.
+            Controller.getBoard().debugPrintln(DebugType::EMU, "## Capturing PUSH PSW stack write! ##");
             CPU.emu_flags = (uint8_t)CPU.data_bus;
           }
           CPU.stack_w_op_ct++;
@@ -2114,82 +1253,70 @@ void cycle() {
 
       break;
 
-    case ExecuteDone:
+    case ServerState::ExecuteDone:
       // We sit in ExecuteDone state until the client requests a Store operation.
       // The client should not cycle the CPU in this state.
-      if (!READ_MRDC_PIN && CPU.bus_state == PASV) {
+      if (!Controller.readMRDCPin() && CPU.bus_state == PASV) {
         // CPU is reading (MRDC active-low)
-        data_bus_write(CPU.data_bus, CPU.data_width);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
 
         if ((CPU.bus_state_latched == CODE) && (CPU.prefetching_store)) {
           // Since client does not cycle the CPU in this state, we have to fetch from
           // STORE program ourselves
-
-          CPU.data_bus = read_program(CPU.program, CPU.program_len, CPU.program_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
           //CPU.data_bus = STORE_PROGRAM[CPU.s_pc++];
           CPU.data_type = QueueDataType::ProgramEnd;
-          data_bus_write(CPU.data_bus, CPU.data_width);
-#if DEBUG_STORE
-          DEBUG_SERIAL.print("## STORE: Wrote STORE PGM BYTE to bus (in EXECUTE_DONE): ");
-          DEBUG_SERIAL.print(CPU.data_bus, 16);
-          DEBUG_SERIAL.print(" new s_pc: ");
-          DEBUG_SERIAL.println(CPU.s_pc);
-#endif
-        } else {
-          DEBUG_SERIAL.println("## Invalid condition: ExecuteDone without loading STORE");
-          data_bus_write(CPU.data_bus, CPU.data_width);
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+          CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STORE:", CPU.data_bus);
+        } 
+        else {
+          Controller.getBoard().debugPrintln(DebugType::ERROR, "## Invalid condition: ExecuteDone without loading STORE");
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         }
       }
       break;
 
-    case Store:
+    case ServerState::Store:
       // We are executing the Store program.
-      if (!READ_MRDC_PIN && CPU.bus_state == PASV) {
+      if (!Controller.readMRDCPin() && CPU.bus_state == PASV) {
         // CPU is reading
 
         if (CPU.bus_state_latched == CODE) {
           // CPU is doing code fetch
-          if (CPU.s_pc < CPU.program_len) {
+          if (CPU.program->has_remaining()) {
             // Read code byte from store program
             //CPU.data_bus = STORE_PROGRAM[CPU.s_pc++];
-            CPU.data_bus = read_program(CPU.program, CPU.program_len, CPU.program_pc, CPU.address_latch, CPU.data_width);
-#if DEBUG_STORE
-            debugPrintColor(ansi::magenta, "## STORE: fetching code: ");
-            debugPrintColor(ansi::magenta, CPU.data_bus, 16);
-            debugPrintColor(ansi::magenta, " new s_pc: ");
-            debugPrintlnColor(ansi::magenta, CPU.s_pc);
-#endif
+            CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
+            CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STORE:", CPU.data_bus);
             CPU.data_type = QueueDataType::Program;
 
           } else {
             CPU.data_bus = OPCODE_DOUBLENOP;
             CPU.data_type = QueueDataType::ProgramEnd;
           }
-        } else {
+        } 
+        else {
           // CPU is reading something else. Stack?
           CPU.data_bus = read_program(NMI_STACK_BUFFER, sizeof NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.address_latch, CPU.data_width);
-#if DEBUG_STORE
-          debugPrintColor(ansi::magenta, "## STORE: Reading from stack: ");
-          debugPrintColor(ansi::magenta, CPU.data_bus, 16);
-          debugPrintColor(ansi::magenta, " new cursor: ");
-          debugPrintlnColor(ansi::magenta, CPU.nmi_buf_cursor);
-#endif
+          Controller.getBoard().debugPrint(DebugType::STORE, "## STORE: Read from stack: ");
+          Controller.getBoard().debugPrint(DebugType::STORE, CPU.data_bus, 16);
+          Controller.getBoard().debugPrint(DebugType::STORE, " new cursor: ");
+          Controller.getBoard().debugPrintln(DebugType::STORE, CPU.nmi_buf_cursor);
         }
-        data_bus_write(CPU.data_bus, CPU.data_width);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
       }
 
       // CPU is writing to memory address - this should only happen during readback when
       // the flags register is pushed to the stack (The only way to read the full flags)
-      if (!READ_MWTC_PIN && CPU.bus_state != PASV) {
-        CPU.data_bus = data_bus_read(CPU.data_width);
+      if (!Controller.readMWTCPin() && CPU.bus_state != PASV) {
+        CPU.data_bus = Controller.readDataBus(CPU.data_width);
 
         // Store program sets up SS:SP as 0:4, so write should be to the first four memory
         // addresses, for pushing IP and FLAGS.
         if (CPU.address_latch < 0x00004) {
 
-#if DEBUG_STORE
-          debugPrintlnColor(ansi::magenta, "## STORE Stack Push");
-#endif
+
+          Controller.getBoard().debugPrint(DebugType::STORE, "## STORE: Stack push!");
 
           // Write flags and IP to the register struct
           if (CPU.data_width == ActiveBusWidth::EightLow) {
@@ -2230,124 +1357,116 @@ void cycle() {
         } else {
           // We shouldn't be writing to any other addresses, something wrong happened
           if (CPU.address_latch == 0x00004) {
-            debugPrintlnColor(ansi::bright_red, "## TRAP detected in Store operation! Invalid flags?");
+            debugPrintlnColor(ansi::bright_red, "## STORE: TRAP detected in Store operation! Invalid flags?");
           }
 
-          debugPrintColor(ansi::bright_red, "## INVALID STORE MEMORY WRITE: ");
-          debugPrintlnColor(ansi::bright_red, CPU.address_latch, HEX);
+          Controller.getBoard().debugPrint(DebugType::ERROR, "## STORE: Invalid store memory write: ");
+          Controller.getBoard().debugPrintln(DebugType::ERROR, CPU.address_latch, HEX);
           set_error("Invalid store memory write");
           // TODO: handle error gracefully
         }
-#if DEBUG_STORE
-        debugPrintColor(DEBUG_STORE_COLOR, "## STORE: memory write: ");
-        debugPrintlnColor(DEBUG_STORE_COLOR, CPU.data_bus, HEX);
-#endif
+        Controller.getBoard().debugPrint(DebugType::STORE, "## STORE: memory write: ");
+        Controller.getBoard().debugPrintln(DebugType::STORE, CPU.data_bus, HEX);
       }
 
       // CPU is writing to IO address - this indicates we are saving a register value.
       // We structured the register struct in the right order, so we can overwrite it
       // directly.
-      if (!READ_IOWC_PIN) {
-#if DEBUG_STORE
-        debugPrintlnColor(DEBUG_STORE_COLOR, "## STORE: IO Write");
-#endif
+      if (!Controller.readIOWCPin()) {
+        Controller.getBoard().debugPrintln(DebugType::STORE, "## STORE: IO Write");
         if (CPU.address_latch == 0xFD) {
-// Write to 0xFD indicates end of store procedure.
+          // Write to 0xFD indicates end of store procedure.
 
-// Adjust IP by offset of CALL instruction.
-#if DEBUG_STORE
-          DEBUG_SERIAL.print("## Unadjusted IP: ");
-          DEBUG_SERIAL.println(CPU.post_regs.ip, HEX);
-#endif
+          // Adjust IP by offset of CALL instruction.
+          Controller.getBoard().debugPrint(DebugType::STORE, "## STORE: Unadjusted IP: ");
+          Controller.getBoard().debugPrintln(DebugType::STORE, CPU.post_regs.ip, HEX);
           //CPU.post_regs.ip -= 0x24;
           //CPU.post_regs.ip -= (0x24 + 6); // added 6 NOPs to start of STORE program
 
-          change_state(StoreDone);
-        } else {
-          CPU.data_bus = data_bus_read(CPU.data_width);
+          ArduinoX86::Server.change_state(ServerState::StoreDone);
+        } 
+        else {
+          CPU.data_bus = Controller.readDataBus(CPU.data_width);
 
           if (CPU.data_width == ActiveBusWidth::EightLow) {
             *CPU.readback_p = (uint8_t)CPU.data_bus;
             CPU.readback_p++;
           } else if (CPU.data_width == ActiveBusWidth::EightHigh) {
-            DEBUG_SERIAL.println("## Bad Data Bus Width during Store: EightHigh");
+            Controller.getBoard().debugPrintln(DebugType::ERROR, "## STORE: Bad Data Bus Width during Store: EightHigh");
           } else {
             *(uint16_t *)CPU.readback_p = CPU.data_bus;
             CPU.readback_p += 2;
           }
-
-#if DEBUG_STORE
-          debugPrintColor(ansi::bright_magenta, "## STORE: IO write: ");
-          debugPrintlnColor(ansi::bright_magenta, CPU.data_bus, HEX);
-#endif
+          Controller.getBoard().debugPrint(DebugType::STORE, "## STORE: IO write: ");
+          Controller.getBoard().debugPrintln(DebugType::STORE, CPU.data_bus, HEX);
         }
       }
       break;
 
-    case StoreDone:
+    case ServerState::StoreDone:
       // We are done with the Store program.
       break;
-    case Done:
+    case ServerState::Done:
       break;
   }
 
   // Print instruction state if tracing is enabled
-  switch (CPU.v_state) {
-    case Reset:
+  switch (ArduinoX86::Server.state()) {
+    case ServerState::Reset:
 #if TRACE_RESET
       print_cpu_state();
 #endif
       break;
-    case CpuId:
+    case ServerState::CpuId:
 #if TRACE_ID
       print_cpu_state();
 #endif
       break;
-    case CpuSetup:
+    case ServerState::CpuSetup:
 #if TRACE_SETUP
       print_cpu_state();
 #endif
       break;
-    case JumpVector:
+    case ServerState::JumpVector:
 #if TRACE_VECTOR
       print_cpu_state();
 #endif
       break;
-    case Load:  // FALLTHROUGH
-    case LoadDone:
+    case ServerState::Load:  // FALLTHROUGH
+    case ServerState::LoadDone:
 #if TRACE_LOAD
       print_cpu_state();
 #endif
       break;
-    case Prefetch:
+    case ServerState::Prefetch:
 #if TRACE_PREFETCH
       print_cpu_state();
 #endif
       break;
-    case EmuEnter:
+    case ServerState::EmuEnter:
 #if TRACE_EMU_ENTER
       print_cpu_state();
 #endif
       break;
-    case EmuExit:
+    case ServerState::EmuExit:
 #if TRACE_EMU_EXIT
       print_cpu_state();
 #endif
       break;
-    case Execute:
+    case ServerState::Execute:
 #if TRACE_EXECUTE
       print_cpu_state();
 #endif
       break;
-    case ExecuteDone:  // FALLTHROUGH
-    case ExecuteFinalize:
+    case ServerState::ExecuteDone:  // FALLTHROUGH
+    case ServerState::ExecuteFinalize:
 #if TRACE_FINALIZE
       print_cpu_state();
 #endif
       break;
-    case Done: // FALLTHROUGH
-    case StoreDone:  // FALLTHROUGH
-    case Store:
+    case ServerState::Done: // FALLTHROUGH
+    case ServerState::StoreDone:  // FALLTHROUGH
+    case ServerState::Store:
 #if TRACE_STORE
       print_cpu_state();
 #endif
@@ -2365,48 +1484,39 @@ void handle_fetch(uint8_t q) {
     //DEBUG_SERIAL.print("## T4 of CODE fetch. Q is: ");
     //DEBUG_SERIAL.println(q);
 
-#if DEBUG_QUEUE
-    debugPrintlnColor(DEBUG_QUEUE_COLOR, "## QUEUE: T4 of code fetch!");
-#endif
+   Controller.getBoard().debugPrintln(DebugType::QUEUE, "## QUEUE: T4 of code fetch!");
 
     if (q == QUEUE_FLUSHED) {
-#if DEBUG_QUEUE
-      debugPrintlnColor(DEBUG_QUEUE_COLOR, "## Queue flush during T4.");
-#endif
+      Controller.getBoard().debugPrintln(DebugType::QUEUE, "## Queue flush during T4.");
       if (CPU.queue.have_room(CPU.data_width)) {
         CPU.queue.push(CPU.data_bus, CPU.data_type, CPU.data_width);
       } else {
         // No room for fetch - this shouldn't happen!
-        debugPrintlnColor(ERROR_COLOR, "## Error: Invalid Queue Length++ ##");
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## Error: Invalid Queue Length++ ##");
       }
     } else {
       if (CPU.queue.have_room(CPU.data_width)) {
-#if DEBUG_QUEUE
-        debugPrintColor(DEBUG_QUEUE_COLOR, "## QUEUE: T4, Pushing data bus to queue: ");
-        debugPrintlnColor(DEBUG_QUEUE_COLOR, CPU.data_bus, HEX);
-#endif
+        Controller.getBoard().debugPrint(DebugType::QUEUE, "## QUEUE: T4, Pushing data bus to queue: ");
+        Controller.getBoard().debugPrintln(DebugType::QUEUE, CPU.data_bus, HEX);
         CPU.queue.push(CPU.data_bus, CPU.data_type, CPU.data_width);
       } else {
         // Shouldn't be here
-        debugPrintlnColor(ansi::bright_red, "## Error: Invalid Queue Length++ ##");
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## Error: Invalid Queue Length++ ##");
       }
     }
   }
 }
+
 void handle_cpuid_state(uint8_t q) {
 
   if (q == QUEUE_FIRST) {
     if (CPU.cpuid_queue_reads == 0) {
-#if DEBUG_ID
-      debugPrintlnColor(DEBUG_ID_COLOR, "## CPUID: Starting CPUID counter! ##");
-#endif
+      Controller.getBoard().debugPrintln(DebugType::ID, "## CPUID: Starting CPUID counter! ##");
       CPU.cpuid_counter = 0;
     } else if (CPU.cpuid_queue_reads == 1) {
-#if DEBUG_ID
-      debugPrintColor(DEBUG_ID_COLOR, "## CPUID: counter stopped at: ");
-      debugPrintColor(DEBUG_ID_COLOR, CPU.cpuid_counter);
-      debugPrintlnColor(DEBUG_ID_COLOR, " ##");
-#endif
+      Controller.getBoard().debugPrint(DebugType::ID, "## CPUID: CPUID counter started at: ");
+      Controller.getBoard().debugPrint(DebugType::ID, CPU.cpuid_counter);
+      Controller.getBoard().debugPrintln(DebugType::ID, " ##");
       detect_cpu_type(CPU.cpuid_counter);
     }
     CPU.cpuid_queue_reads++;
@@ -2415,43 +1525,34 @@ void handle_cpuid_state(uint8_t q) {
   // Change state after we have executed a minimum number of instructions
   if (CPU.cpuid_queue_reads > 4) {
 #if USE_SETUP_PROGRAM
-    change_state(CpuSetup);
+    ArduinoX86::Server.change_state(ServerState::CpuSetup);
 #else
-    change_state(JumpVector);
+    ArduinoX86::Server.change_state(ServerState::JumpVector);
 #endif
   }
 
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state == CODE) {
       // We are reading a code byte
 
       // Feed the program if we haven't this bus cycle.
-      if (!CPU.data_bus_resolved && (CPU.v_pc < sizeof CPUID_PROGRAM)) {
+      if (!CPU.data_bus_resolved && (CPU.program->has_remaining())) {
         // Feed CPU ID instruction to CPU.
-        CPU.data_bus = read_program(CPUID_PROGRAM, sizeof CPUID_PROGRAM, &CPU.v_pc, CPU.address_latch, CPU.data_width);
+        CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
         CPU.data_type = QueueDataType::Program;
-        data_bus_write(CPU.data_bus, CPU.data_width);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
 
-#if DEBUG_ID
-        debugPrintColor(DEBUG_ID_COLOR, "## CPUID: Writing CPUID program to bus: ");
-        debugPrintColor(DEBUG_ID_COLOR, CPU.data_bus, 16);
-        debugPrintColor(DEBUG_ID_COLOR, " new pc: ");
-        debugPrintColor(DEBUG_ID_COLOR, CPU.v_pc);
-        debugPrintColor(DEBUG_ID_COLOR, "/");
-        debugPrintlnColor(DEBUG_ID_COLOR, sizeof CPUID_PROGRAM);
-#endif
+        CPU.program->debug_print(Controller.getBoard(), DebugType::ID, "## CPUID: ", CPU.data_bus);
       }
     }
   }
 
-  if (!READ_MWTC_PIN && READ_TEST_PIN) {
+  if (!Controller.readMWTCPin() && READ_TEST_PIN) {
     // FPU is writing to bus
     if (CPU.data_bus == 0x03FF) {
-// Have an 8087!
-#if DEBUG_ID
-      debugPrintlnColor(DEBUG_ID_COLOR, "## CPUID: Detected 8087 status word write!");
-#endif
+      // Have an 8087!
+      Controller.getBoard().debugPrintln(DebugType::ID, "## CPUID: Detected 8087 status word write!");
       // This doesn't do anything atm besides set an 8087
       detect_fpu_type();
     }
@@ -2463,7 +1564,7 @@ void handle_cpuid_state(uint8_t q) {
 // they can be used by the cpu_server. Currently the only CPUs that need setup are the 188 and 186
 // which have to have interrupts enabled via the PCB as they are masked off at RESET.
 void handle_cpu_setup_state() {
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state == CODE) {
       // We are reading a code byte
@@ -2472,9 +1573,9 @@ void handle_cpu_setup_state() {
       if (!CPU.data_bus_resolved) {
         if (CPU.v_pc < sizeof SETUP_PROGRAM) {
           // Feed SETUP_PROGRAM instruction to CPU.
-          CPU.data_bus = read_program(SETUP_PROGRAM, sizeof SETUP_PROGRAM, &CPU.v_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = SETUP_PROGRAM.read(CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::Program;
-          data_bus_write(CPU.data_bus, CPU.data_width);
+          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         } else {
           // Ran out of program, so return NOP. Doesn't matter what we feed
           // as queue will be reset.
@@ -2486,7 +1587,7 @@ void handle_cpu_setup_state() {
         debugPrintlnColor(ansi::cyan, CPU.data_bus, 16);
 #endif
         CPU.data_bus_resolved = true;
-        data_bus_write(CPU.data_bus, CPU.data_width);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
       }
     }
   }
@@ -2500,21 +1601,21 @@ void handle_cpu_setup_state() {
       debugPrintlnColor(ansi::cyan, CPU.address_latch, 16);
 #endif
       // Transition to Load state.
-      change_state(Load);
+      ArduinoX86::Server.change_state(ServerState::Load);
     }
   }
 }
 
 void handle_jump_vector_state(uint8_t q) {
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state_latched == CODE) {
       // We are reading a code byte.
       // If the data bus hasn't been resolved this m-cycle, feed in the JUMP_VECTOR program
       if (!CPU.data_bus_resolved) {
-        if (CPU.v_pc < sizeof JUMP_VECTOR) {
+        if (CPU.program->has_remaining()) {
           // Feed jump instruction to CPU
-          CPU.data_bus = read_program(JUMP_VECTOR, sizeof JUMP_VECTOR, &CPU.v_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::Program;
         } else {
           // Ran out of program, so return NOP. Doesn't matter what we feed
@@ -2522,16 +1623,12 @@ void handle_jump_vector_state(uint8_t q) {
           CPU.data_bus = read_nops(CPU.data_width);
           CPU.data_type = QueueDataType::ProgramEnd;
         }
-#if DEBUG_VECTOR
-        debugPrintColor(DEBUG_VECTOR_COLOR, "## Writing JUMP_VECTOR program to bus: ");
-        debugPrintColor(DEBUG_VECTOR_COLOR, CPU.data_bus, 16);
-        debugPrintColor(DEBUG_VECTOR_COLOR, " new pc: ");
-        debugPrintlnColor(DEBUG_VECTOR_COLOR, CPU.v_pc);
-#endif
+
+        CPU.program->debug_print(Controller.getBoard(), DebugType::VECTOR, "## JUMP_VECTOR: ", CPU.data_bus);
         CPU.data_bus_resolved = true;
         
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-        //data_bus_write(CPU.data_bus, CPU.data_width);
+        //Controller.writeDataBus(CPU.data_bus, CPU.data_width);
       }
     }
   }
@@ -2540,27 +1637,24 @@ void handle_jump_vector_state(uint8_t q) {
     // Jump is finished on first address latch of LOAD_SEG:0
     uint32_t dest = calc_flat_address(LOAD_SEG, 0);
     if (dest == CPU.address_latch) {
-#if DEBUG_VECTOR
-      debugPrintColor(ansi::cyan, "## ALE at LOAD_SEG. Transitioning to Load state. SEG: ");
-      debugPrintlnColor(ansi::cyan, CPU.address_latch, 16);
-#endif
-      // Transition to Load state.
-      change_state(Load);
+      Controller.getBoard().debugPrint(DebugType::VECTOR, "## ALE at LOAD_SEG. Transitioning to Load state. SEG: ");
+      Controller.getBoard().debugPrintln(DebugType::VECTOR, CPU.address_latch, 16);
+      ArduinoX86::Server.change_state(ServerState::Load);
     }
   }
 }
 
 void handle_loadall_286() {
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state_latched == CODE) {
       // We are reading a code byte
 
       // If we haven't resolved the data bus this bus cycle...
       if (!CPU.data_bus_resolved) {
-        if (CPU.v_pc < CPU.program_len) {
+        if (CPU.program->has_remaining()) {
           // Feed load program to CPU
-          CPU.data_bus = read_program(CPU.program, CPU.program_len, CPU.program_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::Program;
         } else {
           // Ran out of program, so return NOP. JMP cs:ip will actually fetch once before SUSP,
@@ -2608,40 +1702,32 @@ void handle_loadall_286() {
     debugPrintColor(ansi::green, "## LOADALL_286: Detected jump to new CS:IP to trigger transition into Execute");
     debugPrintlnColor(ansi::green, CPU.data_bus, 16);
 #endif
-    change_state(Execute);
+    ArduinoX86::Server.change_state(ServerState::Execute);
   }
 }
 
 void handle_load_state(uint8_t q) {
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state_latched == CODE) {
       // We are reading a code byte
 
       // If we haven't resolved the data bus this bus cycle...
       if (!CPU.data_bus_resolved) {
-        if (CPU.v_pc < CPU.program_len) {
+        if (CPU.program->has_remaining()) {
           // Feed load program to CPU
-          CPU.data_bus = read_program(CPU.program, CPU.program_len, CPU.program_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::Program;
         } else {
           // Ran out of program, so return NOP. JMP cs:ip will actually fetch once before SUSP,
           // so we wil see this NOP prefetched.
 
-#if (DATA_BUS_SIZE == 1)
-          CPU.data_bus = OPCODE_NOP;
-#else
           CPU.data_bus = OPCODE_DOUBLENOP;
-#endif
-
           CPU.data_type = QueueDataType::ProgramEnd;
           //change_state(LoadDone);
         }
-#if DEBUG_LOAD
-        debugPrintColor(ansi::green, "## Writing LOAD program to bus: ");
-        debugPrintlnColor(ansi::green, CPU.data_bus, 16);
-#endif
-        
+        Controller.getBoard().debugPrint(DebugType::LOAD, "## LOAD: Writing LOAD program to bus: ");
+        Controller.getBoard().debugPrint(DebugType::LOAD, CPU.data_bus, 16);
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         CPU.data_bus_resolved = true;
       }
@@ -2653,8 +1739,7 @@ void handle_load_state(uint8_t q) {
         // This should only occur during Load when flags are popped from 0:0
         if (CPU.address_latch < 0x00002) {
           // First two bytes of LOAD_PROGRAM were patched with flags
-          uint16_t dummy_pc = (uint16_t)CPU.address_latch;
-          CPU.data_bus = read_program(LOAD_PROGRAM, sizeof LOAD_PROGRAM, &dummy_pc, CPU.address_latch, CPU.data_width);
+          CPU.data_bus = LOAD_PROGRAM.read_at(0x00000, CPU.address_latch, CPU.data_width);
           CPU.data_type = QueueDataType::Program;
           Controller.writeDataBus(CPU.data_bus, CPU.data_width);
           CPU.data_bus_resolved = true;
@@ -2673,7 +1758,7 @@ void handle_load_state(uint8_t q) {
     debugPrintlnColor(ansi::green, "## Detected queue flush to trigger transition into LoadDone");
 #endif
     // Queue flush after final jump triggers next state.
-    change_state(LoadDone);
+    ArduinoX86::Server.change_state(ServerState::LoadDone);
   }
 #else
   // We can't tell when the queue flushed but we can see the initial code fetch at the new CS:IP.
@@ -2685,7 +1770,7 @@ void handle_load_state(uint8_t q) {
     debugPrintColor(ansi::green, "## 186: Detected jump to new CS:IP to trigger transition into Execute");
     debugPrintlnColor(ansi::green, CPU.data_bus, 16);
 #endif
-    change_state(Execute);
+    ArduinoX86::Server.change_state(ServerState::Execute);
   }
 #endif
 }
@@ -2701,21 +1786,21 @@ void handle_load_done_state() {
   if (Controller.readALEPin() && (CPU.bus_state == CODE)) {
     // First bus cycle of the instruction to execute. Transition to Execute or EmuEnter as appropriate.
     if (CPU.do_emulation && !CPU.in_emulation) {
-      change_state(EmuEnter);
+      ArduinoX86::Server.change_state(ServerState::EmuEnter);
     } else {
-      change_state(Execute);
+      ArduinoX86::Server.change_state(ServerState::Execute);
     }
   }
 }
 
 void handle_emu_enter_state(uint8_t q) {
-  if (!READ_MRDC_PIN) {
+  if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state == CODE) {
       // We are reading a code byte
-      if (CPU.v_pc < sizeof EMU_ENTER_PROGRAM) {
+      if (CPU.program->has_remaining()) {
         // Feed load program to CPU
-        CPU.data_bus = read_program(EMU_ENTER_PROGRAM, sizeof EMU_ENTER_PROGRAM, &CPU.v_pc, CPU.address_latch, CPU.data_width);
+        CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
         CPU.data_type = QueueDataType::Program;
       } else {
         // Ran out of program, so return NOP.
@@ -2723,7 +1808,7 @@ void handle_emu_enter_state(uint8_t q) {
         CPU.data_type = QueueDataType::ProgramEnd;
         //change_state(LoadDone);
       }
-      data_bus_write(CPU.data_bus, CPU.data_width);
+      Controller.writeDataBus(CPU.data_bus, CPU.data_width);
     }
 
     if (CPU.bus_state == MEMR) {
@@ -2743,12 +1828,9 @@ void handle_emu_enter_state(uint8_t q) {
           DEBUG_SERIAL.println("## Reading BRKEM segment! ##");
 #endif
         }
-        // Feed a dummy pc variable to read_program - the actual address is determined from
-        // the address latch
-        uint16_t dummy_pc = (uint16_t)(CPU.address_latch - vector_base);
-        CPU.data_bus = read_program(EMU_ENTER_PROGRAM, sizeof EMU_ENTER_PROGRAM, &dummy_pc, CPU.address_latch, CPU.data_width);
+        CPU.data_bus = EMU_ENTER_PROGRAM.read_at(vector_base, CPU.address_latch, CPU.data_width);
         CPU.data_type = QueueDataType::Program;
-        data_bus_write(CPU.data_bus, CPU.data_width);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
       } else {
         // Unexpected read above address 0x00001
         DEBUG_SERIAL.println("## INVALID MEM READ DURING EMUENTER ##");
@@ -2756,7 +1838,7 @@ void handle_emu_enter_state(uint8_t q) {
     }
   }
 
-  if (!READ_MWTC_PIN) {
+  if (!Controller.readMWTCPin()) {
     if (CPU.width == BusWidthEight) {
       // Flags will be read in two operations
       if (CPU.stack_w_op_ct == 0) {
@@ -2778,7 +1860,7 @@ void handle_emu_enter_state(uint8_t q) {
         DEBUG_SERIAL.println("## Reading BRKEM flag push! ##");
 #endif
         // CPU is writing to the data bus, latch value
-        CPU.data_bus = data_bus_read(CPU.data_width);
+        CPU.data_bus = Controller.readDataBus(CPU.data_width);
         CPU.pre_emu_flags = CPU.data_bus;
       }
       CPU.stack_w_op_ct++;
@@ -2788,7 +1870,7 @@ void handle_emu_enter_state(uint8_t q) {
   if (q == QUEUE_FLUSHED) {
     // Queue flush after final jump triggers next state.
     CPU.in_emulation = true;
-    change_state(LoadDone);
+    ArduinoX86::Server.change_state(ServerState::LoadDone);
   }
 }
 
@@ -2812,18 +1894,18 @@ bool is_transfer_done() {
   switch (CPU.bus_state_latched) {
     case IOR:
       // IORC is active-low, so we are returning true if it is off
-      return READ_IORC_PIN;
+      return Controller.readIORCPin();
     case IOW:
       // IOWC is active-low, so we are returning true if it is off
-      return READ_IOWC_PIN;
+      return Controller.readIOWCPin();
     case CODE:
       // FALLTHRU
     case MEMR:
       // MRDC is active-low, so we are returning true if it is off
-      return READ_MRDC_PIN;
+      return Controller.readMRDCPin();
     case MEMW:
       // MWTC is active-low, so we are returning true if it is off
-      return READ_MWTC_PIN;
+      return Controller.readMWTCPin();
     default:
       // Rely on external READY pin
       return READ_READY_PIN;
@@ -2902,7 +1984,7 @@ void do_frame_update() {
     char buf[6];
     snprintf(buf, sizeof(buf), "%05lX", CPU.address_latch);
     screen->updateCell(0, 1, screen->makeColor(128, 128, 255), buf);
-    screen->updateCell(1, 1, screen->makeColor(128, 128, 255), MACHINE_STATE_STRINGS[CPU.v_state]);
+    screen->updateCell(1, 1, screen->makeColor(128, 128, 255), ArduinoX86::Server.get_state_string(ArduinoX86::Server.state()));
     fps_counter++;
   }
 
@@ -2963,95 +2045,5 @@ void loop() {
   }
 
   do_frame_update();
-
-  switch (SERVER.c_state) {
-
-    case WaitingForCommand:
-      if (INBAND_SERIAL.available() > 0) {
-        uint8_t cmd_byte = INBAND_SERIAL.read();
-
-        // DEBUG_SERIAL.print("Received opcode: 0x");
-        // DEBUG_SERIAL.println(cmd_byte, HEX);
-
-        debug_cmd(CMD_STRINGS[cmd_byte], "received!");
-        if (cmd_byte >= (uint8_t)CmdInvalid) {
-          send_fail();
-          break;
-        }
-
-        // Valid command, enter ReadingCommand state
-        SERVER.cmd = (server_command)cmd_byte;
-
-        if (cmd_byte == 0) {
-          // We ignore command byte 0 (null command)
-          break;
-        } else if (cmd_byte > MAX_CMD) {
-          // Cmd is out of range
-          debug_proto("Command out of range!");
-          break;
-        } else if (CMD_INPUTS[cmd_byte] > 0) {
-          // This command requires input bytes before it is executed.
-          SERVER.cmd = (server_command)cmd_byte;
-          SERVER.cmd_byte_n = 0;
-          SERVER.c_state = ReadingCommand;
-          SERVER.cmd_bytes_expected = CMD_INPUTS[cmd_byte];
-          SERVER.cmd_start_time = millis();  // Get start time for timeout calculation
-        } else {
-          // Command requires no input, execute immediately
-          bool result = V_TABLE[cmd_byte - 1]();
-          if (result) {
-            debug_proto("Command OK!");
-            send_ok();
-          } else {
-            debug_proto("Command FAIL!");
-            send_fail();
-          }
-        }
-      }
-      break;
-
-    case ReadingCommand:
-      // The previously specified command requires parameter bytes, so read them in, or timeout
-      if (INBAND_SERIAL.available() > 0) {
-        uint8_t cmd_byte = INBAND_SERIAL.read();
-
-        if (SERVER.cmd_byte_n < MAX_COMMAND_BYTES) {
-          // Stil have bytes yet to read
-          COMMAND_BUFFER[SERVER.cmd_byte_n] = cmd_byte;
-          SERVER.cmd_byte_n++;
-
-          if (SERVER.cmd_byte_n == SERVER.cmd_bytes_expected) {
-            // We have received enough parameter bytes to execute the in-progress command.
-            bool result = V_TABLE[SERVER.cmd - 1]();
-            if (result) {
-              send_ok();
-            } else {
-              send_fail();
-            }
-
-            // Revert to listening for command
-            SERVER.cmd_byte_n = 0;
-            SERVER.cmd_bytes_expected = 0;
-            SERVER.c_state = WaitingForCommand;
-          }
-        }
-      } else {
-        // No bytes received yet, so keep track of how long we've been waiting
-        uint32_t now = millis();
-        uint32_t elapsed = now - SERVER.cmd_start_time;
-
-        if (elapsed >= CMD_TIMEOUT) {
-          // Timed out waiting for parameter bytes. Send failure and revert to listening for command
-          SERVER.cmd_byte_n = 0;
-          SERVER.cmd_bytes_expected = 0;
-          SERVER.c_state = WaitingForCommand;
-          debug_proto("Command timeout!");
-          send_fail();
-        }
-      }
-      break;
-
-    case ExecutingCommand:
-      break;
-  }
+  ArduinoX86::Server.run();
 }

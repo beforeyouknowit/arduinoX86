@@ -25,7 +25,7 @@
 
 #include <Arduino.h>
 #include "../gpio_pins.h"    // Your GPIO macros like WRITE_PIN_D04, etc.
-#include "../hat_config.h"   // Board-specific configuration and pin mappings
+#include "../serial_config.h"   // Board-specific configuration and pin mappings
 
 #include "../DebugPrint.h"   // Debug print mixin
 #include "../hats/HatTraits.h" // Hat-specific traits

@@ -27,13 +27,14 @@
 void cycle();
 
 #include <arduinoX86.h>
-#include <hat_config.h>
+#include <serial_config.h>
 #include <gpio_pins.h>
 #include <hats/HatBase.h>
 #include <hats/HatBase.h>
 #include <hats/Pins.h>
 #include <DebugFilter.h>
 
+#define ADDRESS_SPACE_MASK 0xFFFFF // 20-bit address space for 8088
 #define WRITE_CYCLE T3
 
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \

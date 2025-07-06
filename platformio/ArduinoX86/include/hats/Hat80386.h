@@ -27,7 +27,7 @@
 void cycle();
 
 #include <arduinoX86.h>
-#include <hat_config.h>
+#include <serial_config.h>
 #include <gpio_pins.h>
 #include <BusTypes.h>
 #include <hats/HatBase.h>

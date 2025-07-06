@@ -1,0 +1,1094 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#include <Arduino.h>
+#include <config.h>
+
+#include <Hat.h>
+#include <Board.h>
+#include <globals.h>
+#include <BoardController.h>
+#include <CommandServer.h>
+#include <DebugFilter.h>
+
+#include <cstdarg>
+
+#include <programs.h>
+
+template<typename BoardType, typename HatType>
+CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatType>& controller_)
+  : controller_(controller_)
+{}
+
+
+/// @brief Runs the command server, processing incoming commands and executing them.
+/// @tparam BoardType 
+/// @tparam HatType 
+template<typename BoardType, typename HatType>
+void CommandServer<BoardType,HatType>::run()
+{
+
+  switch (commandState_) {
+
+    case CommandState::WaitingForCommand:
+      if (proto_available() > 0) {
+        uint8_t cmd_byte = proto_read();
+
+        // DEBUG_SERIAL.print("Received opcode: 0x");
+        // DEBUG_SERIAL.println(cmd_byte, HEX);
+
+        if (cmd_byte >= static_cast<uint8_t>(ServerCommand::CmdInvalid)) {
+          send_fail();
+          break;
+        }
+
+        // Valid command, enter ReadingCommand state
+        cmd_ = static_cast<ServerCommand>(cmd_byte);
+        debug_cmd("received!");
+
+        size_t command_bytes = get_command_input_bytes(cmd_);
+
+        if (cmd_ == ServerCommand::CmdNone) {
+          // We ignore command byte 0 (null command)
+          break;
+        } else if (command_bytes > 0) {
+          // This command requires input bytes before it is executed.
+          commandByteN_ = 0;
+          commandBytesExpected_ = command_bytes;
+          commandStartTime_ = millis();  // Get start time for timeout calculation
+          commandState_ = CommandState::ReadingCommand;
+        } else {
+          // Command requires no input, so execute it immediately
+          bool result = dispatch_command(cmd_);
+          if (result) {
+            debug_proto("Command OK!");
+            send_ok();
+          } else {
+            debug_proto("Command FAIL!");
+            send_fail();
+          }
+        }
+      }
+      break;
+
+    case CommandState::ReadingCommand:
+      // The previously specified command requires parameter bytes, so read them in, or timeout
+      if (proto_available() > 0) {
+        // TODO: Read more than one byte at a time if available.
+        uint8_t param_byte = proto_read();
+
+        if (commandByteN_ < MAX_COMMAND_BYTES) {
+          commandBuffer_[commandByteN_++] = param_byte;
+
+          if (commandByteN_ == commandBytesExpected_) {
+            // We have received enough parameter bytes to execute the in-progress command.
+            bool result = dispatch_command(cmd_);
+            if (result) {
+              send_ok();
+            } else {
+              send_fail();
+            }
+
+            // Revert to listening for command
+            commandByteN_ = 0;
+            commandBytesExpected_ = 0;
+            commandState_ = CommandState::WaitingForCommand;
+          }
+        }
+      } else {
+        // No bytes received yet, so keep track of how long we've been waiting
+        uint32_t now = millis();
+        uint32_t elapsed = now - commandStartTime_;
+
+        if (elapsed >= CMD_TIMEOUT) {
+          // Timed out waiting for parameter bytes. Send failure and revert to listening for command
+          commandByteN_ = 0;
+          commandBytesExpected_ = 0;
+          commandState_ = CommandState::WaitingForCommand;
+          debug_proto("Command timeout!");
+          send_fail();
+        }
+      }
+      break;
+
+    case CommandState::ExecutingCommand:
+      break;
+  }
+}
+
+/// @brief Returns the name of the command based on the ServerCommand enum.
+/// This is useful for debugging and logging purposes.
+/// @tparam BoardType 
+/// @tparam HatType 
+/// @param cmd The command to get the name of.
+/// @return Name of the command as a constant C string.
+template<typename BoardType, typename HatType>
+const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cmd) {
+  switch(cmd) {
+      case ServerCommand::CmdNone: return "CmdNone";
+      case ServerCommand::CmdVersion: return "CmdVersion";
+      case ServerCommand::CmdReset: return "CmdReset";
+      case ServerCommand::CmdLoad: return "CmdLoad";
+      case ServerCommand::CmdCycle: return "CmdCycle";
+      case ServerCommand::CmdReadAddressLatch: return "CmdReadAddressLatch";
+      case ServerCommand::CmdReadStatus: return "CmdReadStatus";
+      case ServerCommand::CmdRead8288Command: return "CmdRead8288Command";
+      case ServerCommand::CmdRead8288Control: return "CmdRead8288Control";
+      case ServerCommand::CmdReadDataBus: return "CmdReadDataBus";
+      case ServerCommand::CmdWriteDataBus: return "CmdWriteDataBus";
+      case ServerCommand::CmdFinalize: return "CmdFinalize";
+      case ServerCommand::CmdBeginStore: return "CmdBeginStore";
+      case ServerCommand::CmdStore: return "CmdStore";
+      case ServerCommand::CmdQueueLen: return "CmdQueueLen";
+      case ServerCommand::CmdQueueBytes: return "CmdQueueBytes";
+      case ServerCommand::CmdWritePin: return "CmdWritePin";
+      case ServerCommand::CmdReadPin: return "CmdReadPin";
+      case ServerCommand::CmdGetProgramState: return "CmdGetProgramState";
+      case ServerCommand::CmdLastError: return "CmdLastError";
+      case ServerCommand::CmdGetCycleState: return "CmdGetCycleState";
+      case ServerCommand::CmdAvailable00: return "CmdAvailable00";
+      case ServerCommand::CmdPrefetchStore: return "CmdPrefetchStore";
+      case ServerCommand::CmdReadAddress: return "CmdReadAddress";
+      case ServerCommand::CmdCpuType: return "CmdCpuType";
+      case ServerCommand::CmdEmulate8080: return "CmdEmulate8080";
+      case ServerCommand::CmdPrefetch: return "CmdPrefetch";
+      case ServerCommand::CmdInitScreen: return "CmdInitScreen";
+      case ServerCommand::CmdInvalid: return "CmdInvalid";
+      default: return "Unknown";
+  }
+}
+
+template<typename BoardType, typename HatType>
+const char* CommandServer<BoardType, HatType>::get_state_string(ServerState state) {
+  switch(state) {
+      case ServerState::Reset: return "Reset";
+      case ServerState::CpuId: return "CpuId";
+      case ServerState::CpuSetup: return "CpuSetup";
+      case ServerState::JumpVector: return "JumpVector";
+      case ServerState::Load: return "Load";
+      case ServerState::LoadDone: return "LoadDone";
+      case ServerState::EmuEnter: return "EmuEnter";
+      case ServerState::Execute: return "Execute";
+      case ServerState::ExecuteFinalize: return "ExecuteFinalize";
+      case ServerState::ExecuteDone: return "ExecuteDone";
+      case ServerState::EmuExit: return "EmuExit";
+      case ServerState::Store: return "Store";
+      case ServerState::StoreDone: return "StoreDone";
+      case ServerState::Done: return "Done";
+      default: return "Invalid";
+  }
+}
+
+template<typename BoardType, typename HatType>
+char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
+  switch(state) {
+      case ServerState::Reset: return 'R';
+      case ServerState::CpuId: return 'I';
+      case ServerState::CpuSetup: return 'C';
+      case ServerState::JumpVector: return 'J';
+      case ServerState::Load: return 'L';
+      case ServerState::LoadDone: return 'M';
+      case ServerState::EmuEnter: return '8';
+      case ServerState::Prefetch: return 'P';
+      case ServerState::Execute: return 'E';
+      case ServerState::ExecuteFinalize: return 'F';
+      case ServerState::ExecuteDone: return 'X';
+      case ServerState::EmuExit: return '9';
+      case ServerState::Store: return 'S';
+      case ServerState::StoreDone: return 'T';
+      case ServerState::Done: return 'D';
+      default: return '?';
+  }
+}
+
+/// @brief Dispatches a command based on the command byte received.
+/// @tparam BoardType
+/// @tparam HatType
+/// @param cmd_byte The command byte to dispatch.
+/// @return True if the command was successfully dispatched, false otherwise.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
+  switch(cmd) {
+    case ServerCommand::CmdNone:
+        return cmd_null();
+    case ServerCommand::CmdVersion:
+        return cmd_version();
+    case ServerCommand::CmdReset:
+        return cmd_reset();
+    case ServerCommand::CmdLoad:
+        return cmd_load();
+    case ServerCommand::CmdCycle:
+        return cmd_cycle();
+    case ServerCommand::CmdReadAddressLatch:
+        return cmd_read_address_latch();
+    case ServerCommand::CmdReadStatus:
+        return cmd_read_status();
+    case ServerCommand::CmdRead8288Command:
+        return cmd_read_8288_command();
+    case ServerCommand::CmdRead8288Control:
+        return cmd_read_8288_control();
+    case ServerCommand::CmdReadDataBus:
+        return cmd_read_data_bus();
+    case ServerCommand::CmdWriteDataBus:
+        return cmd_write_data_bus();
+    case ServerCommand::CmdFinalize:
+        return cmd_finalize();
+    case ServerCommand::CmdBeginStore:
+        return cmd_begin_store();
+    case ServerCommand::CmdStore:
+        return cmd_store();
+    case ServerCommand::CmdQueueLen:
+        return cmd_queue_len();
+    case ServerCommand::CmdQueueBytes:
+        return cmd_queue_bytes();
+    case ServerCommand::CmdWritePin:
+        return cmd_write_pin();
+    case ServerCommand::CmdReadPin:
+        return cmd_read_pin();
+    case ServerCommand::CmdGetProgramState:
+        return cmd_get_program_state();
+    case ServerCommand::CmdLastError:
+        return cmd_get_last_error();
+    case ServerCommand::CmdGetCycleState:
+        return cmd_get_cycle_state();
+    case ServerCommand::CmdAvailable00:
+        return cmd_null();
+    case ServerCommand::CmdPrefetchStore:
+        return cmd_prefetch_store();
+    case ServerCommand::CmdReadAddress:
+        return cmd_read_address();
+    case ServerCommand::CmdCpuType:
+        return cmd_cpu_type();
+    case ServerCommand::CmdEmulate8080:
+        return cmd_emu8080();
+    case ServerCommand::CmdPrefetch:
+        return cmd_prefetch();
+    case ServerCommand::CmdInitScreen:
+        return cmd_init_screen();
+    case ServerCommand::CmdInvalid:
+    default:
+        return cmd_invalid();
+  }
+}
+
+/// @brief Handle the version command. This is the first command sent upon opening a serial port to discover an ArduinoX86 server.
+/// It sends an identification string, and protocol version number.
+/// @tparam BoardType 
+/// @tparam HatType 
+/// @return Always returns true.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_version() {
+  debug_cmd("In cmd");
+
+  const char msg[] = "ardx86 ";
+  proto_write((const uint8_t *)msg, sizeof(msg) - 1);
+  //INBAND_SERIAL.write((uint8_t *)VERSION_DAT, VERSION_DAT_LEN);
+  proto_write(VERSION_NUM);
+  proto_flush();
+  delay(10);  // let USB complete the transaction
+  
+  controller_.getBoard().debugPrintln(DebugType::CMD, "Got version query!");
+  return true;
+}
+
+/// @brief Get the number of input bytes expected from the client for a given command
+/// @tparam BoardType 
+/// @tparam HatType 
+/// @param cmd 
+/// @return The number of input bytes expected for the command
+template<typename BoardType, typename HatType>
+uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand cmd) {
+    switch(cmd) {
+        case ServerCommand::CmdNone: return 0;
+        case ServerCommand::CmdVersion: return 0;
+        case ServerCommand::CmdReset: return 0;
+        case ServerCommand::CmdLoad: return 1;  // Parameter: Type of register file to load
+        case ServerCommand::CmdCycle: return 1; // Parameter: Number of cycles to execute
+        case ServerCommand::CmdReadAddressLatch: return 0;
+        case ServerCommand::CmdReadStatus: return 0;
+        case ServerCommand::CmdRead8288Command: return 0;
+        case ServerCommand::CmdRead8288Control: return 0;
+        case ServerCommand::CmdReadDataBus: return 0;
+        case ServerCommand::CmdWriteDataBus: return 2; // Parameter: 16-bit value to write
+        case ServerCommand::CmdFinalize: return 0;
+        case ServerCommand::CmdBeginStore: return 0;
+        case ServerCommand::CmdStore: return 0;
+        case ServerCommand::CmdQueueLen: return 0;
+        case ServerCommand::CmdQueueBytes: return 0;
+        case ServerCommand::CmdWritePin: return 2; // Parameters: Pin to read, value to write
+        case ServerCommand::CmdReadPin: return 1;  // Parameter: Pin to read
+        case ServerCommand::CmdGetProgramState: return 0;
+        case ServerCommand::CmdLastError: return 0;
+        case ServerCommand::CmdGetCycleState: return 1; // Parameter: Flags. Bit 0 set to 1 will cycle CPU first
+        case ServerCommand::CmdAvailable00: return 0;  // Null
+        case ServerCommand::CmdPrefetchStore: return 0;
+        case ServerCommand::CmdReadAddress: return 0;
+        case ServerCommand::CmdCpuType: return 0;
+        case ServerCommand::CmdEmulate8080: return 0;
+        case ServerCommand::CmdPrefetch: return 0;
+        case ServerCommand::CmdInitScreen: return 0;
+        case ServerCommand::CmdInvalid: return 0;
+        default: return 0;
+    }
+}
+
+template<typename BoardType, typename HatType>
+void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
+
+  // Leave current state.
+  switch (state_) {
+    case ServerState::CpuId: // FALLTHROUGH
+    case ServerState::JumpVector:
+      CPU.program->reset();
+      break;
+    case ServerState::ExecuteFinalize:
+      CPU.nmi_checkpoint = 0;
+      CPU.nmi_buf_cursor = 0;
+      break;
+    default:
+      break;
+  }
+
+  switch (new_state) {
+    case ServerState::Reset:
+      CPU.doing_reset = true;
+      CPU.cpuid_counter = 0;
+      CPU.cpuid_queue_reads = 0;
+      break;
+    case ServerState::CpuSetup:
+      CPU.v_pc = 0;
+      break;
+    case ServerState::CpuId:
+      CPU.program = &CPUID_PROGRAM;
+      CPU.program->reset();
+      CPU.doing_reset = false;
+      CPU.doing_id = true;
+      CPU.cpuid_counter = 0;
+      CPU.cpuid_queue_reads = 0;
+      break;
+    case ServerState::JumpVector:
+      CPU.program = &JUMP_VECTOR;
+      CPU.program->reset();
+      CPU.doing_reset = false;
+      break;
+    case ServerState::Load:
+
+      if (CPU.cpu_type == CpuType::i80286) {
+        CPU.program = &LOAD_PROGRAM_286;
+        CPU.program->reset();
+      }
+      else {
+        CPU.program = &LOAD_PROGRAM;
+        CPU.program->set_pc(2); // Set pc to 2 to skip flag bytes
+      }
+      break;
+    case ServerState::LoadDone:
+      break;
+    case ServerState::EmuEnter:
+      CPU.stack_r_op_ct = 0;
+      CPU.stack_w_op_ct = 0;
+      CPU.program = &EMU_ENTER_PROGRAM;
+      CPU.program->set_pc(4); // Set v_pc to 4 to skip IVT segment:offset
+      break;
+    case ServerState::Execute:
+      CPU.nmi_checkpoint = 0;
+      CPU.program->reset();
+      if (CPU.do_emulation) {
+        // Set v_pc to 4 to skip IVT segment:offset
+        CPU.program->set_pc(4);
+      }
+      break;
+    case ServerState::ExecuteFinalize:
+      CPU.nmi_checkpoint = 0;
+      CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
+
+      if (CPU.in_emulation) {
+        CPU.program = &EMU_EXIT_PROGRAM;
+      } 
+      else if (CPU.nmi_terminate) {
+        CPU.program = &STORE_PROGRAM_NMI;
+      } 
+      else {
+        CPU.program = &STORE_PROGRAM_INLINE;
+      }
+      CPU.program->reset();
+      break;
+    case ServerState::ExecuteDone:
+      break;
+    case ServerState::EmuExit:
+      CPU.stack_r_op_ct = 0;
+      CPU.stack_w_op_ct = 0;
+      CPU.program->reset();
+      break;
+    case ServerState::Store:
+      reverse_stack_buf();
+      CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
+      // Take a raw uint8_t pointer to the register struct. Both x86 and Arduino are little-endian,
+      // so we can write raw incoming data over the struct. Faster than logic required to set
+      // specific members.
+      CPU.readback_p = (uint8_t *)&CPU.post_regs;
+      break;
+    case ServerState::StoreDone:
+      break;
+    case ServerState::Done:
+      break;
+    default:
+      controller_.getBoard().debugPrint(DebugType::ERROR, "Unhandled state change to: ");
+      controller_.getBoard().debugPrintln(DebugType::ERROR, MACHINE_STATE_STRINGS[(size_t)new_state]);
+      // Unhandled state.
+      break;
+  }
+
+  uint32_t state_end_time = micros();
+
+  // Report time we spent in the previous state.
+  if (stateBeginTime_ != 0) {
+    uint32_t elapsed = state_end_time - stateBeginTime_;
+    controller_.getBoard().debugPrint(DebugType::STATE, "## Changing to state: ");
+    controller_.getBoard().debugPrint(DebugType::STATE, MACHINE_STATE_STRINGS[(size_t)new_state]);
+    controller_.getBoard().debugPrint(DebugType::STATE, ". Spent ");
+    controller_.getBoard().debugPrint(DebugType::STATE, elapsed);
+    controller_.getBoard().debugPrintln(DebugType::STATE, " us in previous state. ##");
+  }
+
+  stateBeginTime_ = micros();
+  state_ = new_state;
+}
+
+
+// Server command - Reset
+// Attempt to reset the CPU and report status.
+// This will be rarely used by itself as the register state is not set up. The Load
+// command will reset the CPU and set register state.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_reset() {
+  debug_cmd("In cmd_reset()");
+  CpuResetResult result;
+  clear_error();
+
+  result = controller_.resetCpu();
+  if (result.success) {
+    change_state(ServerState::Execute);
+  }
+  return result.success;
+}
+
+// Server command - Cpu type
+// Return the detected CPU type and the queue status availability bit in MSB
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_cpu_type() {
+  debug_cmd("In cmd_cpu_type()");
+  clear_error();
+
+  uint8_t byte = (uint8_t)CPU.cpu_type;
+  // Set queue status available bit
+  if (CPU.have_queue_status) {
+    byte |= 0x80;
+  }
+
+  // Set FPU present bit
+  if (CPU.fpu_type != 0) {
+    byte |= 0x40;
+  }
+
+  proto_write(byte);
+  return true;
+}
+
+// Server command - Cycle
+// Execute the specified number of CPU cycles.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_cycle() {
+  uint8_t cycle_ct = commandBuffer_[0];
+  for (uint8_t i = 0; i < cycle_ct; i++) {
+    cycle();
+  }
+  return true;
+}
+
+// Server command - Load
+// Load the specified register state into the CPU.
+// 
+// This command takes one byte first, which indicates the type of registers to load.
+// On 8088-80186, this command takes 28 bytes, which correspond to the word values of each of the 14
+// CPU registers.
+// On 80286, this command takes 102 bytes, which correspond to the LOADALL structure.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_load() {
+
+  //DEBUG_SERIAL.println(">> Got load!");
+  clear_error();
+  volatile uint8_t *read_p = nullptr;
+  uint8_t reg_type = commandBuffer_[0];
+  bool read_result = false;
+
+  switch (reg_type) {
+    case 0:
+      Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 8088-80186");
+      // 8088-80186 register load
+      // This is the default register load type.
+      read_result = readParameterBytes(commandBuffer_, sizeof(commandBuffer_), sizeof(registers1_t));
+
+      if (!read_result) {
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
+        set_error("Failed to read parameter bytes");
+        return false;
+      }
+
+      // Write raw command bytes over register struct.
+      // All possible bit representations are valid.
+      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.load_regs);
+      for (size_t i = 0; i < sizeof(registers1_t); i++) {
+        *read_p++ = commandBuffer_[i];
+      }
+
+      patch_load_pgm(&LOAD_PROGRAM, &CPU.load_regs);
+      patch_brkem_pgm(&EMU_ENTER_PROGRAM, &CPU.load_regs);
+
+      CPU.load_regs.flags &= CPU_FLAG_DEFAULT_CLEAR;
+      CPU.load_regs.flags |= CPU_FLAG_DEFAULT_SET_8086;
+    break;
+
+    case 1:
+      Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 80286 (LOADALL)");
+      read_result = readParameterBytes(commandBuffer_, sizeof(commandBuffer_), sizeof(Loadall286));
+      if (!read_result) {
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
+        set_error("Failed to read parameter bytes");
+        return false;
+      }
+
+      // Write raw command bytes over register struct.
+      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.loadall_regs);
+      for (size_t i = 0; i < sizeof(Loadall286); i++) {
+        *read_p++ = commandBuffer_[i];
+      }
+
+      CPU.loadall_regs.FLAGS &= CPU_FLAG_DEFAULT_CLEAR;
+      CPU.loadall_regs.FLAGS |= CPU_FLAG_DEFAULT_SET_286;
+    break;
+
+    default:
+      set_error("Invalid register type");
+      return false;
+  }
+
+  CpuResetResult result = Controller.resetCpu();
+  if (!result.success) {
+    //set_error("Failed to reset CPU");
+    Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
+    return false;
+  }
+  change_state(ServerState::JumpVector);
+
+  // Run CPU and wait for load to finish
+  int load_timeout = 0;
+  while (state_ != ServerState::Execute) {
+    cycle();
+    load_timeout++;
+
+    if (load_timeout > LOAD_TIMEOUT) {
+      // Something went wrong in load program
+      set_error("Load timeout");
+      return false;
+    }
+  }
+
+#if LOAD_INDICATOR
+  DEBUG_SERIAL.print(".");
+#endif
+  debug_proto("LOAD DONE");
+  return true;
+}
+
+// Server command - ReadAddressLatch
+// Read back the contents of the address latch as a sequence of 3 bytes (little-endian)
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_address_latch() {
+  INBAND_SERIAL.write((uint8_t)(CPU.address_latch & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 8) & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 16) & 0xFF));
+  return true;
+}
+
+// Server command - ReadAddress
+// Read back the contents of the address bus as a sequence of 3 bytes (little-endian)
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_address() {
+  //read_address_pins(true);
+  CPU.address_bus = Controller.readAddressBus(true);
+  INBAND_SERIAL.write((uint8_t)(CPU.address_bus & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 8) & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_bus >> 16) & 0xFF));
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_invalid() {
+  DEBUG_SERIAL.println("Called cmd_invalid!");
+  return false;
+}
+
+// Server command - ReadStatus
+// Return the value of the CPU status lines S0-S5 and QS0-QS1
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_status() {
+  CPU.status0 = Controller.readCpuStatusLines();
+  INBAND_SERIAL.write(CPU.status0);
+  return true;
+}
+
+// Server command - Read8288Command
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_8288_command() {
+  CPU.command_bits = Controller.readBusControllerCommandLines();
+  //read_8288_command_bits();
+  INBAND_SERIAL.write(CPU.command_bits);
+  return true;
+}
+
+// Server command - Read8288Control
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_8288_control() {
+  Controller.readBusControllerControlLines();
+  //read_8288_control_bits();
+  INBAND_SERIAL.write(CPU.control_bits);
+  return true;
+}
+
+// Server command - ReadDataBus
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_data_bus() {
+  INBAND_SERIAL.write((uint8_t)CPU.data_bus);
+  INBAND_SERIAL.write((uint8_t)(CPU.data_bus >> 8));
+  return true;
+}
+
+// Server command - WriteDataBus
+// Takes an argument of 2 bytes.
+// Sets the data bus to the provided value. On 8-bit CPUs the upper byte is ignored.
+// This should not be called for CODE fetches after we have called cmd_prefetch_store(),
+// unless a flow control operation occurs that flushes the queue and returns us to
+// within original program boundaries.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_write_data_bus() {
+  if (CPU.bus_state_latched == CODE) {
+    // We've just been instructed to write a normal fetch byte to the bus.
+    // If we were prefetching the store program, reset this status as a queue
+    // flush must have executed (or we goofed up...)
+    CPU.prefetching_store = false;
+    CPU.s_pc = 0;
+  }
+
+  CPU.data_bus = (uint16_t)commandBuffer_[0];
+  CPU.data_bus |= ((uint16_t)commandBuffer_[1] << 8);
+  CPU.data_type = QueueDataType::Program;
+
+  Controller.getBoard().debugPrint(DebugType::CMD, "## cmd_write_data_bus(): Writing data bus: ");
+  Controller.getBoard().debugPrintln(DebugType::CMD, CPU.data_bus, HEX);
+
+  return true;
+}
+
+// Server command - PrefetchStore
+// Instructs the CPU server to load the next byte of the Store (or EmuExit) program early
+// Should be called in place of cmd_write_data_bus() by host on T3/TwLast when
+// program bytes have been exhausted.
+// (When we are prefetching past execution boundaries during main program execution)
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_prefetch_store() {
+
+  if (CPU.in_emulation) {
+    // Prefetch the EmuExit program
+    if (CPU.s_pc >= sizeof EMU_EXIT_PROGRAM) {
+      set_error("EmuExit program underflow");
+      return false;
+    }
+
+#if DEBUG_STORE
+    debugPrintColor(ansi::yellow, "## PREFETCH_EMU_EXIT: s_pc: ");
+#endif
+
+    CPU.prefetching_store = true;
+    CPU.data_bus = EMU_EXIT_PROGRAM.read(CPU.address_latch, CPU.data_width);
+    CPU.data_type = QueueDataType::ProgramEnd;
+  } else {
+    // Prefetch the Store program
+    if (!STORE_PROGRAM_INLINE.has_remaining()) {
+      set_error("## Store program underflow!");
+      return false;
+    }
+
+#if DEBUG_STORE
+    debugPrintColor(ansi::yellow, "## PREFETCH_STORE: s_pc: ");
+#endif
+
+    CPU.prefetching_store = true;
+    CPU.data_bus = STORE_PROGRAM_INLINE.read(CPU.address_latch, CPU.data_width);
+    CPU.data_type = QueueDataType::ProgramEnd;
+  }
+
+#if DEBUG_STORE
+  debugPrintColor(ansi::yellow, CPU.s_pc);
+  debugPrintColor(ansi::yellow, " addr: ");
+  debugPrintColor(ansi::yellow, CPU.address_latch, 16);
+  debugPrintColor(ansi::yellow, " data: ");
+  debugPrintlnColor(ansi::yellow, CPU.data_bus, 16);
+#endif
+
+  return true;
+}
+
+// Server command - Finalize
+// Sets the data bus flag to DATA_PROGRAM_END, so that the Execute state can terminate
+// on the next instruction queue fetch
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_finalize() {
+  if (state_ == ServerState::Execute) {
+    change_state(ServerState::ExecuteFinalize);
+
+    // Wait for execute done state
+    int execute_ct = 0;
+    int timeout = FINALIZE_TIMEOUT;
+    if (CPU.in_emulation) {
+      // We need more time to exit emulation mode
+      timeout = FINALIZE_EMU_TIMEOUT;
+    }
+    while (state_ != ServerState::ExecuteDone) {
+      cycle();
+      execute_ct++;
+
+
+
+      if (execute_ct > timeout) {
+        set_error("cmd_finalize(): state timeout");
+        return false;
+      }
+    }
+    return true;
+  } else {
+    error_beep();
+    set_error("cmd_finalize(): wrong state: %s", get_state_string(state_));
+    controller_.getBoard().debugPrint(DebugType::ERROR, "cmd_finalize(): wrong state: ");
+    controller_.getBoard().debugPrintln(DebugType::ERROR, get_state_string(state_));
+    return false;
+  }
+}
+
+// Server command - BeginStore
+// Execute state must be in ExecuteDone before intiating BeginStore command
+//
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_begin_store(void) {
+  /*
+  char err_msg[30];
+
+  // Command only valid in ExecuteDone state
+  if(state_ != ExecuteDone) {
+    snprintf(err_msg, 30, "BeginStore: Wrong state: %d ", state_);
+    set_error(err_msg);
+    return false;
+  }
+
+  change_state(Store);
+  */
+  return true;
+}
+
+// Server command - Store
+//
+// Returns values of registers in the following order, little-endian
+// AX, BX, CX, DX, SS, SP, FLAGS, IP, CS, DS, ES, BP, SI, DI
+// Execute state must be in ExecuteDone before executing Store command
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_store(void) {
+
+#if DEBUG_STORE
+  debugPrintColor(ansi::bright_magenta, "## In STORE: s_pc is: ");
+  debugPrintlnColor(ansi::bright_magenta, CPU.s_pc);
+#endif
+
+  char err_msg[30];
+  // Command only valid in ExecuteDone state
+  if (state_ != ServerState::ExecuteDone) {
+    set_error("## STORE: Wrong state: %s ", get_state_string(state_));
+    return false;
+  }
+
+  change_state(ServerState::Store);
+
+  int store_timeout = 0;
+
+  // Cycle CPU until Store complete
+  while (state_ != ServerState::StoreDone) {
+    cycle();
+    store_timeout++;
+
+    if (store_timeout > 500) {
+      debugPrintlnColor(ansi::bright_red, "## STORE: Timeout! ##");
+      snprintf(err_msg, 30, "StoreDone timeout.");
+      error_beep();
+      return false;
+    }
+  }
+
+#if DEBUG_STORE
+  debugPrintColor(ansi::bright_magenta, "## STORE: Flags are: ");
+  debugPrintlnColor(ansi::bright_magenta, CPU.post_regs.flags, 16);
+
+  if (!CPU.nmi_terminate) {
+    // We didn't use NMI to terminate code. which means we used the inline STORE routine,
+    // which means we need to convert the registers struct.
+    debugPrintlnColor(ansi::bright_magenta, "## STORE: Converting registers from STORE INLINE format...");
+    convert_inline_registers(&CPU.post_regs);
+  }
+#endif
+
+  // Dump final register state to Serial port
+  uint8_t *reg_p = (uint8_t *)&CPU.post_regs;
+  for (size_t i = 0; i < sizeof CPU.post_regs; i++) {
+    INBAND_SERIAL.write(reg_p[i]);
+  }
+
+#if STORE_INDICATOR
+  DEBUG_SERIAL.print("?");
+#endif
+  change_state(ServerState::StoreDone);
+  return true;
+}
+
+
+// Server command - QueueLen
+// Return the length of the instruction queue in bytes
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_queue_len(void) {
+  INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.len()));
+  return true;
+}
+
+// Server command - QueueBytes
+// Return the contents of the instruction queue, from 0-6 bytes.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_queue_bytes(void) {
+  for (size_t i = 0; i < CPU.queue.len(); i++) {
+    INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.read_byte(i)));
+  }
+  return true;
+}
+
+// Server command - Write pin
+// Sets the value of the specified CPU input pin
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_write_pin(void) {
+
+  uint8_t pin_idx = commandBuffer_[0];
+  uint8_t pin_val = commandBuffer_[1] & 0x01;
+
+  if (pin_idx < 4) {
+    //uint8_t pin_no = WRITE_PINS[pin_idx];
+
+    switch (pin_idx) {
+      case 0: // READY pin
+#if DEBUG_PIN_CMD
+        debugPrintColor(ansi::cyan, "Setting READY pin to: ");
+        debugPrintlnColor(ansi::cyan, pin_val);
+#endif
+        Controller.writePin(OutputPin::Ready, pin_val);
+        break;
+
+      case 1: // TEST pin
+#if DEBUG_PIN_CMD
+        debugPrintColor(ansi::cyan, "Setting TEST pin to: ");
+        debugPrintlnColor(ansi::cyan, pin_val);
+#endif
+        Controller.writePin(OutputPin::Test, pin_val);
+        break;
+
+      case 2: // INTR pin
+#if DEBUG_PIN_CMD
+        debugPrintColor(ansi::cyan, "Setting INTR pin to: ");
+        debugPrintlnColor(ansi::cyan, pin_val);
+#endif
+        Controller.writePin(OutputPin::Intr, pin_val);
+        break;
+
+      case 3: // NMI pin
+#if DEBUG_PIN_CMD
+        debugPrintColor(ansi::cyan, "Setting NMI pin to: ");
+        debugPrintlnColor(ansi::cyan, pin_val);
+#endif
+        Controller.writePin(OutputPin::Nmi, pin_val);
+        break;
+
+      default:
+        error_beep();
+        return false;
+    }
+    return true;
+  } else {
+    // Invalid pin
+    error_beep();
+    return false;
+  }
+}
+
+// Server command - Read pin
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_read_pin(void) {
+  // Not implemented
+  INBAND_SERIAL.write((uint8_t)0);
+  return true;
+}
+
+// Server command - Get program state
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_get_program_state(void) {
+  INBAND_SERIAL.write((uint8_t)state_);
+  return true;
+}
+
+// Server command - Get last error
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_get_last_error(void) {
+  INBAND_SERIAL.write(errorBuffer_);
+  return true;
+}
+
+// Server command - Get Cycle State
+// Returns all the state info typically needed for a single cycle
+// Parameter: One byte, flags. Bit 0 set to 1 will cycle CPU first before 
+//            returning the state.
+// Returns 11 bytes
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_get_cycle_state(void) {
+  uint8_t send_buf[11] = { 0 };
+  bool do_cycle = (bool)(commandBuffer_[0] & 0x01);
+  if (do_cycle) {
+    // Perform a cycle if requested
+    cycle();
+  }
+
+  //CPU.status0 = Controller.readCpuStatusLines();
+  CPU.command_bits = Controller.readBusControllerCommandLines();
+  CPU.control_bits = Controller.readBusControllerControlLines();
+
+  //read_8288_command_bits();
+  //read_8288_control_bits();
+  uint8_t server_state = ((uint8_t)state_) & 0x3F;
+  uint8_t cpu_state_byte = 0;
+
+  cpu_state_byte |= ((uint8_t)(CPU.last_bus_cycle)) & 0x07; // Bits 0-2: Bus cycle
+
+  send_buf[0] = server_state; // Byte 0
+  send_buf[1] = cpu_state_byte; // Byte 1
+  send_buf[2] = CPU.status0; // Byte 2
+  send_buf[3] = CPU.control_bits; // Byte 3
+  send_buf[4] = CPU.command_bits; // Byte 4
+  send_buf[5] = (uint8_t)(CPU.address_bus & 0xFF); // Bytes 5-8
+  send_buf[6] = (uint8_t)((CPU.address_bus >> 8) & 0xFF);
+  send_buf[7] = (uint8_t)((CPU.address_bus >> 16) & 0xFF);
+  send_buf[8] = (uint8_t)((CPU.address_bus >> 24) & 0xFF);
+  send_buf[9] = (uint8_t)(CPU.data_bus & 0xFF); // Bytes 9-10
+  send_buf[10] = (uint8_t)(CPU.data_bus >> 8);
+  // Send the state bytes
+  INBAND_SERIAL.write(send_buf, sizeof(send_buf));
+  return true;
+}
+
+// Server command - Enter emulation mode
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_emu8080(void) {
+  if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
+    // Simply toggle the emulation flag
+    CPU.do_emulation = true;
+#if DEBUG_EMU
+    DEBUG_SERIAL.println("## cmd_emu8080(): Enabling 8080 emulation mode! ##");
+#endif
+    return true;
+  }
+// Unsupported CPU!
+#if DEBUG_EMU
+  DEBUG_SERIAL.println("## cmd_emu8080(): Bad CPU type ## ");
+#endif
+  return false;
+}
+
+// Server command - prefetch
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_prefetch(void) {
+  if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
+    // Simply toggle the emulation flag
+    CPU.do_prefetch = true;
+#if DEBUG_EMU
+    DEBUG_SERIAL.println("## cmd_prefetch(): Enabling VX0 prefetch ##");
+#endif
+    return true;
+  }
+
+// Unsupported CPU!
+#if DEBUG_EMU
+  DEBUG_SERIAL.println("## cmd_prefetch(): Bad CPU type ## ");
+#endif
+  return false;
+}
+
+// The Giga display shield takes a few seconds to initialize, so we don't 
+// want to do it in setup. The client can request display initialization instead
+// once it has established a connection.  The client should wait approximately 
+// 3 seconds after sending the init command.
+// Returns one data byte. A value of 0 indicates no display is present.
+// A value of 1 indicates the display is present and will be initialized.
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_init_screen() {
+  uint8_t byte0 = 0;
+  #if GIGA_DISPLAY_SHIELD
+    byte0 = 1;
+    screen_init_requested = true;
+  #endif
+  INBAND_SERIAL.write(byte0);
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_null() {
+  return true;
+}
+
+// Error handling methods
+template<typename BoardType, typename HatType>
+void CommandServer<BoardType, HatType>::set_error(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  vsnprintf(errorBuffer_, MAX_ERROR_LEN, format, args);
+  va_end(args);
+  
+  // Ensure null termination
+  errorBuffer_[MAX_ERROR_LEN - 1] = 0;
+}
+
+template<typename BoardType, typename HatType>
+const char* CommandServer<BoardType, HatType>::get_last_error() const {
+  return errorBuffer_;
+}
+
+template class CommandServer<BoardType, HatType>;

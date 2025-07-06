@@ -1,0 +1,229 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <cstdarg>
+#include <serial_config.h>
+//#include <BoardController.h>
+#include <config.h>
+
+enum class ServerState: uint8_t {
+  Reset = 0,
+  CpuId,
+  CpuSetup,
+  JumpVector,
+  Load,
+  LoadDone,
+  EmuEnter,
+  Prefetch,
+  Execute,
+  ExecuteFinalize,
+  ExecuteDone,
+  EmuExit,
+  Store,
+  StoreDone,
+  Done
+};
+
+template<typename BoardType, typename HatType> class BoardController;
+
+template<typename BoardType, typename HatType>
+class CommandServer {
+public:
+
+  using CmdFn = bool (CommandServer::*)();
+
+  enum class ServerCommand {
+    CmdNone            = 0x00,
+    CmdVersion         = 0x01,
+    CmdReset           = 0x02,
+    CmdLoad            = 0x03,
+    CmdCycle           = 0x04,
+    CmdReadAddressLatch= 0x05,
+    CmdReadStatus      = 0x06,
+    CmdRead8288Command = 0x07,
+    CmdRead8288Control = 0x08, 
+    CmdReadDataBus     = 0x09,
+    CmdWriteDataBus    = 0x0A,
+    CmdFinalize        = 0x0B,
+    CmdBeginStore      = 0x0C,
+    CmdStore           = 0x0D,
+    CmdQueueLen        = 0x0E,
+    CmdQueueBytes      = 0x0F,
+    CmdWritePin        = 0x10,
+    CmdReadPin         = 0x11,
+    CmdGetProgramState = 0x12,
+    CmdLastError       = 0x13,
+    CmdGetCycleState   = 0x14,
+    CmdAvailable00     = 0x15,
+    CmdPrefetchStore   = 0x16,
+    CmdReadAddress     = 0x17,
+    CmdCpuType         = 0x18,
+    CmdEmulate8080     = 0x19,
+    CmdPrefetch        = 0x1A,
+    CmdInitScreen      = 0x1B,
+    CmdInvalid         = 0x1C,
+  };
+
+  enum class CommandState: uint8_t {
+    WaitingForCommand = 0x01,
+    ReadingCommand,
+    ExecutingCommand
+  };
+
+
+  void run();
+  void change_state(ServerState new_state);
+  ServerState state() const { return state_; }
+  const char* get_last_error() const;
+
+  const char* get_command_name(ServerCommand cmd);
+  const char* get_state_string(ServerState state);
+  char get_state_char(ServerState state);
+
+  explicit CommandServer(BoardController<BoardType,HatType>& controller); 
+
+private:
+  static constexpr std::size_t CMD_COUNT =
+    static_cast<std::size_t>(ServerCommand::CmdInvalid);
+  std::array<CmdFn, CMD_COUNT> commands_;
+
+  static constexpr uint8_t VERSION_NUM = 3;
+  static constexpr uint8_t RESPONSE_FAIL = 0x00;
+  static constexpr uint8_t RESPONSE_OK = 0x01;
+  static constexpr size_t MAX_COMMAND_BYTES = 255; // Maximum number of bytes for fixed-length parameters.
+  static constexpr unsigned long CMD_TIMEOUT_ = CMD_TIMEOUT; // Timeout for command parameter bytes in milliseconds.
+  uint8_t commandBuffer_[MAX_COMMAND_BYTES];
+
+  BoardController<BoardType,HatType>& controller_;
+  ServerState state_ = ServerState::Reset;
+  CommandState commandState_ = CommandState::WaitingForCommand;
+  uint8_t commandByte_ = 0;
+  ServerCommand cmd_ = ServerCommand::CmdNone;
+
+  size_t commandBytesExpected_ = 0;
+  size_t commandByteN_ = 0;
+  unsigned long commandStartTime_ = 0;
+  unsigned long stateBeginTime_ = 0;
+
+  // Error handling
+  static constexpr size_t MAX_ERROR_LEN = 256;
+  char errorBuffer_[MAX_ERROR_LEN] = {0};
+
+  bool dispatch_command(ServerCommand cmd);
+  uint8_t get_command_input_bytes(ServerCommand cmd);
+
+  // Error handling methods
+  void set_error(const char* format, ...);
+  void clear_error() {
+    set_error("NO ERROR");
+  }
+
+  void proto_write(const uint8_t* buf, size_t len) {
+    INBAND_SERIAL.write(buf, len);
+  }
+
+  void proto_write(uint8_t b) {
+    INBAND_SERIAL.write(b);
+  }
+
+  void proto_flush() {
+    FLUSH;
+  }
+
+  int proto_available() {
+    return INBAND_SERIAL.available();
+  }
+
+  int proto_read() {
+    return INBAND_SERIAL.read();
+  }
+
+  size_t proto_read(uint8_t* buf, size_t len) {
+    return INBAND_SERIAL.readBytes(buf, len);
+  }
+
+  int proto_peek() {
+    return INBAND_SERIAL.peek();
+  }
+
+  void send_ok() {
+    proto_write(RESPONSE_OK);
+    proto_flush();
+  }
+
+  void send_fail() {
+    proto_write(RESPONSE_FAIL);
+    proto_flush();
+  }
+
+  void debug_cmd(const char *msg) {
+    #if DEBUG_PROTO
+      DEBUG_SERIAL.print("## cmd ");
+      DEBUG_SERIAL.print(get_command_name(cmd_));
+      DEBUG_SERIAL.print(": ");
+      DEBUG_SERIAL.print(msg);
+      DEBUG_SERIAL.println(" ##");
+    #endif
+  }
+
+  void debug_proto(const char* msg) {
+    #if DEBUG_PROTO
+      DEBUG_SERIAL.print("## ");
+      DEBUG_SERIAL.print(msg);
+      DEBUG_SERIAL.println(" ##");
+    #endif
+  }
+
+  bool cmd_version(void);
+  bool cmd_reset(void);
+  bool cmd_load(void);
+  bool cmd_cycle(void);
+  bool cmd_read_address_latch(void);
+  bool cmd_read_status(void);
+  bool cmd_read_8288_command(void);
+  bool cmd_read_8288_control(void);
+  bool cmd_read_data_bus(void);
+  bool cmd_write_data_bus(void);
+  bool cmd_finalize(void);
+  bool cmd_begin_store(void);
+  bool cmd_store(void);
+  bool cmd_queue_len(void);
+  bool cmd_queue_bytes(void);
+  bool cmd_write_pin(void);
+  bool cmd_read_pin(void);
+  bool cmd_get_program_state(void);
+  bool cmd_get_last_error(void);
+  bool cmd_get_cycle_state(void);
+  bool cmd_prefetch_store(void);
+  bool cmd_read_address(void);
+  bool cmd_cpu_type(void);
+  bool cmd_invalid(void);
+  bool cmd_emu8080(void);
+  bool cmd_prefetch(void);
+  bool cmd_init_screen(void);
+  bool cmd_null(void);
+};

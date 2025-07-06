@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <CpuTypes.h>
 #include <BusTypes.h>
 #include <hats/Pins.h>
 
@@ -36,8 +37,10 @@ public:
   
   // Constructor that allows passing Hat constructor parameters
   template<typename... HatArgs>
-  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), hat(std::forward<HatArgs>(hatArgs)...) {}CpuResetResult resetCpu() {
-    return Hat::template resetCpu<Board>(board);
+  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), hat(std::forward<HatArgs>(hatArgs)...) {}
+  
+  CpuResetResult resetCpu() {
+    return hat.resetCpu(board);
   }
 
   Board& getBoard() {
@@ -45,7 +48,7 @@ public:
   }
 
   void tickCpu() {
-    Hat::tickCpu();
+    hat.tickCpu();
   }
 
   static int getAddressBusWidth() {

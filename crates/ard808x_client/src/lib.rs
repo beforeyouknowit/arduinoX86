@@ -101,6 +101,49 @@ impl ServerCpuType {
             _ => matches!(state, TState::T2),
         }
     }
+
+    pub fn bus_chr_width(&self) -> usize {
+        match self {
+            ServerCpuType::Intel80286 => 6,
+            _ => 5,
+        }
+    }
+
+    pub fn decode_status(&self, status_byte: u8) -> BusState {
+        match self {
+            ServerCpuType::Intel80286 => match status_byte & 0x0F {
+                0b0000 => BusState::INTA,
+                0b0001 => BusState::PASV, // Reserved
+                0b0010 => BusState::PASV, // Reserved
+                0b0011 => BusState::PASV, // None
+                0b0100 => BusState::HALT,
+                0b0101 => BusState::MEMR,
+                0b0110 => BusState::MEMW,
+                0b0111 => BusState::PASV, // None
+                0b1000 => BusState::PASV, // Reserved
+                0b1001 => BusState::IOR,
+                0b1010 => BusState::IOW,
+                0b1011 => BusState::PASV, // None
+                0b1100 => BusState::PASV, // Reserved
+                0b1101 => BusState::CODE,
+                0b1110 => BusState::PASV, // Reserved
+                0b1111 => BusState::PASV, // None
+                _ => BusState::PASV,      // Default to passive state
+            },
+            _ => {
+                match status_byte & 0x07 {
+                    0 => BusState::INTA, // IRQ Acknowledge
+                    1 => BusState::IOR,  // IO Read
+                    2 => BusState::IOW,  // IO Write
+                    3 => BusState::HALT, // Halt
+                    4 => BusState::CODE, // Code fetch
+                    5 => BusState::MEMR, // Memory Read
+                    6 => BusState::MEMW, // Memory Write
+                    _ => BusState::PASV, // Passive state
+                }
+            }
+        }
+    }
 }
 
 /// Derive the [CpuWidth] from a [ServerCpuType].
@@ -388,22 +431,6 @@ macro_rules! get_segment {
             0b01 => Segment::SS,
             0b10 => Segment::CS,
             _ => Segment::DS,
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! get_bus_state {
-    ($s:expr) => {
-        match ($s & 0x07) {
-            0 => BusState::INTA,
-            1 => BusState::IOR,
-            2 => BusState::IOW,
-            3 => BusState::HALT,
-            4 => BusState::CODE,
-            5 => BusState::MEMR,
-            6 => BusState::MEMW,
-            _ => BusState::PASV,
         }
     };
 }

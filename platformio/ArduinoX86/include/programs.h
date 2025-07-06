@@ -3,7 +3,7 @@
     https://github.com/dbalsom/arduinoX86
 
     Permission is hereby granted, free of charge, to any person obtaining a
-    copy of this software and associated documentation files (the "Software"),
+    copy of this software and associated documentation files (the “Software”),
     to deal in the Software without restriction, including without limitation
     the rights to use, copy, modify, merge, publish, distribute, sublicense,
     and/or sell copies of the Software, and to permit persons to whom the
@@ -12,7 +12,7 @@
     The above copyright notice and this permission notice shall be included in
     all copies or substantial portions of the Software.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
@@ -21,11 +21,22 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-#include <config.h>
-#if defined(HAT_286_5V_V1)
-#include <hats/Hat80286.h>
+#pragma once
 
-// Define the static constexpr members of Hat80286
-constexpr std::array<int,6> Hat80286::OUTPUT_PINS;
-constexpr std::array<int,36> Hat80286::INPUT_PINS;
-#endif
+#include <cstdint>
+#include <InlineProgram.h>
+
+extern InlineProgram SETUP_PROGRAM_86;
+extern InlineProgram SETUP_PROGRAM_186;
+extern InlineProgram LOAD_PROGRAM;
+extern InlineProgram LOAD_PROGRAM_286;
+extern InlineProgram CPUID_PROGRAM;
+extern InlineProgram EMU_ENTER_PROGRAM;
+extern InlineProgram EMU_EXIT_PROGRAM;
+extern InlineProgram JUMP_VECTOR;
+extern InlineProgram NMI_VECTOR;
+extern InlineProgram STORE_PROGRAM_NMI;
+extern InlineProgram STORE_PROGRAM_INLINE;
+extern InlineProgram NEC_PREFETCH_PROGRAM;
+
+#define NMI_VECTOR_SIZE 4

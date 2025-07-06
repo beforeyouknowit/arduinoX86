@@ -39,18 +39,18 @@ class BusController {
 
     BusController() 
       : ale(false), mrdc(false), amwc(false), iorc(false), mwtc(false), aiowc(false), iowc(false) {
-        _last_status = PASV; // Start in passive state
+        last_status_ = PASV; // Start in passive state
       }
 
   private:
-    BusStatus _last_status; // S0-S2 of previous cycle
-    BusStatus _status; // S0-S2 of current cycle
-    BusStatus _status_latch;
-    TCycle _t_cycle;
+    BusStatus last_status_; // S0-S2 of previous cycle
+    BusStatus status_; // S0-S2 of current cycle
+    BusStatus status_latch_;
+    TCycle t_cycle_;
 
   public:
     BusStatus status() const {
-      return _status;
+      return status_;
     }
 
     void reset() {
@@ -62,25 +62,25 @@ class BusController {
       aiowc = false;
       iowc = false;
 
-      _last_status = PASV;
-      _status = PASV;
-      _status_latch = PASV;
-      _t_cycle = TI;
+      last_status_ = PASV;
+      status_ = PASV;
+      status_latch_ = PASV;
+      t_cycle_ = TI;
     }
 
     void tick(BusStatus new_status) {
       
-      _last_status = _status;
-      _status = new_status;
+      last_status_ = status_;
+      status_ = new_status;
 
       // TODO: Handle wait states
-      switch (_t_cycle) {
+      switch (t_cycle_) {
         case TI:
           break;
         case T1:
           ale = false;
-          _t_cycle = T2;
-          switch(_status_latch) {
+          t_cycle_ = T2;
+          switch(status_latch_) {
               case IOR:
                 iorc = true;
                 break;
@@ -103,8 +103,8 @@ class BusController {
           }
           break;
         case T2:
-          _t_cycle = T3;
-            switch(_status_latch) {
+          t_cycle_ = T3;
+            switch(status_latch_) {
               case IRQA:
                 break;
               case IOW:
@@ -118,7 +118,7 @@ class BusController {
             }        
           break;
         case T3:
-          _t_cycle = T4;
+          t_cycle_ = T4;
           iorc = false;
           amwc = false;
           iowc = false;
@@ -129,15 +129,15 @@ class BusController {
         case TW:
           break;
         case T4:
-          _t_cycle = TI;
+          t_cycle_ = TI;
           break;
       }
 
-      if (_last_status == PASV && _status != PASV) {
+      if (last_status_ == PASV && status_ != PASV) {
         // We started a bus cycle; enter t1 and set ALE
         ale = true;
-        _t_cycle = T1;
-        _status_latch = _status;
+        t_cycle_ = T1;
+        status_latch_ = status_;
       }
     }
 

@@ -23,10 +23,6 @@
 
 #pragma once
 
-
-
-
-
 #if defined(HAT_8088_V1)
   #include "hats/Hat8088.h"
   class Hat8088;

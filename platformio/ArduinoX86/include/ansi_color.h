@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <hat_config.h>
+#include <serial_config.h>
 
 namespace ansi {
   // Normal colors

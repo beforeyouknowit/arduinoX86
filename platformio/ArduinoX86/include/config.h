@@ -7,7 +7,7 @@
 #define SCREEN_UPDATE_MS (1000 / SCREEN_UPDATE_FPS)
 
 // Define this if you have connected an 8087 FPU
-#define FPU_8087
+//#define FPU_8087
 
 // The main AruduinoX86 boards are:
 // HAT_8088_V1 - Hat8088 rev 1.1 - Due & Giga compatible, supporting the 8088, 8086, NEC V20 and NEC V30 CPUs
@@ -42,7 +42,6 @@
 #define DEBUG_BAUD_RATE 460800
 
 #define CMD_TIMEOUT 100 // Command timeout in milliseconds
-#define MAX_COMMAND_BYTES 255 // Maximum length of command parameter input
 
 // What vector to use for the BRKEM call. No reason to change this really.
 #define BRKEM_VECTOR ((uint8_t)0x00)

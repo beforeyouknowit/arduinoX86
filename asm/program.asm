@@ -5,7 +5,6 @@ cpu	286
 org	0h
 
 start:
-    aad
-    push ax
+    nop
     hlt
 

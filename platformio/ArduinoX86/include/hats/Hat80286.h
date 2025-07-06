@@ -27,12 +27,14 @@
 void cycle();
 
 #include <arduinoX86.h>
-#include <hat_config.h>
+#include <serial_config.h>
 #include <gpio_pins.h>
 #include <BusTypes.h>
 #include <hats/HatBase.h>
 #include <hats/Pins.h>
 #include <DebugFilter.h>
+
+#include <i82288Emulator.h>
 
 #define CPU_286
 
@@ -40,6 +42,7 @@ void cycle();
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
 
 
+#define ADDRESS_SPACE_MASK 0x3FFFFF // 4MB address space for 80286
 #define WRITE_CYCLE T2
 
 // ------------------------- CPU Control pins ---------------------------------
@@ -212,10 +215,17 @@ private:
     21, 20, 17, 16, 15, 14, 3, 2, 1, 0, // (6) Address pins - Top row of GPIO pins
     82, 83, // (2) IORC and IOWC pins
   }};
+
   
-  bool _emulate_bus_controller = false;
-  uint8_t _lastCpuStatus = 0x03; // Last CPU status read from the status lines. Initialized to 0x03 (S0 and S1 high).
-  bool _emulatedALE = false; // Emulated ALE signal. We ignore ALE from the bus controller as it is asynchronous. 
+  BusController i82288_; // 82288 bus controller emulator
+  bool emulate_bus_controller_ = false;
+  uint8_t currentCpuStatus_ = 0x03; // Current CPU status read from the status lines. Initialized to 0x03 (S0 and S1 high).
+  uint8_t lastCpuStatus_ = 0x03; // Last CPU status read from the status lines. Initialized to 0x03 (S0 and S1 high).
+  uint8_t latchedStatus_ = 0x03; // Status latched on ALE signal. 
+  bool emulatedALE_ = false; // Emulated ALE signal. We ignore ALE from the bus controller as it is asynchronous. 
+  bool stickyALE_ = false; // Sticky ALE signal. This is set when we see an ALE signal and remains true until reset.
+  bool stickyIORC_ = true; // Sticky IORC signal. This is set when we see an IORC signal and remains true until reset.
+  bool stickyIOWC_ = true; // Sticky IOWC signal. This is set when we see an IOWC signal and remains true until reset.
 
 protected:
   static constexpr unsigned ClockDivisor = 2;
@@ -223,7 +233,7 @@ protected:
   
 public:
 
-  Hat80286(bool emulate_bus_controller = false) : _emulate_bus_controller(emulate_bus_controller) 
+  Hat80286(bool emulate_bus_controller = false) : emulate_bus_controller_(emulate_bus_controller) 
     {}
 
   static void initPins() {
@@ -368,7 +378,9 @@ public:
 
   /// @brief Tick the CPU one clock cycle.
   /// For 286, this is two external clock cycles per CPU clock cycle.
-  static void tickCpuImpl() {
+  void tickCpuImpl() {
+    // stickyIORC_ = READ_IORC_PIN;
+    // stickyIOWC_ = READ_IOWC_PIN;
     WRITE_PIN_D04(1);
     if (ClockLowDelay > 0) {
       delayMicroseconds(ClockLowDelay);
@@ -377,6 +389,14 @@ public:
     if (ClockHighDelay > 0) {
       delayMicroseconds(ClockHighDelay);
     }
+    // // Check 82288 outputs here.
+    // if(!READ_IORC_PIN) {
+    //   stickyIORC_ = false;
+    // }
+    // if(!READ_IOWC_PIN) {
+    //   stickyIOWC_ = false;
+    // }
+
     WRITE_PIN_D04(1);
     if (ClockLowDelay > 0) {
       delayMicroseconds(ClockLowDelay);
@@ -385,6 +405,16 @@ public:
     if (ClockHighDelay > 0) {
       delayMicroseconds(ClockHighDelay);
     }
+
+    // if(!READ_IORC_PIN) {
+    //   stickyIORC_ = false;
+    // }
+    // if(!READ_IOWC_PIN) {
+    //   stickyIOWC_ = false;
+    // }
+
+    currentCpuStatus_ = (READ_S0_PIN << 0) | (READ_S1_PIN << 1) | (READ_M_IO_PIN << 2) | (READ_C_I_PIN << 3);
+    i82288_.tick(currentCpuStatus_, true);
   }
 
   uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
@@ -531,7 +561,7 @@ public:
   }
 
   template<typename Board>
-  static CpuResetResult resetCpuImpl(Board& board) {
+  CpuResetResult resetCpuImpl(Board& board) {
 
     CpuResetResult result = {};
     bool s0 = false;
@@ -642,29 +672,38 @@ public:
   }
   
   bool readALEPinImpl() {
-    return _emulatedALE;
+
+    if(emulatedALE_ != stickyALE_) {
+      //DEBUG_SERIAL.println(" >>>>> 82288 mismatch: emulated ALE is " + String(emulatedALE_) + ", sticky ALE is " + String(stickyALE_));
+    }
+    return emulatedALE_;
   }
-  static bool readMRDCPinImpl() {
-    return READ_MRDC_PIN;
+  bool readMRDCPinImpl() {
+    //return !(!emulatedALE_ && ((latchedStatus_ & 0x07) == 0x05));
+    return i82288_.mrdc();
   }
-  static bool readAMWCPinImpl() {
+  bool readAMWCPinImpl() {
     return READ_AMWC_PIN;
   }
-  static bool readMWTCPinImpl() {
-    return READ_MWTC_PIN;
+  bool readMWTCPinImpl() {
+    //return !(!emulatedALE_ && ((latchedStatus_ & 0x07) == 0x06));
+    return i82288_.mwtc();
   }
-  static bool readIORCPinImpl() {
-    return READ_IORC_PIN;
+  bool readIORCPinImpl() {
+    //return !(!emulatedALE_ && ((latchedStatus_ & 0x0F) == 0x09));
+    return i82288_.iorc();
   }
-  static bool readIOWCPinImpl() {
-    return READ_IOWC_PIN;
-  }
-  static bool readAIOWCPinImpl() {
+  bool readAIOWCPinImpl() {
     return READ_AIOWC_PIN;
   }
-  static bool readINTAPinImpl() {
+  bool readIOWCPinImpl() {
+    //return !(!emulatedALE_ && ((latchedStatus_ & 0x0F) == 0x0A)); 
+    return i82288_.iowc();
+  }
+  bool readINTAPinImpl() {
     return false;
   }
+  
   static void writeResetPinImpl(bool value) {
     // Write to the RESET pin
     WRITE_PIN_D05(value);
@@ -672,26 +711,26 @@ public:
 
   uint8_t readCpuStatusLinesImpl() {
     // Read the CPU status lines
-    uint8_t status = 0;
 
-    pinMode(S0_PIN, INPUT_PULLUP);
-    pinMode(S1_PIN, INPUT_PULLUP);
-    if (READ_S0_PIN) { status |= 0x01; }; // S0
-    if (READ_S1_PIN) { status |= 0x02; }; // S1
-    if (READ_M_IO_PIN) { status |= 0x04; }; // M/!IO
-    if (READ_C_I_PIN) { status |= 0x08; }; // COD/!INTA
-    
-    // Check for ALE. 
-    if (((_lastCpuStatus & 0x03) == 0x03) && ((status & 0x03) < 0x03)) {
+    currentCpuStatus_ = 0x00;
+    //pinMode(S0_PIN, INPUT_PULLUP);
+    //pinMode(S1_PIN, INPUT_PULLUP);
+    if (READ_S0_PIN) { currentCpuStatus_ |= 0x01; }; // S0
+    if (READ_S1_PIN) { currentCpuStatus_ |= 0x02; }; // S1
+    if (READ_M_IO_PIN) { currentCpuStatus_ |= 0x04; }; // M/!IO
+    if (READ_C_I_PIN) { currentCpuStatus_ |= 0x08; }; // COD/!INTA
+
+    // Check for ALE.
+    if (((lastCpuStatus_ & 0x03) == 0x03) && ((currentCpuStatus_ & 0x03) < 0x03)) {
       // The last status was passive, and the current status is active (S0 or S1 is low).
       // This means the start of a bus cycle and Ts state. 
-      _emulatedALE = true;
+      emulatedALE_ = true;
     }
     else {
-      _emulatedALE = false;
+      emulatedALE_ = false;
     }
-    _lastCpuStatus = status;
-    return status;
+    lastCpuStatus_ = currentCpuStatus_;
+    return currentCpuStatus_;
   }
 
   uint8_t readBusControllerCommandLinesImpl() {
@@ -713,7 +752,7 @@ public:
   uint8_t readBusControllerControlLinesImpl() {
     // Read the bus controller control lines
     uint8_t control = 0;
-    control |= _emulatedALE ? 0x01 : 0;     // ALE      - Pin 50
+    control |= emulatedALE_ ? 0x01 : 0;     // ALE      - Pin 50
     //control |= READ_PIN_D49 ? 0x02 : 0;     // DTR      - Pin 49
     //control |= READ_PIN_D43 ? 0x04 : 0;     // MCE/PDEN - Pin 43
     //control |= READ_PIN_D44 ? 0x08 : 0;     // DEN      - Pin 44

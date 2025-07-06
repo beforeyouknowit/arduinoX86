@@ -25,6 +25,20 @@
 
 #include <Arduino.h>
 
+/// @brief Type of bus operation. This is used to for logging bus operations.
+enum class BusOperationType: uint8_t {
+    CodeFetch8,
+    CodeFetch16,
+    MemRead8,
+    MemRead16,
+    MemWrite8,
+    MemWrite16,
+    IoRead8,
+    IoRead16,
+    IoWrite8,
+    IoWrite16
+};
+
 /// @brief Type of bus transfer. This is can be Code, Memory, or Io.
 enum BusTransferType {
   Code,
@@ -76,4 +90,11 @@ enum TCycle {
   T3 = 3,
   T4 = 4,
   TW = 5,
+};
+
+/// @brief Structure representing a stack frame in the CPU.
+struct CallStackFrame {
+  uint16_t flags; // Flags register
+  uint16_t cs;   // Code Segment
+  uint16_t ip;   // Instruction Pointer
 };

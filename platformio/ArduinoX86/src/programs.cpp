@@ -1,0 +1,126 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+#include <cstdint>
+#include <config.h>
+#include <programs.h>
+#include <InlineProgram.h>
+
+InlineProgram SETUP_PROGRAM_86("SETUP", { 0x90 });
+
+InlineProgram SETUP_PROGRAM_186("SETUP_186", {
+  0xb8, 0x00, 0x00, 0xba, 0x18, 0xff, 0xef,  // MOV AX, 0 | MOV DX, FF18 | OUT DX, AX  ; Unmask Int0
+  0xEA, 0x00, 0x00, 0x00, 0x00,              // FAR JUMP to [patched segment:0000]
+}, 10);
+
+// Register load routine. This program gets patched with the client supplied register values.
+// It uses MOVs and POPs to set the register state as specified before the main program execution
+// begins.
+InlineProgram LOAD_PROGRAM("LOAD", {
+  0x00, 0x00,
+  0xB8, 0x00, 0x00, 0x8E, 0xD0, 0x89, 0xC4, 0x9D, 0xBB, 0x00, 0x00, 0xB9, 0x00, 0x00,
+  0xBA, 0x00, 0x00, 0xB8, 0x00, 0x00, 0x8E, 0xD0, 0xB8, 0x00, 0x00, 0x8E, 0xD8, 0xB8, 0x00, 0x00,
+  0x8E, 0xC0, 0xB8, 0x00, 0x00, 0x89, 0xC4, 0xB8, 0x00, 0x00, 0x89, 0xC5, 0xB8, 0x00, 0x00, 0x89,
+  0xC6, 0xB8, 0x00, 0x00, 0x89, 0xC7, 0xB8, 0x00, 0x00, 0xEA, 0x00, 0x00, 0x00, 0x00
+});
+
+InlineProgram LOAD_PROGRAM_286("LOAD_286", {
+  0x0F, 0x05, // LOADALL
+});
+
+// CPU/FPU ID program.
+// FPU detection is performed by issuing a `fnstcw` instruction followed by wait.
+// If a write of 0x03FF is detected, then a FPU is present.
+//
+// CPU detection is pretty simple - Intel CPUs have the undocumented and very fast instruction
+// SALC at D6 - NEC CPUs have an undefined alias for XLAT that takes a lot longer. We can simply
+// measure the execution time to determine Intel vs NEC.
+// This routine is run first, in the reset vector, before the Jump program.
+//
+// CPU detection is only relevant for hats that support multiple CPUs which is pretty much just 
+// the original Arduino8088 hat that supports the 8088, 8086, V20, and V30 CPUs.
+InlineProgram CPUID_PROGRAM("CPUID", {
+  0xD6,                    // SALC/Undefined
+  0xD9, 0x3E, 0x00, 0x00,  // fnstcw [0000]
+  0x90,                    // wait
+  0x90, 0x90,              // NOPs to absorb fetch while RQ/GT runs
+});
+
+// 8080 Emulation enter program. This program executes the BRKEM opcode to enter 8080 emulation
+// on a compatible NEC CPU such as the V20 or V30.
+// The first four bytes are used as the BRKEM vector segment and offset, and are patched with the
+// values of CS and IP.
+InlineProgram EMU_ENTER_PROGRAM("EMU_ENTER", {
+  0x00, 0x00, 0x00, 0x00, 0x0F, 0xFF, BRKEM_VECTOR
+});
+
+// 8080 Emulation exit program. This program executes PUSH PSW to preseve the 8080 flag state,
+// then POP PSW to restore BP, then executes RETEM to exit emulation mode.
+InlineProgram EMU_EXIT_PROGRAM("EMU_EXIT", {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 6 NOPs to hide program from client
+  0xF5, 0x00,                          // PUSH PSW, NOP
+  0x33, 0x33,                          // INX SP, INX SP to restore 8080 stack pointer
+  0xED, 0xFD,                          // RETEM
+});
+  
+// Far Jump program. We feed this program to the CPU at the reset vector. On an 8088 the reset
+// vector is at FFFF:0000 or address FFFF0 - giving us only 16 bytes to the end of the address
+// space, where we will wrap around. We could wrap, but it gets a bit confusing, so instead
+// we'll jump to a clean new segment. The exact segment is configurable with LOAD_SEG which
+// will get patched into this routine as the destination segment.
+InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xEA, 0x00, 0x00, 0x00, 0x00}, 3);
+
+// // STOREALL 
+// uint8_t JUMP_VECTOR[] = {
+//   0xF1, 0x0F, 0x04, 0x00, 0x00
+// };
+
+// NMI vector. Not really a program, but using the program read function to read the vector
+// address is conveneient.
+InlineProgram NMI_VECTOR("NMI_VECTOR", { 0x00, 0x00, 0x00, 0x00 }, 2);
+
+// Register store routine.
+// Six NOPs have been padded to the front of the STORE routine to hide it from appearing in
+// client cycle traces.
+
+// The store program for NMI-based program termination.
+InlineProgram STORE_PROGRAM_NMI("STORE_NMI", {
+  0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+  0xE7, 0xFE, 0x89, 0xD8, 0xE7, 0xFE, 0x89, 0xC8, 0xE7, 0xFE, 0x89, 0xD0, 0xE7, 0xFE, 0x58, 0xE7,
+  0xFE, 0x58, 0xE7, 0xFE, 0x58, 0xE7, 0xFE, 0x8C, 0xD0, 0xE7, 0xFE, 0x89, 0xE0, 0xE7, 0xFE, 0x8C,
+  0xD8, 0xE7, 0xFE, 0x8C, 0xC0, 0xE7, 0xFE, 0x89, 0xE8, 0xE7, 0xFE, 0x89, 0xF0, 0xE7, 0xFE, 0x89,
+  0xF8, 0xE7, 0xFE, 0xB0, 0xFF, 0xE6, 0xFD
+});
+
+// The STORE program for inline program termination. This requires queue state availability.
+InlineProgram STORE_PROGRAM_INLINE("STORE_INLINE",  {
+  0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+  0xE7, 0xFE, 0x89, 0xD8, 0xE7, 0xFE, 0x89, 0xC8, 0xE7, 0xFE, 0x89, 0xD0, 0xE7, 0xFE, 0x8C, 0xD0,
+  0xE7, 0xFE, 0x89, 0xE0, 0xE7, 0xFE, 0xB8, 0x00, 0x00, 0x8E, 0xD0, 0xB8, 0x04, 0x00, 0x89, 0xC4,
+  0x9C, 0xE8, 0x00, 0x00, 0x8C, 0xC8, 0xE7, 0xFE, 0x8C, 0xD8, 0xE7, 0xFE, 0x8C, 0xC0, 0xE7, 0xFE,
+  0x89, 0xE8, 0xE7, 0xFE, 0x89, 0xF0, 0xE7, 0xFE, 0x89, 0xF8, 0xE7, 0xFE, 0xB0, 0xFF, 0xE6, 0xFD
+});
+
+InlineProgram NEC_PREFETCH_PROGRAM("NEC_PREFETCH", {
+  0x63, 0xC0
+});

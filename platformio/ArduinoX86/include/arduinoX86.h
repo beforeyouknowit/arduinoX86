@@ -27,13 +27,14 @@
 #include <stdint.h>
 
 #include <config.h>
-#include <hat_config.h>
+#include <serial_config.h>
 #include <ansi_color.h>
-#include "cpu_server.h"
 #include <BusTypes.h>
 #include <Hat.h>
 #include <gpio_pins.h>
 #include <InstructionQueue.h>
+#include <InlineProgram.h>
+#include <programs.h>
 
 // Code segment to use for load program.
 const uint16_t LOAD_SEG = 0xD000;
@@ -197,7 +198,6 @@ typedef struct cpu {
   bool do_prefetch; // Flag that determines if we enter Prefetch state and execute a prefetch program.
   uint32_t cpuid_counter; // Cpuid cycle counter. Used to time to identify the CPU type.
   uint32_t cpuid_queue_reads; // Number of queue reads since reset of Cpuid cycle counter.
-  machine_state_t v_state;
   uint32_t state_begin_time;
   uint32_t address_bus;
   uint32_t address_latch;
@@ -235,10 +235,8 @@ typedef struct cpu {
   bool nmi_terminate; // Whether we are entering ExecuteFinalize via NMI termination.
   uint8_t nmi_checkpoint; // How many reads we have done at the NMI IVT address.
   uint16_t nmi_buf_cursor;
-
-  const uint8_t *program;
-  size_t program_len;
-  uint16_t *program_pc;
+  InlineProgram *program = &JUMP_VECTOR;
+  CallStackFrame nmi_stack_frame; // NMI stack frame for 286/386 CPUs
 } Cpu;
 
 typedef struct i8288 {
@@ -326,15 +324,13 @@ static const uint8_t BIT_REVERSE_TABLE[256] =
 // --------------------- Function declarations --------------------------------
 
 // main.cpp
-void patch_vector_pgm(uint8_t *pgm, uint16_t seg, size_t offset);
 void cycle();
 void set_error(const char *msg);
 void clear_error();
 bool cpu_id();
-void change_state(machine_state_t new_state);
-void patch_load_pgm(uint8_t *pgm, volatile registers1_t *reg);
-void patch_brkem_pgm(uint8_t *pgm, volatile registers1_t *regs);
-uint16_t read_program(const uint8_t *program, size_t len, uint16_t *pc, uint32_t address, ActiveBusWidth width);
+void patch_load_pgm(InlineProgram *pgm, volatile registers1_t *reg);
+void patch_brkem_pgm(InlineProgram *pgm, volatile registers1_t *regs);
+
 void convert_inline_registers(volatile void *inline_regs);
 void reverse_stack_buf();
 bool is_transfer_done();
@@ -363,7 +359,6 @@ void read_address(bool peek);
 void read_status0();
 uint8_t read_status0_raw();
 bool cpu_reset();
-//bool cpu_reset2();
 void cpu_set_width(cpu_width_t width);
 const char *get_opcode_str(uint8_t op1, uint8_t op2, bool modrm);
 

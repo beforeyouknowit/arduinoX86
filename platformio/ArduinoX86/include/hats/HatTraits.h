@@ -27,10 +27,10 @@
 
 #include <config.h>
 
-struct Hat8088;
-struct Hat80186;
-struct Hat80286;
-struct Hat80386;
+class Hat8088;
+class Hat80186;
+class Hat80286;
+class Hat80386;
 
 template<typename Hat>
 struct HatTraits {

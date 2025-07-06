@@ -31,6 +31,7 @@
 #include <CpuTypes.h>
 #include <gpio_pins.h>
 #include <hats/Pins.h>
+#include <ansi_color.h>
 
 template<typename Derived>
 class HatBase {
@@ -42,13 +43,13 @@ class HatBase {
     }
 
     template<typename Board>
-    static CpuResetResult resetCpu(Board& board) {
+    CpuResetResult resetCpu(Board& board) {
       // dispatch to Derived::cpuResetImpl()
-      return Derived::resetCpuImpl(board);
+      return static_cast<Derived*>(this)->resetCpuImpl(board);
     }
 
-    static void tickCpu() {
-      Derived::tickCpuImpl();
+    void tickCpu() {
+      static_cast<Derived*>(this)->tickCpuImpl();
     };
 
     static void writePin(OutputPin pin, bool value) {
@@ -195,9 +196,9 @@ class HatBase {
 
     static constexpr uint32_t PORT_J_DBUS_MASK      = 0x0CFFC000;
     static constexpr uint32_t PORT_J_DBUS_READ      = 0;
-    static constexpr uint32_t PORT_J_DBUS_WRITE     = 0x51411555;
-    static constexpr uint32_t PORT_J_DBUS_WRITE_LO  = 0x51410015;
-    static constexpr uint32_t PORT_J_DBUS_WRITE_HI  = 0x04101540;
+    static constexpr uint32_t PORT_J_DBUS_WRITE     = 0x51011555; 
+    static constexpr uint32_t PORT_J_DBUS_WRITE_LO  = 0x51010015; // J15, J14, J12, J2, J1, J0
+    static constexpr uint32_t PORT_J_DBUS_WRITE_HI  = 0x00011540; // J6, J5, J4, J3
 
     static constexpr uint32_t PORT_G_DBUS_MASK      = 0xF0FFFFFF;
     static constexpr uint32_t PORT_G_DBUS_READ      = 0;

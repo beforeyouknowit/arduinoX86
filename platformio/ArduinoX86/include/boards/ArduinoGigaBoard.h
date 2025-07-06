@@ -26,7 +26,7 @@
 #include <Arduino.h>
 #include <config.h>
 #include <gpio_pins.h>
-#include <hat_config.h>
+#include <serial_config.h>
 #include <DebugPrint.h>
 #include "../hats/HatTraits.h"
 
