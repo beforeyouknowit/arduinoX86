@@ -27,7 +27,6 @@ mod queue;
 #[macro_use]
 pub(crate) mod opcodes;
 mod code_stream;
-mod registers;
 mod remote_program;
 
 use std::str::FromStr;
@@ -41,7 +40,7 @@ use opcodes::*;
 use queue::*;
 use remote_program::RemoteProgram;
 
-pub use crate::registers::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
+pub use ard808x_client::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
 pub use queue::QueueDataType;
 
 pub const WAIT_STATES: u32 = 0;
@@ -263,7 +262,7 @@ impl RemoteCpu<'_> {
                 log::error!("Emulation mode requested but detected CPU type does not support it.");
                 std::process::exit(1);
             } else {
-                match client.emu8080() {
+                match client.set_flags(ServerFlags::EMU_8080) {
                     Ok(_) => {
                         log::debug!("Emulation mode enabled for CPU type: {:?}", server_cpu_type);
                     }
@@ -303,7 +302,7 @@ impl RemoteCpu<'_> {
         }
 
         if do_emu8080 && server_cpu_type.has_8080_emulation() {
-            match client.emu8080() {
+            match client.set_flags(ServerFlags::EMU_8080) {
                 Ok(result_code) if result_code == true => {
                     log::debug!("8080 Emulation flag successfully set.");
                 }

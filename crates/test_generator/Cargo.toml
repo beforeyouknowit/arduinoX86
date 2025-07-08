@@ -1,0 +1,19 @@
+[package]
+name = "test_generator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+log.workspace = true
+env_logger.workspace = true
+clap = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+rand.workspace = true
+iced-x86.workspace = true
+
+ard808x_client = { path = "../ard808x_client" }

@@ -2,7 +2,7 @@
 members = [
     "crates/ard808x_client",
     "crates/ard808x_cpu",
-    "crates/exec_program",
+    "crates/exec_program", "crates/test_generator",
 ]
 resolver = "2"
 default-members = ["crates/exec_program"]
@@ -21,5 +21,14 @@ log = "0.4"
 serialport = "4.7.2"
 modular-bitfield = "0.11"
 binrw = "0.14"
+serde = { version = "1.0", features = ["derive"] }
+toml = { version = "0.8" }
+anyhow = "1.0"
+rand = "0.9"
+[workspace.dependencies.iced-x86]
+version = "1.21"
+default-features = false
+# See below for all features
+features = ["std", "decoder", "nasm", "instr_info", "serde"]
 
 #serialport = { git = "https://github.com/dbalsom/serialport-rs", branch = "arduino-fix" }

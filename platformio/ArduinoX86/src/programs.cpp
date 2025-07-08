@@ -90,10 +90,8 @@ InlineProgram EMU_EXIT_PROGRAM("EMU_EXIT", {
 // will get patched into this routine as the destination segment.
 InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xEA, 0x00, 0x00, 0x00, 0x00}, 3);
 
-// // STOREALL 
-// uint8_t JUMP_VECTOR[] = {
-//   0xF1, 0x0F, 0x04, 0x00, 0x00
-// };
+// STOREALL opcode for 286. 
+InlineProgram STOREALL_PROGRAM("STOREALL", { 0xF1, 0x0F, 0x04 });
 
 // NMI vector. Not really a program, but using the program read function to read the vector
 // address is conveneient.

@@ -1,4 +1,7 @@
 #![allow(dead_code, unused_variables)]
+
+mod registers;
+
 use std::io::{Read, Write};
 use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc, str};
 
@@ -6,6 +9,52 @@ use log;
 use serialport::{ClearBuffer, SerialPort};
 
 pub const ARDUINO_BAUD: u32 = 1000000;
+pub use registers::*;
+
+pub struct ServerFlags;
+
+impl ServerFlags {
+    pub const EMU_8080: u32 = 0x0000_0001; // 8080 emulation enabled
+    pub const EXECUTE_AUTOMATIC: u32 = 0x0000_0002; // Execute automatically after load
+}
+
+/// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
+#[derive(Copy, Clone, Debug)]
+pub enum ServerCommand {
+    CmdNull = 0x00,
+    CmdVersion = 0x01,
+    CmdReset = 0x02,
+    CmdLoad = 0x03,
+    CmdCycle = 0x04,
+    CmdReadAddressLatch = 0x05,
+    CmdReadStatus = 0x06,
+    CmdRead8288Command = 0x07,
+    CmdRead8288Control = 0x08,
+    CmdReadDataBus = 0x09,
+    CmdWriteDataBus = 0x0A,
+    CmdFinalize = 0x0B,
+    CmdBeginStore = 0x0C,
+    CmdStore = 0x0D,
+    CmdQueueLen = 0x0E,
+    CmdQueueBytes = 0x0F,
+    CmdWritePin = 0x10,
+    CmdReadPin = 0x11,
+    CmdGetProgramState = 0x12,
+    CmdGetLastError = 0x13,
+    CmdGetCycleState = 0x14,
+    CmdNull2 = 0x15,
+    CmdPrefetchStore = 0x16,
+    CmdReadAddressU = 0x17,
+    CmdCpuType = 0x18,
+    CmdSetFlags = 0x19,
+    CmdPrefetch = 0x1A,
+    CmdInitScreen = 0x1B,
+    CmdStoreAll = 0x1C,
+    CmdSetRandomSeed = 0x1D,
+    CmdRandomizeMemory = 0x1E,
+    CmdSetMemory = 0x1F,
+    CmdInvalid,
+}
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum TState {
@@ -259,6 +308,15 @@ pub enum RegisterSetType {
     Intel286,
 }
 
+impl From<ServerCpuType> for RegisterSetType {
+    fn from(cpu_type: ServerCpuType) -> Self {
+        match cpu_type {
+            ServerCpuType::Intel80286 => RegisterSetType::Intel286,
+            _ => RegisterSetType::Intel8088,
+        }
+    }
+}
+
 impl From<u8> for RegisterSetType {
     fn from(value: u8) -> Self {
         match value {
@@ -276,40 +334,6 @@ impl From<RegisterSetType> for u8 {
             RegisterSetType::Intel286 => 1,
         }
     }
-}
-
-/// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
-#[derive(Copy, Clone, Debug)]
-pub enum ServerCommand {
-    CmdNull = 0x00,
-    CmdVersion = 0x01,
-    CmdReset = 0x02,
-    CmdLoad = 0x03,
-    CmdCycle = 0x04,
-    CmdReadAddressLatch = 0x05,
-    CmdReadStatus = 0x06,
-    CmdRead8288Command = 0x07,
-    CmdRead8288Control = 0x08,
-    CmdReadDataBus = 0x09,
-    CmdWriteDataBus = 0x0A,
-    CmdFinalize = 0x0B,
-    CmdBeginStore = 0x0C,
-    CmdStore = 0x0D,
-    CmdQueueLen = 0x0E,
-    CmdQueueBytes = 0x0F,
-    CmdWritePin = 0x10,
-    CmdReadPin = 0x11,
-    CmdGetProgramState = 0x12,
-    CmdGetLastError = 0x13,
-    CmdGetCycleState = 0x14,
-    CmdNull2 = 0x15,
-    CmdPrefetchStore = 0x16,
-    CmdReadAddressU = 0x17,
-    CmdCpuType = 0x18,
-    CmdEmulate8080 = 0x19,
-    CmdPrefetch = 0x1A,
-    CmdInitScreen = 0x1B,
-    CmdInvalid,
 }
 
 /// [ProgramState] represents the current state of the Arduino808X server.
@@ -330,6 +354,8 @@ pub enum ProgramState {
     Store,
     StoreDone,
     Done,
+    StoreAll,
+    Error,
 }
 
 /// Convert a raw u8 value received from the Arduino808X server to a [ProgramState].
@@ -352,6 +378,8 @@ impl TryFrom<u8> for ProgramState {
             0x0C => Ok(ProgramState::Store),
             0x0D => Ok(ProgramState::StoreDone),
             0x0E => Ok(ProgramState::Done),
+            0x0F => Ok(ProgramState::StoreAll),
+            0x10 => Ok(ProgramState::Error),
             _ => Err(CpuClientError::BadValue),
         }
     }
@@ -474,6 +502,7 @@ pub enum CpuClientError {
     ReadFailure,
     WriteFailure,
     BadValue,
+    BadParameter,
     ReadTimeout,
     EnumerationError,
     DiscoveryError,
@@ -492,6 +521,9 @@ impl Display for CpuClientError {
             }
             CpuClientError::BadValue => {
                 write!(f, "Received invalid value from command.")
+            }
+            CpuClientError::BadParameter => {
+                write!(f, "Command was given an invalid parameter.")
             }
             CpuClientError::ReadTimeout => {
                 write!(f, "Response timeout.")
@@ -735,10 +767,33 @@ impl CpuClient {
         self.read_result_code()
     }
 
-    pub fn store_registers_to_buf(&mut self, reg_data: &mut [u8]) -> Result<bool, CpuClientError> {
+    pub fn store_registers_to_buf(&mut self, reg_data: &mut [u8]) -> Result<u8, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdStore)?;
+        let mut buf: [u8; 1] = [0; 1];
+        self.recv_buf(&mut buf)?;
+
+        match buf[0] {
+            0 => {
+                // Type 1 register set (Intel808X)
+                if reg_data.len() < 28 {
+                    return Err(CpuClientError::BadParameter);
+                }
+            }
+            1 => {
+                // Type 2 register set (Intel286)
+                if reg_data.len() < 102 {
+                    return Err(CpuClientError::BadParameter);
+                }
+            }
+            _ => {
+                // invalid register set type
+                return Err(CpuClientError::BadValue);
+            }
+        }
         self.recv_buf(reg_data)?;
-        self.read_result_code()
+        self.read_result_code()?;
+
+        Ok(buf[0])
     }
 
     pub fn cycle(&mut self) -> Result<bool, CpuClientError> {
@@ -903,8 +958,49 @@ impl CpuClient {
         Ok(cycle_state)
     }
 
-    pub fn emu8080(&mut self) -> Result<bool, CpuClientError> {
-        self.send_command_byte(ServerCommand::CmdEmulate8080)?;
+    pub fn set_flags(&mut self, flags: u32) -> Result<bool, CpuClientError> {
+        let buf: [u8; 4] = flags.to_le_bytes();
+        self.send_command_byte(ServerCommand::CmdSetFlags)?;
+        self.send_buf(&buf)?;
+        self.read_result_code()
+    }
+
+    pub fn storeall(&mut self) -> Result<bool, CpuClientError> {
+        self.send_command_byte(ServerCommand::CmdStoreAll)?;
+        self.read_result_code()
+    }
+
+    pub fn randomize_memory(&mut self) -> Result<bool, CpuClientError> {
+        self.send_command_byte(ServerCommand::CmdRandomizeMemory)?;
+        self.read_result_code()
+    }
+
+    pub fn set_random_seed(&mut self, seed: u32) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 4] = seed.to_le_bytes();
+        self.send_command_byte(ServerCommand::CmdSetRandomSeed)?;
+        self.send_buf(&buf)?;
+        self.read_result_code()
+    }
+
+    pub fn set_memory(&mut self, address: u32, data_buf: &[u8]) -> Result<bool, CpuClientError> {
+        log::trace!(
+            "set_memory(): uploading {} bytes to address 0x{:08X}",
+            data_buf.len(),
+            address
+        );
+        let mut buf: [u8; 4] = address.to_le_bytes();
+        let data_buf_len = data_buf.len() as u32;
+        if data_buf_len == 0 {
+            return Err(CpuClientError::BadValue);
+        }
+        self.send_command_byte(ServerCommand::CmdSetMemory)?;
+        // Send address
+        self.send_buf(&mut buf)?;
+        // Send size
+        buf = data_buf_len.to_le_bytes();
+        self.send_buf(&mut buf)?;
+        // Send data
+        self.send_buf(data_buf)?;
         self.read_result_code()
     }
 }

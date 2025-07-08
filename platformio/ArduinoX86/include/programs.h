@@ -35,6 +35,7 @@ extern InlineProgram EMU_ENTER_PROGRAM;
 extern InlineProgram EMU_EXIT_PROGRAM;
 extern InlineProgram JUMP_VECTOR;
 extern InlineProgram NMI_VECTOR;
+extern InlineProgram STOREALL_PROGRAM;
 extern InlineProgram STORE_PROGRAM_NMI;
 extern InlineProgram STORE_PROGRAM_INLINE;
 extern InlineProgram NEC_PREFETCH_PROGRAM;

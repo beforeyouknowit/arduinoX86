@@ -48,6 +48,7 @@ constexpr const char* getColor(DebugType stage) {
     case DebugType::BUS:       return cyan;
     case DebugType::PROTO:     return yellow;
     case DebugType::CMD:       return bright_cyan;
+    case DebugType::ERROR:     return red;
     default:                  return reset;
   }
 }
@@ -55,21 +56,43 @@ constexpr const char* getColor(DebugType stage) {
 // Debug print mixin templated on Serial port type
 template<typename SerialPort>
 class DebugPrintMixin {
+
+private:
+  static constexpr size_t BUFFER_SIZE = 256;
+  char buffer_[BUFFER_SIZE];
+  char printf_buffer_[BUFFER_SIZE];
+  char *buffer_ptr_ = buffer_;
+  size_t buffer_remain_ = BUFFER_SIZE;
+  char have_deferred_buffer_ = false;
+
 protected:
   SerialPort& serial;
   DebugFilter filter;
 
 public:
-  explicit DebugPrintMixin(SerialPort& s) : serial(s) {}
+  explicit DebugPrintMixin(SerialPort& s) : serial(s) {
+    buffer_[0] = '\0';
+    printf_buffer_[0] = '\0';
+  }
 
   void setDebugType(DebugType stage, bool enabled) {
     filter.setTypeEnabled(stage, enabled);
   }
 
-  template<typename T>
+  void debugPrintf(DebugType stage, bool defer, const char* fmt, ...);
+
   // String overload
-  inline void debugPrint(DebugType stage, const char* text) {
+  inline void debugPrint(DebugType stage, const char* text, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+    
+    if (defer) {
+      // Defer printing to avoid blocking
+      snprintf(buffer_ptr_, buffer_remain_, "%s%s%s", getColor(stage), text, ansi::reset);
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.print(text);
     serial.print(ansi::reset);
@@ -77,8 +100,17 @@ public:
 
   // Generic value overload
   template<typename T>
-  inline void debugPrint(DebugType stage, T value) {
+  inline void debugPrint(DebugType stage, T value, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+
+    if(defer) {
+      String s = String(value);
+      snprintf(buffer_ptr_, buffer_remain_, "%s%s%s", getColor(stage), s.c_str(), ansi::reset);
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.print(value);
     serial.print(ansi::reset);
@@ -87,8 +119,20 @@ public:
   // Generic value with base (for integers)
   
   template<typename T>
-  inline void debugPrint(DebugType stage, T value, int base) {
+  inline void debugPrint(DebugType stage, T value, int base, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+    if(defer) {
+      // Must convert base
+      if (base == 16) {
+        snprintf(buffer_ptr_, buffer_remain_, "%s%lx%s", getColor(stage), static_cast<unsigned long>(value), ansi::reset);
+      } else {
+        snprintf(buffer_ptr_, buffer_remain_, "%s%ld%s", getColor(stage), static_cast<long>(value), ansi::reset);
+      }
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.print(value, base);
     serial.print(ansi::reset);
@@ -97,8 +141,16 @@ public:
   // --- Print with newline ---
 
   // String overload
-  inline void debugPrintln(DebugType stage, const char* text) {
+  inline void debugPrintln(DebugType stage, const char* text, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+    
+    if (defer) {
+      snprintf(buffer_ptr_, buffer_remain_, "%s%s%s\n\r", getColor(stage), text, ansi::reset);
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.println(text);
     serial.print(ansi::reset);
@@ -106,8 +158,18 @@ public:
 
   // Generic value overload
   template<typename T>
-  inline void debugPrintln(DebugType stage, T value) {
+  inline void debugPrintln(DebugType stage, T value, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+
+    if (defer) {
+      // Convert value to string
+      String s = String(value);
+      snprintf(buffer_ptr_, buffer_remain_, "%s%s%s\n\r", getColor(stage), s.c_str(), ansi::reset);
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.println(value);
     serial.print(ansi::reset);
@@ -115,18 +177,53 @@ public:
 
   // Generic value with base
   template<typename T>
-  inline void debugPrintln(DebugType stage, T value, int base) {
+  inline void debugPrintln(DebugType stage, T value, int base, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
+
+    if (defer) {
+      // Must convert base
+      if (base == 16) {
+        snprintf(buffer_ptr_, buffer_remain_, "%s%lx%s\n\r", getColor(stage), static_cast<unsigned long>(value), ansi::reset);
+      } else {
+        snprintf(buffer_ptr_, buffer_remain_, "%s%ld%s\n\r", getColor(stage), static_cast<long>(value), ansi::reset);
+      }
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.print(getColor(stage));
     serial.println(value, base);
     serial.print(ansi::reset);
   }
 
   // Println with no arguments, just newline with color
-  inline void debugPrintln(DebugType stage) {
+  inline void debugPrintln(DebugType stage, bool defer = false) {
     if (!serial || !filter.isEnabled(stage)) return;
-    serial.print(getColor(stage));
+
+    if (defer) {
+      // Defer printing to avoid blocking
+      snprintf(buffer_ptr_, buffer_remain_, "\n\r");
+      buffer_ptr_ += strlen(buffer_ptr_);
+      buffer_remain_ -= strlen(buffer_ptr_);
+      have_deferred_buffer_ = true;
+      return;
+    }
     serial.println();
-    serial.print(ansi::reset);
+  }
+
+  inline void debugPrintDeferred() {
+    if (!have_deferred_buffer_) return;
+
+    serial.print(buffer_);
+    // Reset buffer
+    have_deferred_buffer_ = false;
+    buffer_ptr_ = buffer_;
+    buffer_remain_ = BUFFER_SIZE;
+    buffer_[0] = '\0'; 
+  }
+
+  inline bool haveDeferredBuffer() {
+    return have_deferred_buffer_;
   }
 };

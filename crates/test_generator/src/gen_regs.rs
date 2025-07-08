@@ -15,34 +15,30 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
 
-#pragma once
+use crate::{Registers, TestContext, TestGen};
+use ard808x_client::RandomizeOpts;
 
-#include <Board.h>
-#include <Hat.h>
-#include <BusEmulator.h>
+pub fn randomize_v2(context: &mut TestContext, config: TestGen, regs: &mut Registers) {
+    let random_opts = RandomizeOpts {
+        weight_zero: config.reg_zero_chance,
+        weight_ones: config.reg_ff_chance,
+        randomize_flags: true,
+        clear_trap_flag: true,
+        clear_interrupt_flag: true,
+        randomize_general: true,
+        randomize_x: false,
+        randomize_msw: false,
+        randomize_tr: false,
+        randomize_ldt: false,
+        randomize_segment_descriptors: false,
+        randomize_table_descriptors: false,
+    };
 
-template<typename BoardType, typename HatType> class BoardController;
-template<typename BoardType, typename HatType> class CommandServer;
-
-extern Cpu CPU;
-extern Intel8288 I8288;
-extern BoardController<BoardType,HatType> Controller;
-
-namespace ArduinoX86 {
-  extern CommandServer<BoardType,HatType> Server;
-  extern BusEmulator *Bus;
+    regs.randomize(&random_opts, &mut context.rng);
 }
-
-// cpu_server.cpp
-extern const char RESPONSE_CHRS[];
-extern const char VERSION_DAT[];
-extern const size_t VERSION_DAT_LEN;
-extern const char MACHINE_STATE_CHARS[];
-extern const char * const MACHINE_STATE_STRINGS[];
-extern const char * const CMD_STRINGS[];

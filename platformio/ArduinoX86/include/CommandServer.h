@@ -30,22 +30,27 @@
 //#include <BoardController.h>
 #include <config.h>
 
+#define FLAG_EMU_8080 0x00000001
+#define FLAG_EXECUTE_AUTOMATIC 0x00000002
+
 enum class ServerState: uint8_t {
-  Reset = 0,
-  CpuId,
-  CpuSetup,
-  JumpVector,
-  Load,
-  LoadDone,
-  EmuEnter,
-  Prefetch,
-  Execute,
-  ExecuteFinalize,
-  ExecuteDone,
-  EmuExit,
-  Store,
-  StoreDone,
-  Done
+  Reset = 0x00,
+  CpuId = 0x01,
+  CpuSetup = 0x02,
+  JumpVector = 0x03,
+  Load = 0x04,
+  LoadDone = 0x05,
+  EmuEnter = 0x06,
+  Prefetch = 0x07,
+  Execute = 0x08,
+  ExecuteFinalize = 0x09,
+  ExecuteDone = 0x0A,
+  EmuExit = 0x0B,
+  Store = 0x0C,
+  StoreDone = 0x0D,
+  Done = 0x0E,
+  StoreAll = 0x0F,
+  Error
 };
 
 template<typename BoardType, typename HatType> class BoardController;
@@ -59,7 +64,7 @@ public:
   enum class ServerCommand {
     CmdNone            = 0x00,
     CmdVersion         = 0x01,
-    CmdReset           = 0x02,
+    CmdResetCpu        = 0x02,
     CmdLoad            = 0x03,
     CmdCycle           = 0x04,
     CmdReadAddressLatch= 0x05,
@@ -82,10 +87,14 @@ public:
     CmdPrefetchStore   = 0x16,
     CmdReadAddress     = 0x17,
     CmdCpuType         = 0x18,
-    CmdEmulate8080     = 0x19,
+    CmdSetFlags        = 0x19,
     CmdPrefetch        = 0x1A,
     CmdInitScreen      = 0x1B,
-    CmdInvalid         = 0x1C,
+    CmdStoreAll        = 0x1C,
+    CmdSetRandomSeed   = 0x1D,
+    CmdRandomizeMem    = 0x1E,
+    CmdSetMemory       = 0x1F,
+    CmdInvalid
   };
 
   enum class CommandState: uint8_t {
@@ -94,7 +103,7 @@ public:
     ExecutingCommand
   };
 
-
+  void reset();
   void run();
   void change_state(ServerState new_state);
   ServerState state() const { return state_; }
@@ -103,7 +112,12 @@ public:
   const char* get_command_name(ServerCommand cmd);
   const char* get_state_string(ServerState state);
   char get_state_char(ServerState state);
-
+  ServerState get_state() const {
+    return state_;
+  }
+  uint32_t get_flags() const {
+    return flags_;
+  }
   explicit CommandServer(BoardController<BoardType,HatType>& controller); 
 
 private:
@@ -128,6 +142,7 @@ private:
   size_t commandByteN_ = 0;
   unsigned long commandStartTime_ = 0;
   unsigned long stateBeginTime_ = 0;
+  uint32_t flags_ = 0; 
 
   // Error handling
   static constexpr size_t MAX_ERROR_LEN = 256;
@@ -199,7 +214,7 @@ private:
   }
 
   bool cmd_version(void);
-  bool cmd_reset(void);
+  bool cmd_reset_cpu(void);
   bool cmd_load(void);
   bool cmd_cycle(void);
   bool cmd_read_address_latch(void);
@@ -222,8 +237,12 @@ private:
   bool cmd_read_address(void);
   bool cmd_cpu_type(void);
   bool cmd_invalid(void);
-  bool cmd_emu8080(void);
+  bool cmd_set_flags(void);
   bool cmd_prefetch(void);
   bool cmd_init_screen(void);
+  bool cmd_storeall(void);
+  bool cmd_set_random_seed(void);
+  bool cmd_randomize_mem(void);
+  bool cmd_set_memory(void);
   bool cmd_null(void);
 };

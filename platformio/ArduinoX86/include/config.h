@@ -42,7 +42,8 @@
 #define DEBUG_BAUD_RATE 460800
 
 #define CMD_TIMEOUT 100 // Command timeout in milliseconds
-
+#define MAX_ERROR_CYCLES 5
+#define EXECUTE_TIMEOUT 1000
 // What vector to use for the BRKEM call. No reason to change this really.
 #define BRKEM_VECTOR ((uint8_t)0x00)
 
@@ -89,7 +90,7 @@
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
 #define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
-#define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Debug the serial cpu_server protocol
+#define DEBUG_PROTO     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Debug the serial cpu_server protocol
 #define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE)
 
 #define DEBUG_BUS_COLOR (ansi::bright_green)

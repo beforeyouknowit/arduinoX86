@@ -13,6 +13,9 @@ struct Args {
     #[arg(long)]
     com_port: Option<String>,
 
+    #[arg(long, default_value_t = false)]
+    storeall: bool,
+
     // The binary file containing the register data. Produced from an assembly
     // file 'program_regs.asm'
     #[arg(long, required(true))]
@@ -100,6 +103,17 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if args.storeall {
+        // Just do STOREALL and exit.
+        if let Err(e) = cpu_client.storeall() {
+            eprintln!("Error executing STOREALL: {e}");
+            std::process::exit(1);
+        } else {
+            println!("STOREALL executed successfully.");
+            return;
+        }
+    }
 
     if args.nmi_on.is_some() && args.single_step {
         eprintln!("Cannot use NMI with single step mode!");

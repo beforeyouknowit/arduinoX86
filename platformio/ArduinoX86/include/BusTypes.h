@@ -36,7 +36,10 @@ enum class BusOperationType: uint8_t {
     IoRead8,
     IoRead16,
     IoWrite8,
-    IoWrite16
+    IoWrite16,
+    IntAck,
+    Halt,
+    Shutdown,
 };
 
 /// @brief Type of bus transfer. This is can be Code, Memory, or Io.

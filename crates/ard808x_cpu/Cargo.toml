@@ -16,5 +16,3 @@ crate-type = ["cdylib", "lib"]
 ard808x_client = { path = "../ard808x_client" }
 env_logger.workspace = true
 log.workspace = true
-modular-bitfield.workspace = true
-binrw.workspace = true

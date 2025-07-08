@@ -23,6 +23,8 @@
 use binrw::BinReaderExt;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::*;
+use rand::Rng;
+use std::io::{Cursor, Write};
 
 #[derive(Debug)]
 pub enum RemoteCpuRegisters {
@@ -158,6 +160,11 @@ impl RemoteCpuRegistersV1 {
         buf[26] = (self.di & 0xFF) as u8;
         buf[27] = ((self.di >> 8) & 0xFF) as u8;
     }
+
+    pub fn calculate_code_address(&self) -> u32 {
+        // Calculate the code address based on CS and IP
+        ((self.cs as u32) << 4) + (self.ip as u32)
+    }
 }
 
 impl From<&RemoteCpuRegistersV2> for RemoteCpuRegistersV1 {
@@ -224,8 +231,17 @@ impl From<&[u8]> for RemoteCpuRegistersV1 {
 
 #[bitfield]
 #[derive(Default, Debug)]
+pub struct SegmentDescriptorAccessByte {
+    pub d_type: B4,
+    pub s: B1,
+    pub dpl: B2,
+    pub p: B1,
+}
+
+#[bitfield]
+#[derive(Clone, Debug)]
 pub struct SegmentDescriptorV1 {
-    pub address: B24,
+    pub base_address: B24,
     pub d_type: B4,
     pub s: B1,
     pub dpl: B2,
@@ -233,9 +249,29 @@ pub struct SegmentDescriptorV1 {
     pub limit: B16,
 }
 
+impl Default for SegmentDescriptorV1 {
+    fn default() -> Self {
+        SegmentDescriptorV1::new()
+            .with_base_address(0)
+            .with_d_type(0x02)
+            .with_s(0)
+            .with_dpl(0)
+            .with_p(1)
+            .with_limit(0xFFFF)
+    }
+}
+
+impl SegmentDescriptorV1 {
+    pub fn to_buffer<W: Write>(&self, mut buffer: &mut W) -> std::io::Result<()> {
+        let bytes = self.clone().into_bytes();
+        buffer.write_all(&bytes)?;
+        Ok(())
+    }
+}
+
 /// [RemoteCpuRegistersV2] is the full set of registers for the Intel 80286.
 /// This structure is loaded via the LOADALL instruction, 0F 05.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct RemoteCpuRegistersV2 {
     pub x0: u16,
     pub x1: u16,
@@ -332,19 +368,19 @@ fn parse_v2(buf: &[u8]) -> Result<RemoteCpuRegistersV2, &'static str> {
     let idx = cursor.position();
     let desc_slice = &cursor.into_inner()[idx as usize..idx as usize + 48];
 
-    new_regs.es_desc = read_desc(desc_slice, 0);
-    new_regs.cs_desc = read_desc(desc_slice, 1);
-    new_regs.ss_desc = read_desc(desc_slice, 2);
-    new_regs.ds_desc = read_desc(desc_slice, 3);
-    new_regs.gdt_desc = read_desc(desc_slice, 4);
-    new_regs.ldt_desc = read_desc(desc_slice, 5);
-    new_regs.idt_desc = read_desc(desc_slice, 6);
-    new_regs.tss_desc = read_desc(desc_slice, 7);
+    new_regs.es_desc = read_descriptor(desc_slice, 0);
+    new_regs.cs_desc = read_descriptor(desc_slice, 1);
+    new_regs.ss_desc = read_descriptor(desc_slice, 2);
+    new_regs.ds_desc = read_descriptor(desc_slice, 3);
+    new_regs.gdt_desc = read_descriptor(desc_slice, 4);
+    new_regs.ldt_desc = read_descriptor(desc_slice, 5);
+    new_regs.idt_desc = read_descriptor(desc_slice, 6);
+    new_regs.tss_desc = read_descriptor(desc_slice, 7);
 
     Ok(new_regs)
 }
 
-fn read_desc(slice: &[u8], index: usize) -> SegmentDescriptorV1 {
+fn read_descriptor(slice: &[u8], index: usize) -> SegmentDescriptorV1 {
     // each descriptor is 6 bytes
     let start = index * 6;
     let end = start + 6;
@@ -354,8 +390,247 @@ fn read_desc(slice: &[u8], index: usize) -> SegmentDescriptorV1 {
     SegmentDescriptorV1::from_bytes(bytes)
 }
 
+impl Default for RemoteCpuRegistersV2 {
+    fn default() -> Self {
+        RemoteCpuRegistersV2 {
+            x0: 0,
+            x1: 0,
+            x2: 0x002A,  // X2 is always 2A (42).
+            msw: 0xFFF0, // MSW is always 0xFFF0 on reset.
+            x3: 0,
+            x4: 0,
+            x5: 0,
+            x6: 0,
+            x7: 0,
+            x8: 0,
+            x9: 0,
+            tr: 0,
+            flags: 0x0002, // Flags are always 0x0002 on reset (bit 1 is reserved and always 1)
+            ip: 0xFFF0,    // IP is always 0xFFF0 on reset (reset vector is F000:FFF0).
+            ldt: 0,
+            ds: 0,
+            ss: 0,
+            cs: 0xF000, // CS is always 0xF000 on reset (reset vector is F000:FFF0).
+            es: 0,
+            di: 0,
+            si: 0,
+            bp: 0,
+            sp: 0,
+            bx: 0,
+            dx: 0,
+            cx: 0,
+            ax: 0,
+            es_desc: SegmentDescriptorV1::default(),
+            cs_desc: SegmentDescriptorV1::default(),
+            ss_desc: SegmentDescriptorV1::default(),
+            ds_desc: SegmentDescriptorV1::default(),
+            gdt_desc: SegmentDescriptorV1::default(),
+            ldt_desc: SegmentDescriptorV1::default(),
+            idt_desc: SegmentDescriptorV1::default(),
+            tss_desc: SegmentDescriptorV1::default(),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct RandomizeOpts {
+    pub weight_zero: f32,
+    pub weight_ones: f32,
+    pub randomize_flags: bool,
+    pub clear_trap_flag: bool,
+    pub clear_interrupt_flag: bool,
+    pub randomize_general: bool,
+    pub randomize_x: bool,
+    pub randomize_msw: bool,
+    pub randomize_tr: bool,
+    pub randomize_ldt: bool,
+    pub randomize_segment_descriptors: bool,
+    pub randomize_table_descriptors: bool,
+}
+
 impl RemoteCpuRegistersV2 {
+    pub fn to_buffer<W: Write>(&self, buffer: &mut W) {
+        buffer.write_all(&self.x0.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x1.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x2.to_le_bytes()).unwrap();
+        buffer.write_all(&self.msw.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x3.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x4.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x5.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x6.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x7.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x8.to_le_bytes()).unwrap();
+        buffer.write_all(&self.x9.to_le_bytes()).unwrap();
+        buffer.write_all(&self.tr.to_le_bytes()).unwrap();
+        buffer.write_all(&self.flags.to_le_bytes()).unwrap();
+        buffer.write_all(&self.ip.to_le_bytes()).unwrap();
+        buffer.write_all(&self.ldt.to_le_bytes()).unwrap();
+        buffer.write_all(&self.ds.to_le_bytes()).unwrap();
+        buffer.write_all(&self.ss.to_le_bytes()).unwrap();
+        buffer.write_all(&self.cs.to_le_bytes()).unwrap();
+        buffer.write_all(&self.es.to_le_bytes()).unwrap();
+        buffer.write_all(&self.di.to_le_bytes()).unwrap();
+        buffer.write_all(&self.si.to_le_bytes()).unwrap();
+        buffer.write_all(&self.bp.to_le_bytes()).unwrap();
+        buffer.write_all(&self.sp.to_le_bytes()).unwrap();
+        buffer.write_all(&self.bx.to_le_bytes()).unwrap();
+        buffer.write_all(&self.dx.to_le_bytes()).unwrap();
+        buffer.write_all(&self.cx.to_le_bytes()).unwrap();
+        buffer.write_all(&self.ax.to_le_bytes()).unwrap();
+
+        // Write segment descriptors
+        self.es_desc
+            .to_buffer(buffer)
+            .expect("Failed to write es_desc");
+        self.cs_desc
+            .to_buffer(buffer)
+            .expect("Failed to write cs_desc");
+        self.ss_desc
+            .to_buffer(buffer)
+            .expect("Failed to write ss_desc");
+        self.ds_desc
+            .to_buffer(buffer)
+            .expect("Failed to write ds_desc");
+        self.gdt_desc
+            .to_buffer(buffer)
+            .expect("Failed to write gdt_desc");
+        self.ldt_desc
+            .to_buffer(buffer)
+            .expect("Failed to write ldt_desc");
+        self.idt_desc
+            .to_buffer(buffer)
+            .expect("Failed to write idt_desc");
+        self.tss_desc
+            .to_buffer(buffer)
+            .expect("Failed to write tss_desc");
+    }
+
     pub fn rewind_ip(&mut self, adjust: u16) {
         self.ip = self.ip.wrapping_sub(adjust);
+    }
+
+    pub fn clear_trap_flag(&mut self) {
+        // Clear the trap flag (bit 8) in the flags register.
+        self.flags &= !0x0100; // Clear bit 8
+    }
+    pub fn clear_interrupt_flag(&mut self) {
+        // Clear the interrupt flag (bit 9) in the flags register.
+        self.flags &= !0x0200; // Clear bit 9
+    }
+
+    /// Initialize segment descriptors with a base address calculated from the actual segment
+    /// value, as would be the case in real mode.
+    pub fn normalize_descriptors(&mut self) {
+        let es_base = (self.es as u32) << 4;
+        let cs_base = (self.cs as u32) << 4;
+        let ss_base = (self.ss as u32) << 4;
+        let ds_base = (self.ds as u32) << 4;
+
+        log::trace!("Using CS base of {:06X}", cs_base);
+        self.es_desc = SegmentDescriptorV1::default()
+            .with_base_address(es_base)
+            .with_limit(0xFFFF);
+
+        self.cs_desc = SegmentDescriptorV1::default()
+            .with_base_address(cs_base)
+            .with_limit(0xFFFF);
+
+        self.ss_desc = SegmentDescriptorV1::default()
+            .with_base_address(ss_base)
+            .with_limit(0xFFFF);
+
+        self.ds_desc = SegmentDescriptorV1::default()
+            .with_base_address(ds_base)
+            .with_limit(0xFFFF);
+    }
+
+    pub fn weighted_u16(weight_zero: f32, weight_ones: f32, rand: &mut rand::rngs::StdRng) -> u16 {
+        let random_value: f32 = rand.random();
+        if random_value < weight_zero {
+            0
+        } else if random_value < weight_zero + weight_ones {
+            0xFFFF // All bits set to 1
+        } else {
+            rand.random::<u16>() // Random value
+        }
+    }
+
+    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng) {
+        *self = RemoteCpuRegistersV2::default(); // Reset all registers to default values
+
+        if opts.randomize_flags {
+            self.flags = rand.random::<u16>() | 0x0002; // Set reserved bit
+        }
+        if opts.clear_trap_flag {
+            self.clear_trap_flag();
+        }
+        if opts.clear_interrupt_flag {
+            self.clear_interrupt_flag();
+        }
+
+        if opts.randomize_general {
+            self.ax = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.bx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.cx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.dx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.sp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.bp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.si = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.di = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.ds = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.ss = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.es = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.cs = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.ip = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+        }
+
+        if opts.randomize_x {
+            self.x0 = rand.random();
+            self.x1 = rand.random();
+            //self.x2 = rand.random(); // Cant set X2.
+            self.x3 = rand.random();
+            self.x4 = rand.random();
+            self.x5 = rand.random();
+            self.x6 = rand.random();
+            self.x7 = rand.random();
+            self.x8 = rand.random();
+            self.x9 = rand.random();
+        }
+
+        if opts.randomize_msw {
+            self.msw = rand.random::<u16>() & 0xFFF0; // Keep reserved bits
+        }
+
+        if opts.randomize_tr {
+            self.tr = rand.random::<u16>();
+        }
+
+        if opts.randomize_ldt {
+            self.ldt = rand.random::<u16>();
+        }
+
+        if opts.randomize_segment_descriptors {
+            let base_address: u32 = (rand.random::<u16>() as u32) << 4;
+            let limit: u16 = 0xFFFF;
+
+            // Randomize segment descriptors
+            self.es_desc = SegmentDescriptorV1::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+            self.cs_desc = SegmentDescriptorV1::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+            self.ss_desc = SegmentDescriptorV1::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+            self.ds_desc = SegmentDescriptorV1::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+        }
+    }
+
+    pub fn calculate_code_address(&self) -> u32 {
+        // Calculate the code address based on CS descriptor base and IP
+        self.cs_desc.base_address() + (self.ip as u32)
     }
 }

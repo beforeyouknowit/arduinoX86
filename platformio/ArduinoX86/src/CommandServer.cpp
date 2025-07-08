@@ -32,14 +32,28 @@
 #include <DebugFilter.h>
 
 #include <cstdarg>
-
 #include <programs.h>
+
+#if defined (ARDUINO_GIGA)
+#define MAX_BUFFER_LEN 4096
+#else
+#define MAX_BUFFER_LEN 512
+#endif
 
 template<typename BoardType, typename HatType>
 CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatType>& controller_)
   : controller_(controller_)
 {}
 
+
+template<typename BoardType, typename HatType>
+void CommandServer<BoardType,HatType>::reset() 
+{
+  ArduinoX86::Bus->reset_logging();
+  ArduinoX86::Bus->disable_logging();
+  change_state(ServerState::Done);
+  commandState_ = CommandState::WaitingForCommand;
+}
 
 /// @brief Runs the command server, processing incoming commands and executing them.
 /// @tparam BoardType 
@@ -147,7 +161,7 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
   switch(cmd) {
       case ServerCommand::CmdNone: return "CmdNone";
       case ServerCommand::CmdVersion: return "CmdVersion";
-      case ServerCommand::CmdReset: return "CmdReset";
+      case ServerCommand::CmdResetCpu: return "CmdResetCpu";
       case ServerCommand::CmdLoad: return "CmdLoad";
       case ServerCommand::CmdCycle: return "CmdCycle";
       case ServerCommand::CmdReadAddressLatch: return "CmdReadAddressLatch";
@@ -170,9 +184,13 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
       case ServerCommand::CmdPrefetchStore: return "CmdPrefetchStore";
       case ServerCommand::CmdReadAddress: return "CmdReadAddress";
       case ServerCommand::CmdCpuType: return "CmdCpuType";
-      case ServerCommand::CmdEmulate8080: return "CmdEmulate8080";
+      case ServerCommand::CmdSetFlags: return "CmdSetFlags";
       case ServerCommand::CmdPrefetch: return "CmdPrefetch";
       case ServerCommand::CmdInitScreen: return "CmdInitScreen";
+      case ServerCommand::CmdStoreAll: return "CmdStoreAll";
+      case ServerCommand::CmdSetRandomSeed: return "CmdSetRandomSeed";
+      case ServerCommand::CmdRandomizeMem: return "CmdRandomizeMem";
+      case ServerCommand::CmdSetMemory: return "CmdSetMemory";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -194,7 +212,10 @@ const char* CommandServer<BoardType, HatType>::get_state_string(ServerState stat
       case ServerState::EmuExit: return "EmuExit";
       case ServerState::Store: return "Store";
       case ServerState::StoreDone: return "StoreDone";
+      case ServerState::StoreAll: return "StoreAll";
       case ServerState::Done: return "Done";
+      case ServerState::Error: return "Error";
+      case ServerState::Prefetch: return "Prefetch";
       default: return "Invalid";
   }
 }
@@ -216,7 +237,9 @@ char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
       case ServerState::EmuExit: return '9';
       case ServerState::Store: return 'S';
       case ServerState::StoreDone: return 'T';
+      case ServerState::StoreAll: return 'A';
       case ServerState::Done: return 'D';
+      case ServerState::Error: return '!';
       default: return '?';
   }
 }
@@ -233,8 +256,8 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_null();
     case ServerCommand::CmdVersion:
         return cmd_version();
-    case ServerCommand::CmdReset:
-        return cmd_reset();
+    case ServerCommand::CmdResetCpu:
+        return cmd_reset_cpu();
     case ServerCommand::CmdLoad:
         return cmd_load();
     case ServerCommand::CmdCycle:
@@ -279,12 +302,20 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_read_address();
     case ServerCommand::CmdCpuType:
         return cmd_cpu_type();
-    case ServerCommand::CmdEmulate8080:
-        return cmd_emu8080();
+    case ServerCommand::CmdSetFlags:
+        return cmd_set_flags();
     case ServerCommand::CmdPrefetch:
         return cmd_prefetch();
     case ServerCommand::CmdInitScreen:
         return cmd_init_screen();
+    case ServerCommand::CmdStoreAll:
+        return cmd_storeall();        
+    case ServerCommand::CmdSetRandomSeed:
+        return cmd_set_random_seed();
+    case ServerCommand::CmdRandomizeMem:
+        return cmd_randomize_mem();
+    case ServerCommand::CmdSetMemory:
+        return cmd_set_memory();
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -321,7 +352,7 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
     switch(cmd) {
         case ServerCommand::CmdNone: return 0;
         case ServerCommand::CmdVersion: return 0;
-        case ServerCommand::CmdReset: return 0;
+        case ServerCommand::CmdResetCpu: return 0;
         case ServerCommand::CmdLoad: return 1;  // Parameter: Type of register file to load
         case ServerCommand::CmdCycle: return 1; // Parameter: Number of cycles to execute
         case ServerCommand::CmdReadAddressLatch: return 0;
@@ -344,9 +375,13 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
         case ServerCommand::CmdPrefetchStore: return 0;
         case ServerCommand::CmdReadAddress: return 0;
         case ServerCommand::CmdCpuType: return 0;
-        case ServerCommand::CmdEmulate8080: return 0;
+        case ServerCommand::CmdSetFlags: return 4; // Parameter: uint32_t flags to set
         case ServerCommand::CmdPrefetch: return 0;
         case ServerCommand::CmdInitScreen: return 0;
+        case ServerCommand::CmdStoreAll: return 0;
+        case ServerCommand::CmdSetRandomSeed: return 4; // Parameter: uint32_t seed for randomization
+        case ServerCommand::CmdRandomizeMem: return 0;
+        case ServerCommand::CmdSetMemory: return 8; // Parameters: address (4 bytes) and size (4 bytes).
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -362,13 +397,19 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.program->reset();
       break;
     case ServerState::ExecuteFinalize:
+      NMI_VECTOR.reset();
       CPU.nmi_checkpoint = 0;
       CPU.nmi_buf_cursor = 0;
+      break;
+    case ServerState::Load:
+      CPU.program->reset();
+      CPU.loadall_checkpoint = 0;
       break;
     default:
       break;
   }
 
+  // Enter new state.
   switch (new_state) {
     case ServerState::Reset:
       CPU.doing_reset = true;
@@ -392,8 +433,9 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.doing_reset = false;
       break;
     case ServerState::Load:
-
+      CPU.loadall_checkpoint = 0;
       if (CPU.cpu_type == CpuType::i80286) {
+        // Use LOADALL instead of load program on 286.
         CPU.program = &LOAD_PROGRAM_286;
         CPU.program->reset();
       }
@@ -411,14 +453,17 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.program->set_pc(4); // Set v_pc to 4 to skip IVT segment:offset
       break;
     case ServerState::Execute:
+      CPU.execute_cycle_ct = 0; // Reset execute cycle counter
       CPU.nmi_checkpoint = 0;
       CPU.program->reset();
       if (CPU.do_emulation) {
         // Set v_pc to 4 to skip IVT segment:offset
         CPU.program->set_pc(4);
       }
+      ArduinoX86::Bus->enable_logging();
       break;
     case ServerState::ExecuteFinalize:
+      NMI_VECTOR.reset();
       CPU.nmi_checkpoint = 0;
       CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
 
@@ -448,13 +493,21 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       // specific members.
       CPU.readback_p = (uint8_t *)&CPU.post_regs;
       break;
-    case ServerState::StoreDone:
+    case ServerState::StoreAll:
+      CPU.program = &STOREALL_PROGRAM;
+      CPU.program->reset();
       break;
+    case ServerState::StoreDone:
+      break;  
     case ServerState::Done:
+      break;
+    case ServerState::Error:
+      CPU.error_cycle_ct = 0;
+      controller_.getBoard().debugPrint(DebugType::ERROR, "Entering error state. Please reset the CPU.");
       break;
     default:
       controller_.getBoard().debugPrint(DebugType::ERROR, "Unhandled state change to: ");
-      controller_.getBoard().debugPrintln(DebugType::ERROR, MACHINE_STATE_STRINGS[(size_t)new_state]);
+      controller_.getBoard().debugPrintln(DebugType::ERROR, get_state_string(new_state));
       // Unhandled state.
       break;
   }
@@ -464,11 +517,9 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
   // Report time we spent in the previous state.
   if (stateBeginTime_ != 0) {
     uint32_t elapsed = state_end_time - stateBeginTime_;
-    controller_.getBoard().debugPrint(DebugType::STATE, "## Changing to state: ");
-    controller_.getBoard().debugPrint(DebugType::STATE, MACHINE_STATE_STRINGS[(size_t)new_state]);
-    controller_.getBoard().debugPrint(DebugType::STATE, ". Spent ");
-    controller_.getBoard().debugPrint(DebugType::STATE, elapsed);
-    controller_.getBoard().debugPrintln(DebugType::STATE, " us in previous state. ##");
+    controller_.getBoard().debugPrintf(DebugType::STATE, false, 
+      "## Changing to state: %s. Spent %lu us in previous state. ##\n\r", 
+      get_state_string(new_state), elapsed);
   }
 
   stateBeginTime_ = micros();
@@ -481,7 +532,7 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
 // This will be rarely used by itself as the register state is not set up. The Load
 // command will reset the CPU and set register state.
 template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_reset() {
+bool CommandServer<BoardType, HatType>::cmd_reset_cpu() {
   debug_cmd("In cmd_reset()");
   CpuResetResult result;
   clear_error();
@@ -584,8 +635,8 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
         *read_p++ = commandBuffer_[i];
       }
 
-      CPU.loadall_regs.FLAGS &= CPU_FLAG_DEFAULT_CLEAR;
-      CPU.loadall_regs.FLAGS |= CPU_FLAG_DEFAULT_SET_286;
+      CPU.loadall_regs.flags &= CPU_FLAG_DEFAULT_CLEAR;
+      CPU.loadall_regs.flags |= CPU_FLAG_DEFAULT_SET_286;
     break;
 
     default:
@@ -704,9 +755,7 @@ bool CommandServer<BoardType, HatType>::cmd_write_data_bus() {
   CPU.data_bus |= ((uint16_t)commandBuffer_[1] << 8);
   CPU.data_type = QueueDataType::Program;
 
-  Controller.getBoard().debugPrint(DebugType::CMD, "## cmd_write_data_bus(): Writing data bus: ");
-  Controller.getBoard().debugPrintln(DebugType::CMD, CPU.data_bus, HEX);
-
+  Controller.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_write_data_bus(): Writing to data bus: %04X\n\r", CPU.data_bus);
   return true;
 }
 
@@ -778,8 +827,6 @@ bool CommandServer<BoardType, HatType>::cmd_finalize() {
       cycle();
       execute_ct++;
 
-
-
       if (execute_ct > timeout) {
         set_error("cmd_finalize(): state timeout");
         return false;
@@ -823,16 +870,37 @@ bool CommandServer<BoardType, HatType>::cmd_begin_store(void) {
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_store(void) {
 
-#if DEBUG_STORE
-  debugPrintColor(ansi::bright_magenta, "## In STORE: s_pc is: ");
-  debugPrintlnColor(ansi::bright_magenta, CPU.s_pc);
-#endif
+  if (flags_ & FLAG_EXECUTE_AUTOMATIC) {
+    // In automatic mode, Store command is only valid in StoreDone state.
+    if (state_ != ServerState::StoreDone) {
+      controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: Wrong state: %s", get_state_string(state_));
+      set_error("## STORE: Wrong state: %s", get_state_string(state_));
+      return false;
+    }
 
-  char err_msg[30];
-  // Command only valid in ExecuteDone state
-  if (state_ != ServerState::ExecuteDone) {
-    set_error("## STORE: Wrong state: %s ", get_state_string(state_));
-    return false;
+    // If we are in automatic mode, we can just return the stored registers
+    // without executing the Store program.
+    INBAND_SERIAL.write((uint8_t)0x01); // Send 0x01 to indicate V2 register format.
+    Loadall286 regs = ArduinoX86::Bus->loadall286_regs();
+    // Patch the registers with the call stack frame from NMI.
+    if (CPU.nmi_terminate) {
+      // If we terminated with NMI, we need to patch the registers with the NMI call stack frame.
+      controller_.getBoard().debugPrintln(DebugType::STORE, "## STORE: Patching registers with NMI call stack frame...");
+      regs.patch_stack_frame(CPU.nmi_stack_frame);
+    }
+    // Dump the raw byte representation of the registers to the serial port.
+    uint8_t *reg_p = (uint8_t *)&regs;
+    INBAND_SERIAL.write(reg_p, sizeof(Loadall286));
+
+    return true;
+  }
+  else {
+    // In non-automatic mode, Store Command is only valid in ExecuteDone state
+    if (state_ != ServerState::ExecuteDone) {
+      controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: Wrong state: %s", get_state_string(state_));
+      set_error("## STORE: Wrong state: %s", get_state_string(state_));
+      return false;
+    }
   }
 
   change_state(ServerState::Store);
@@ -845,24 +913,23 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
     store_timeout++;
 
     if (store_timeout > 500) {
-      debugPrintlnColor(ansi::bright_red, "## STORE: Timeout! ##");
-      snprintf(err_msg, 30, "StoreDone timeout.");
+      controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: Timeout! ##");
+      set_error("StoreDone timeout.");
       error_beep();
       return false;
     }
   }
 
-#if DEBUG_STORE
-  debugPrintColor(ansi::bright_magenta, "## STORE: Flags are: ");
-  debugPrintlnColor(ansi::bright_magenta, CPU.post_regs.flags, 16);
+  controller_.getBoard().debugPrintf(DebugType::STORE, false, "## STORE: Flags are: %04X\n\r", CPU.post_regs.flags);
 
   if (!CPU.nmi_terminate) {
     // We didn't use NMI to terminate code. which means we used the inline STORE routine,
     // which means we need to convert the registers struct.
-    debugPrintlnColor(ansi::bright_magenta, "## STORE: Converting registers from STORE INLINE format...");
+    controller_.getBoard().debugPrintln(DebugType::STORE, "## STORE: Converting registers from STORE INLINE format...");
     convert_inline_registers(&CPU.post_regs);
   }
-#endif
+
+  INBAND_SERIAL.write((uint8_t)0); // Send 0 to indicate V1 register format.
 
   // Dump final register state to Serial port
   uint8_t *reg_p = (uint8_t *)&CPU.post_regs;
@@ -963,6 +1030,12 @@ bool CommandServer<BoardType, HatType>::cmd_read_pin(void) {
 // Server command - Get program state
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_get_program_state(void) {
+  controller_.getBoard().debugPrintf(
+    DebugType::CMD, 
+    false,
+    "## cmd_get_program_state(): State: %s Raw: %02X\n\r", 
+    get_state_string(state_), 
+    state_);
   INBAND_SERIAL.write((uint8_t)state_);
   return true;
 }
@@ -1015,22 +1088,35 @@ bool CommandServer<BoardType, HatType>::cmd_get_cycle_state(void) {
   return true;
 }
 
-// Server command - Enter emulation mode
+// Server command - Set flags
 template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_emu8080(void) {
-  if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
-    // Simply toggle the emulation flag
-    CPU.do_emulation = true;
-#if DEBUG_EMU
-    DEBUG_SERIAL.println("## cmd_emu8080(): Enabling 8080 emulation mode! ##");
-#endif
-    return true;
+bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
+
+  uint32_t new_flags = commandBuffer_[0] | 
+            (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
+            (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
+            (static_cast<uint32_t>(commandBuffer_[3]) << 24);
+
+  if (flags_ & FLAG_EMU_8080) {
+      // Enable 8080 emulation mode
+    if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
+      // Simply toggle the emulation flag
+      CPU.do_emulation = true;
+      controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling 8080 emulation mode! ##");
+    }
+    else {
+      // Unsupported CPU!
+      controller_.getBoard().debugPrintln(DebugType::ERROR, "## cmd_set_flags(): Bad CPU type for emulation flag ## ");
+      return false;
+    }
   }
-// Unsupported CPU!
-#if DEBUG_EMU
-  DEBUG_SERIAL.println("## cmd_emu8080(): Bad CPU type ## ");
-#endif
-  return false;
+
+  if (flags_ & FLAG_EXECUTE_AUTOMATIC) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling automatic execution ##");
+  }
+
+  flags_ = new_flags;
+  return true;
 }
 
 // Server command - prefetch
@@ -1066,6 +1152,77 @@ bool CommandServer<BoardType, HatType>::cmd_init_screen() {
     screen_init_requested = true;
   #endif
   INBAND_SERIAL.write(byte0);
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_storeall() {
+  change_state(ServerState::StoreAll);
+
+  for (int i = 0; i < 300; i++) {
+    cycle();
+    if (state_ == ServerState::Done) {
+      // StoreAll completed
+      break;
+    }
+  }
+
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_set_random_seed() {
+
+  uint32_t seed = commandBuffer_[0] | 
+                  (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
+                  (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
+                  (static_cast<uint32_t>(commandBuffer_[3]) << 24);
+
+  randomSeed(static_cast<unsigned long>(seed));  
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_randomize_mem() {
+  unsigned long start_time = millis();
+  ArduinoX86::Bus->randomize_memory();
+  unsigned long end_time = millis();
+  unsigned long elapsed = end_time - start_time;
+  controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_randomize_mem(): Memory randomized in %lu ms\n\r", elapsed);
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_set_memory() {
+  uint8_t read_buffer[MAX_BUFFER_LEN];
+  uint32_t address = commandBuffer_[0] | 
+                     (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
+                     (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
+                     (static_cast<uint32_t>(commandBuffer_[3]) << 24);
+
+  uint32_t size = commandBuffer_[4] | 
+                  (static_cast<uint32_t>(commandBuffer_[5]) << 8) |
+                  (static_cast<uint32_t>(commandBuffer_[6]) << 16) |
+                  (static_cast<uint32_t>(commandBuffer_[7]) << 24);
+
+  controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_memory(): Setting memory at address: %06lX with size: %lu\n\r", address, size);
+
+  // Read `size` bytes from the serial stream, MAX_BUFFER_LEN bytes at a time.
+  size_t total_bytes_read = 0;
+  while (total_bytes_read < size) {
+    size_t bytes_available = proto_available();
+    size_t bytes_to_read = min(bytes_available, MAX_BUFFER_LEN);
+
+    size_t bytes_read = proto_read(read_buffer, bytes_to_read);
+    if (bytes_read == 0) {
+      set_error("cmd_set_memory(): Timeout reading memory data");
+      return false;
+    }
+    ArduinoX86::Bus->set_memory(address + total_bytes_read, read_buffer, bytes_read);
+    total_bytes_read += bytes_read;
+  }
+  
+  controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_set_memory(): Memory set successfully");
   return true;
 }
 

@@ -181,15 +181,15 @@ public:
 
   template<typename Board>
   void debug_print(Board& board, DebugType dtype, const char* prefix, uint16_t value) const {
-    board.debugPrint(dtype, prefix);
-    board.debugPrint(dtype, ": writing ");
-    board.debugPrint(dtype, name());
-    board.debugPrint(dtype, " program to bus: ");
-    board.debugPrint(dtype, value, 16);
-    board.debugPrint(dtype, " new pc: ");
-    board.debugPrint(dtype, pc());
-    board.debugPrint(dtype, "/");
-    board.debugPrintln(dtype, len());
+    board.debugPrint(dtype, prefix, true);
+    board.debugPrint(dtype, ": writing ", true);
+    board.debugPrint(dtype, name(), true);
+    board.debugPrint(dtype, " program to bus: ", true);
+    board.debugPrint(dtype, value, 16, true);
+    board.debugPrint(dtype, " new pc: ", true);
+    board.debugPrint(dtype, pc(), true);
+    board.debugPrint(dtype, "/", true);
+    board.debugPrintln(dtype, len(), true);
   }
 
 private:

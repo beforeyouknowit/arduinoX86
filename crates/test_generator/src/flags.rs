@@ -15,34 +15,26 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
 
-#pragma once
-
-#include <Board.h>
-#include <Hat.h>
-#include <BusEmulator.h>
-
-template<typename BoardType, typename HatType> class BoardController;
-template<typename BoardType, typename HatType> class CommandServer;
-
-extern Cpu CPU;
-extern Intel8288 I8288;
-extern BoardController<BoardType,HatType> Controller;
-
-namespace ArduinoX86 {
-  extern CommandServer<BoardType,HatType> Server;
-  extern BusEmulator *Bus;
-}
-
-// cpu_server.cpp
-extern const char RESPONSE_CHRS[];
-extern const char VERSION_DAT[];
-extern const size_t VERSION_DAT_LEN;
-extern const char MACHINE_STATE_CHARS[];
-extern const char * const MACHINE_STATE_STRINGS[];
-extern const char * const CMD_STRINGS[];
+pub const CPU_FLAG_CARRY: u16 = 0b0000_0000_0000_0001;
+pub const CPU_FLAG_RESERVED1: u16 = 0b0000_0000_0000_0010;
+pub const CPU_FLAG_PARITY: u16 = 0b0000_0000_0000_0100;
+pub const CPU_FLAG_RESERVED3: u16 = 0b0000_0000_0000_1000;
+pub const CPU_FLAG_AUX_CARRY: u16 = 0b0000_0000_0001_0000;
+pub const CPU_FLAG_RESERVED5: u16 = 0b0000_0000_0010_0000;
+pub const CPU_FLAG_ZERO: u16 = 0b0000_0000_0100_0000;
+pub const CPU_FLAG_SIGN: u16 = 0b0000_0000_1000_0000;
+pub const CPU_FLAG_TRAP: u16 = 0b0000_0001_0000_0000;
+pub const CPU_FLAG_INT_ENABLE: u16 = 0b0000_0010_0000_0000;
+pub const CPU_FLAG_DIRECTION: u16 = 0b0000_0100_0000_0000;
+pub const CPU_FLAG_OVERFLOW: u16 = 0b0000_1000_0000_0000;
+pub const CPU_FLAG_F15: u16 = 0b1000_0000_0000_0000; // Reserved bit 15
+pub const CPU_FLAG_MODE: u16 = 0b1000_0000_0000_0000;
+pub const CPU_FLAG_NT: u16 = 0b0100_0000_0000_0000; // Nested Task
+pub const CPU_FLAG_IOPL0: u16 = 0b0001_0000_0000_0000; // Nested Task
+pub const CPU_FLAG_IOPL1: u16 = 0b0010_0000_0000_0000; // Nested Task

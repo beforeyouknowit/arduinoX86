@@ -116,7 +116,7 @@ struct __attribute__((packed)) Loadall286 {
   uint16_t x0;
   uint16_t x1;
   uint16_t x2;
-  uint16_t MSW;
+  uint16_t msw;
   uint16_t x3;
   uint16_t x4;
   uint16_t x5;
@@ -124,30 +124,37 @@ struct __attribute__((packed)) Loadall286 {
   uint16_t x7;
   uint16_t x8;
   uint16_t x9;
-  uint16_t TR;
-  uint16_t FLAGS;
-  uint16_t IP;
-  uint16_t LDT;
-  uint16_t DS;
-  uint16_t SS;
-  uint16_t CS;
-  uint16_t ES;
-  uint16_t DI;
-  uint16_t SI;
-  uint16_t BP;
-  uint16_t SP;
-  uint16_t BX;
-  uint16_t DX;
-  uint16_t CX;
-  uint16_t AX;
-  SegmentDescriptor ES_DESC;
-  SegmentDescriptor CS_DESC;
-  SegmentDescriptor SS_DESC;
-  SegmentDescriptor DS_DESC;
-  SegmentDescriptor GDT_DESC;
-  SegmentDescriptor LDT_DESC;
-  SegmentDescriptor IDT_DESC;
-  SegmentDescriptor TSS_DESC;
+  uint16_t tr;
+  uint16_t flags;
+  uint16_t ip;
+  uint16_t ldt;
+  uint16_t ds;
+  uint16_t ss;
+  uint16_t cs;
+  uint16_t es;
+  uint16_t di;
+  uint16_t si;
+  uint16_t bp;
+  uint16_t sp;
+  uint16_t bx;
+  uint16_t dx;
+  uint16_t cx;
+  uint16_t ax;
+  SegmentDescriptor es_desc;
+  SegmentDescriptor cs_desc;
+  SegmentDescriptor ss_desc;
+  SegmentDescriptor ds_desc;
+  SegmentDescriptor gdt_desc;
+  SegmentDescriptor ldt_desc;
+  SegmentDescriptor idt_desc;
+  SegmentDescriptor tss_desc;
+
+  /// @brief Patch the Loadall286 registers from a CallStackFrame.
+  void patch_stack_frame(const CallStackFrame& frame) {
+    flags = frame.flags;
+    cs    = frame.cs;
+    ip    = frame.ip;
+  }
 };
 
 #define LOADALL286_ADDRESS 0x800
@@ -237,6 +244,9 @@ typedef struct cpu {
   uint16_t nmi_buf_cursor;
   InlineProgram *program = &JUMP_VECTOR;
   CallStackFrame nmi_stack_frame; // NMI stack frame for 286/386 CPUs
+  uint8_t loadall_checkpoint;
+  int error_cycle_ct;
+  int execute_cycle_ct;
 } Cpu;
 
 typedef struct i8288 {
@@ -342,6 +352,9 @@ void handle_loadall_286();
 void handle_load_state(uint8_t q);
 void handle_load_done_state();
 void handle_emu_enter_state(uint8_t q);
+void handle_storeall_286();
+void handle_execute_state();
+void handle_execute_automatic();
 void detect_fpu_type();
 void detect_cpu_type(uint32_t cpuid_cycles);
 void reset_screen();
