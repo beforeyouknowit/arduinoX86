@@ -22,41 +22,26 @@
 */
 
 mod cpu_common;
+mod cycles;
 mod display;
 mod flags;
-mod gen_opcode;
 mod gen_regs;
 mod gen_tests;
+mod instruction;
 mod modrm;
+mod registers;
+mod state;
 
 use anyhow::Context;
 //use iced_x86::{Decoder, DecoderOptions};
-use ard808x_client::{CpuClient, RandomizeOpts, ServerCpuType};
+use ard808x_client::{CpuClient, RegisterSetType, ServerCpuType};
 use clap::Parser;
-use rand::prelude::*;
-use rand::{Rng, SeedableRng};
+use moo::types::MooCpuType;
 use serde::Deserialize;
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufWriter, Cursor};
+use std::time::Instant;
 use std::{fs, path::PathBuf};
-
-#[derive(Copy, Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CpuType {
-    Intel8088,
-    Intel8086,
-    NecV20,
-    NecV30,
-    Intel80188,
-    Intel80186,
-    Intel80286,
-}
-
-impl CpuType {
-    pub fn bitness(&self) -> u32 {
-        // If we ever add 386 or later, we'll need to match
-        16
-    }
-}
 
 #[derive(Copy, Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -64,20 +49,6 @@ pub enum CpuMode {
     Real,
     Unreal,
     Protected,
-}
-
-impl From<CpuType> for ServerCpuType {
-    fn from(cpu_type: CpuType) -> Self {
-        match cpu_type {
-            CpuType::Intel8088 => ServerCpuType::Intel8088,
-            CpuType::Intel8086 => ServerCpuType::Intel8086,
-            CpuType::NecV20 => ServerCpuType::NecV20,
-            CpuType::NecV30 => ServerCpuType::NecV30,
-            CpuType::Intel80188 => ServerCpuType::Intel80188(false),
-            CpuType::Intel80186 => ServerCpuType::Intel80186(false),
-            CpuType::Intel80286 => ServerCpuType::Intel80286,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, Deserialize)]
@@ -96,16 +67,28 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 pub struct TestExec {
     polling_sleep: u32,
+    test_retry: u32,
+    load_retry: u32,
+    print_instruction: bool,
+    print_initial_regs: bool,
+    print_final_regs: bool,
+    show_gen_time: bool,
+    serial_debug_default: bool,
+    serial_debug_test: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TestGen {
-    cpu_type: CpuType,
+    cpu_type: MooCpuType,
     cpu_mode: CpuMode,
-    seed: u64,
+    base_seed: u64,
     termination_condition: TerminationCondition,
     output_dir: PathBuf,
+    trace_file: PathBuf,
+    moo_version: u8,
+    moo_arch: String,
     address_mask: u32,
+    ip_mask: u16,
     instruction_address_range: [u32; 2],
     opcode_range: Vec<u8>,
     excluded_opcodes: Vec<u8>,
@@ -114,14 +97,20 @@ pub struct TestGen {
     test_count: usize,
     append_file: bool,
 
-    segment_override_chance: f32,
-    lock_chance: f32,
+    register_beta: [f64; 2],
+    max_prefixes: usize,
+    prefix_beta: [f64; 2],
+
+    lock_prefix_chance: f32,
+    lock_prefix_opcode: u8,
 
     reg_zero_chance: f32,
     reg_ff_chance: f32,
 
     mem_zero_chance: f32,
     mem_ff_chance: f32,
+    sp_odd_chance: f32,
+    sp_min_value: u16,
 
     disable_seg_overrides: Vec<u8>,
     disable_lock_prefix: Vec<u8>,
@@ -138,59 +127,23 @@ struct Cli {
 
     #[arg(long)]
     com_port: Option<String>,
+
+    #[arg(long)]
+    dry_run: bool,
 }
 
 pub struct TestContext {
-    seed: u64,
-    rng: StdRng,
     client: CpuClient,
-}
+    load_register_buffer: Cursor<Vec<u8>>,
+    store_register_buffer: Vec<u8>,
+    server_cpu: ServerCpuType,
+    register_set_type: RegisterSetType,
 
-pub enum Registers {
-    V1(ard808x_client::RemoteCpuRegistersV1),
-    V2(ard808x_client::RemoteCpuRegistersV2),
-}
+    gen_start: Instant,
+    gen_stop: Instant,
+    trace_log: BufWriter<File>,
 
-impl Registers {
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng) {
-        match self {
-            Registers::V1(regs) => {
-                //gen_regs::randomize_v1(&self.context, &self.config.test_gen, regs);
-            }
-            Registers::V2(regs) => regs.randomize(opts, rand),
-        }
-    }
-
-    pub fn to_buffer<W: Write>(&self, buf: &mut W) {
-        match self {
-            Registers::V1(regs) => {
-                //gen_regs::write_v1(&mut W, regs);
-                unimplemented!("Writing V1 registers to buffer is not implemented yet");
-            }
-            Registers::V2(regs) => regs.to_buffer(buf),
-        }
-    }
-
-    pub fn buf_len(&self) -> usize {
-        match self {
-            Registers::V1(regs) => 28,
-            Registers::V2(regs) => 102,
-        }
-    }
-
-    pub fn calculate_code_address(&self) -> u32 {
-        match self {
-            Registers::V1(regs) => regs.calculate_code_address(),
-            Registers::V2(regs) => regs.calculate_code_address(),
-        }
-    }
-
-    pub fn normalize_descriptors(&mut self) {
-        match self {
-            Registers::V1(regs) => {}
-            Registers::V2(regs) => regs.normalize_descriptors(),
-        }
-    }
+    dry_run: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -207,11 +160,9 @@ fn main() -> anyhow::Result<()> {
     let config: Config = toml::from_str(&text).context("parsing TOML into Config")?;
 
     // Initialize the random number generator
-    let seed: u64 = config.test_gen.seed;
-    let mut rng = StdRng::seed_from_u64(seed);
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(cli.com_port.clone()) {
+    let mut cpu_client = match CpuClient::init(cli.com_port.clone(), Some(2000)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -222,13 +173,28 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    cpu_client.set_random_seed(seed as u32)?;
     cpu_client.randomize_memory()?;
+    let server_cpu = ServerCpuType::from(config.test_gen.cpu_type);
+
+    // Create a BufWriter using the trace log file.
+    let trace_log_path = config
+        .test_gen
+        .output_dir
+        .join(config.test_gen.trace_file.clone());
+    let trace_log_file = File::create(&trace_log_path)
+        .with_context(|| format!("Creating trace log file: {}", trace_log_path.display()))?;
+    let trace_log = BufWriter::new(trace_log_file);
 
     let mut context = TestContext {
-        seed,
-        rng,
         client: cpu_client,
+        load_register_buffer: Cursor::new(vec![0; 102]),
+        store_register_buffer: vec![0; 102],
+        server_cpu,
+        register_set_type: RegisterSetType::from(server_cpu),
+        gen_start: Instant::now(),
+        gen_stop: Instant::now(),
+        trace_log,
+        dry_run: cli.dry_run,
     };
 
     gen_tests::gen_tests(&mut context, &config)?;

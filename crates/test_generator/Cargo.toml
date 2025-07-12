@@ -14,6 +14,8 @@ toml = { workspace = true }
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }
 rand.workspace = true
+rand_distr.workspace = true
 iced-x86.workspace = true
-
+indexmap.workspace = true
 ard808x_client = { path = "../ard808x_client" }
+moo-rs = { path = "../moo", features = ["use_client"] }

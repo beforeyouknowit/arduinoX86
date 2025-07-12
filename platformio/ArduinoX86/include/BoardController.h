@@ -123,12 +123,20 @@ public:
     return Hat::hasMultiplexedBus();
   }
 
-  static bool readBHEPin() {
-    return Hat::readBHEPin();
+  bool readBHEPin() {
+    return hat.readBHEPin();
   }
 
   bool readALEPin() {
     return hat.readALEPin();
+  }
+
+  bool readLockPin() {
+    return hat.readLockPin();
+  }
+
+  bool readReadyPin() {
+    return hat.readReadyPin();
   }
 
   bool readMRDCPin() {

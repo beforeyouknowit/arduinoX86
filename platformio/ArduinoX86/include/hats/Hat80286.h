@@ -52,17 +52,17 @@ void cycle();
 // -------------------------- CPU Input pins ----------------------------------
 // We use the analog pins for CPU inputs as they are not 5v tolerant.
 #define BHE_PIN 13
-#define READY_PIN 77 // A1
+#define READY_PIN 76 // A1
 #define NMI_PIN 78 // A2
 #define INTR_PIN 79 // A3
 #define READ_BHE_PIN READ_PIN_D13
-#define READ_READY_PIN READ_PIN_D77
+#define READ_READY_PIN (!READ_PIN_D76)
 #define READ_RESET_PIN READ_PIN_D05
 #define READ_NMI_PIN READ_PIN_D78
 #define READ_INTR_PIN READ_PIN_D79
 
 #define READ_TEST_PIN READ_PIN_A0
-#define READ_LOCK_PIN (0) // Currently not connected
+#define READ_LOCK_PIN READ_PIN_D07 // Currently not connected
 
 #define S0_PIN 11
 #define S1_PIN 12
@@ -202,8 +202,8 @@ private:
   static constexpr std::array<int,6> OUTPUT_PINS = {
     4,  // CLK
     5,  // RESET
-    76, // HOLD (A0)
-    77, // READY (A1)
+    76, // READY (A0)
+    77, // HOLD(?) (A1)
     78, // NMI (A2)
     79, // BUSY (A3)
   };
@@ -229,6 +229,8 @@ private:
 
 protected:
   static constexpr unsigned ClockDivisor = 2;
+  static constexpr unsigned ClockHighDelay = 1; // Delay for clock high in microseconds
+  static constexpr unsigned ClockLowDelay = 1; // Delay for clock low in microseconds
   size_t addressBusWidth = 24; // Default address bus width is 24 bits
   
 public:
@@ -542,7 +544,8 @@ public:
   static void writePinImpl(OutputPin pin, bool value) {
     switch (pin) {
       case OutputPin::Ready:
-        WRITE_PIN_A1(value);
+        // READY is active-low on 286.
+        WRITE_PIN_A0(!value);
         break;
       case OutputPin::Test:
         // !BUSY is tied to Vcc, so we don't control it.
@@ -678,6 +681,16 @@ public:
     }
     return emulatedALE_;
   }
+
+  static bool readLockPinImpl() {
+    return READ_LOCK_PIN;
+  }
+
+  static bool readReadyPinImpl() {
+    // Read the READY pin
+    return READ_READY_PIN;
+  }
+
   bool readMRDCPinImpl() {
     //return !(!emulatedALE_ && ((latchedStatus_ & 0x07) == 0x05));
     return i82288_.mrdc();

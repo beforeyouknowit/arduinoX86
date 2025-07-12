@@ -25,7 +25,8 @@
 
 #include <Board.h>
 #include <Hat.h>
-#include <BusEmulator.h>
+#include <bus_emulator/BusEmulator.h>
+#include <CycleStateLogger.h>
 
 template<typename BoardType, typename HatType> class BoardController;
 template<typename BoardType, typename HatType> class CommandServer;
@@ -37,6 +38,7 @@ extern BoardController<BoardType,HatType> Controller;
 namespace ArduinoX86 {
   extern CommandServer<BoardType,HatType> Server;
   extern BusEmulator *Bus;
+  extern CycleStateLogger *CycleLogger;
 }
 
 // cpu_server.cpp

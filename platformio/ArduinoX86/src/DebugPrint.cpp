@@ -26,7 +26,7 @@
 
 template<typename SerialPort>
 void DebugPrintMixin<SerialPort>::debugPrintf(DebugType stage, bool defer, const char* fmt, ...) {
-  if (!serial || !filter.isEnabled(stage)) return;
+  if (!serial || !filter.isEnabled(stage) || !enabled_) return;
 
   va_list args;
   va_start(args, fmt);

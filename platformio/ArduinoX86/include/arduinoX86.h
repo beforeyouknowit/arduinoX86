@@ -154,6 +154,11 @@ struct __attribute__((packed)) Loadall286 {
     flags = frame.flags;
     cs    = frame.cs;
     ip    = frame.ip;
+    sp += 6; // Adjust SP to account for the pushed flags, CS, and IP
+  }
+
+  void rewind_ip(uint16_t offset) {
+    ip -= offset;
   }
 };
 
@@ -206,6 +211,7 @@ typedef struct cpu {
   uint32_t cpuid_counter; // Cpuid cycle counter. Used to time to identify the CPU type.
   uint32_t cpuid_queue_reads; // Number of queue reads since reset of Cpuid cycle counter.
   uint32_t state_begin_time;
+  uint32_t last_address_bus;
   uint32_t address_bus;
   uint32_t address_latch;
   BusStatus bus_state_latched; // Bus state latched on T1 and valid for entire bus cycle (immediate bus state goes PASV on T3)
@@ -247,6 +253,9 @@ typedef struct cpu {
   uint8_t loadall_checkpoint;
   int error_cycle_ct;
   int execute_cycle_ct;
+  int wait_states;
+  int wait_state_ct;
+  bool exception_armed;
 } Cpu;
 
 typedef struct i8288 {
@@ -327,10 +336,8 @@ static const uint8_t BIT_REVERSE_TABLE[256] =
     R6(0), R6(2), R6(1), R6(3)
 };
 
-#ifndef OPCODE_NOP
-  #define OPCODE_NOP 0x90
-#endif
-
+#define OPCODE_NOP 0x90
+#define OPCODE_HALT 0xF4
 // --------------------- Function declarations --------------------------------
 
 // main.cpp

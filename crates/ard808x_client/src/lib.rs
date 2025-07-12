@@ -3,10 +3,11 @@
 mod registers;
 
 use std::io::{Read, Write};
-use std::{cell::RefCell, error::Error, fmt::Display, rc::Rc, str};
+use std::{cell::RefCell, rc::Rc, str};
 
 use log;
 use serialport::{ClearBuffer, SerialPort};
+use thiserror::Error;
 
 pub const ARDUINO_BAUD: u32 = 1000000;
 pub use registers::*;
@@ -53,6 +54,8 @@ pub enum ServerCommand {
     CmdSetRandomSeed = 0x1D,
     CmdRandomizeMemory = 0x1E,
     CmdSetMemory = 0x1F,
+    CmdGetCycleStates = 0x20,
+    CmdEnableDebug = 0x21,
     CmdInvalid,
 }
 
@@ -434,6 +437,7 @@ pub struct ServerCycleState {
     pub bus_command_bits: u8,
     pub address_bus: u32,
     pub data_bus: u16,
+    pub pins: u16,
 }
 
 pub const REQUIRED_PROTOCOL_VER: u8 = 3;
@@ -497,48 +501,24 @@ macro_rules! is_writing {
 
 /// [CpuClientError] represents the errors that can occur when communicating with the Arduino808X
 /// server.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum CpuClientError {
+    #[error("Failed to read from serial port.")]
     ReadFailure,
+    #[error("Failed to write to serial port.")]
     WriteFailure,
+    #[error("Received invalid value from command.")]
     BadValue,
-    BadParameter,
+    #[error("Command was given an invalid parameter: {0}")]
+    BadParameter(String),
+    #[error("Response timeout waiting for command.")]
     ReadTimeout,
+    #[error("Failed to enumerate serial ports.")]
     EnumerationError,
+    #[error("Failed to find a listening ArduinoX86 server.")]
     DiscoveryError,
-    CommandFailed,
-}
-
-impl Error for CpuClientError {}
-impl Display for CpuClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            CpuClientError::ReadFailure => {
-                write!(f, "Failed to read from serial port.")
-            }
-            CpuClientError::WriteFailure => {
-                write!(f, "Failed to write to serial port.")
-            }
-            CpuClientError::BadValue => {
-                write!(f, "Received invalid value from command.")
-            }
-            CpuClientError::BadParameter => {
-                write!(f, "Command was given an invalid parameter.")
-            }
-            CpuClientError::ReadTimeout => {
-                write!(f, "Response timeout.")
-            }
-            CpuClientError::EnumerationError => {
-                write!(f, "Failed to find a valid serial port.")
-            }
-            CpuClientError::DiscoveryError => {
-                write!(f, "Failed to find a listening ArduinoX86 server.")
-            }
-            CpuClientError::CommandFailed => {
-                write!(f, "Server command returned failure code.")
-            }
-        }
-    }
+    #[error("{0:?} command returned failure code.")]
+    CommandFailed(ServerCommand),
 }
 
 /// A [CpuClient] represents a connection to an `ArduinoX86` server over a serial port.
@@ -547,7 +527,10 @@ pub struct CpuClient {
 }
 
 impl CpuClient {
-    pub fn init(com_port: Option<String>) -> Result<CpuClient, CpuClientError> {
+    pub fn init(
+        com_port: Option<String>,
+        timeout: Option<u64>,
+    ) -> Result<CpuClient, CpuClientError> {
         let mut matched_port = false;
         match serialport::available_ports() {
             Ok(ports) => {
@@ -559,7 +542,7 @@ impl CpuClient {
                         matched_port = true;
                     }
                     println!("Trying port: {}", port.port_name);
-                    if let Some(rtk_port) = CpuClient::try_port(port, 5000) {
+                    if let Some(rtk_port) = CpuClient::try_port(port, timeout.unwrap_or(1000)) {
                         return Ok(CpuClient {
                             port: Rc::new(RefCell::new(rtk_port)),
                         });
@@ -685,7 +668,7 @@ impl CpuClient {
         }
     }
 
-    pub fn read_result_code(&mut self) -> Result<bool, CpuClientError> {
+    pub fn read_result_code(&mut self, cmd: ServerCommand) -> Result<bool, CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
 
         match self.port.borrow_mut().read_exact(&mut buf) {
@@ -695,7 +678,7 @@ impl CpuClient {
                     Ok(true)
                 } else {
                     log::error!("read_result_code: command returned failure: {:02X}", buf[0]);
-                    Err(CpuClientError::CommandFailed)
+                    Err(CpuClientError::CommandFailed(cmd))
                 }
             }
             Err(e) => {
@@ -759,12 +742,12 @@ impl CpuClient {
         buf[0] = reg_type.into();
         self.send_buf(&buf)?;
         self.send_buf(reg_data)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdLoad)
     }
 
     pub fn begin_store(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdBeginStore)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdBeginStore)
     }
 
     pub fn store_registers_to_buf(&mut self, reg_data: &mut [u8]) -> Result<u8, CpuClientError> {
@@ -776,13 +759,17 @@ impl CpuClient {
             0 => {
                 // Type 1 register set (Intel808X)
                 if reg_data.len() < 28 {
-                    return Err(CpuClientError::BadParameter);
+                    return Err(CpuClientError::BadParameter(
+                        "Expected at least 28 bytes for Intel808X register set".to_string(),
+                    ));
                 }
             }
             1 => {
                 // Type 2 register set (Intel286)
                 if reg_data.len() < 102 {
-                    return Err(CpuClientError::BadParameter);
+                    return Err(CpuClientError::BadParameter(
+                        "Expected at least 102 bytes for Intel286 register set".to_string(),
+                    ));
                 }
             }
             _ => {
@@ -791,21 +778,21 @@ impl CpuClient {
             }
         }
         self.recv_buf(reg_data)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdStore)?;
 
         Ok(buf[0])
     }
 
     pub fn cycle(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdCycle)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdCycle)
     }
 
     pub fn cpu_type(&mut self) -> Result<(ServerCpuType, bool), CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdCpuType)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdCpuType)?;
 
         let cpu_type = ServerCpuType::try_from(buf[0])?;
         Ok((cpu_type, buf[0] & 0x40 != 0))
@@ -815,7 +802,7 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdInitScreen)?;
         let mut buf: [u8; 1] = [0; 1];
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdInitScreen)?;
 
         Ok(buf[0] != 0)
     }
@@ -824,7 +811,7 @@ impl CpuClient {
         let mut buf: [u8; 3] = [0; 3];
         self.send_command_byte(ServerCommand::CmdReadAddressLatch)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdReadAddressLatch)?;
 
         let address = buf[0] as u32 | (buf[1] as u32) << 8 | (buf[2] as u32) << 16;
 
@@ -835,7 +822,7 @@ impl CpuClient {
         let mut buf: [u8; 3] = [0; 3];
         self.send_command_byte(ServerCommand::CmdReadAddressU)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdReadAddressU)?;
 
         let address = buf[0] as u32 | (buf[1] as u32) << 8 | (buf[2] as u32) << 16;
 
@@ -846,7 +833,7 @@ impl CpuClient {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdReadStatus)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdReadStatus)?;
 
         Ok(buf[0])
     }
@@ -855,7 +842,7 @@ impl CpuClient {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdRead8288Command)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdRead8288Command)?;
 
         Ok(buf[0])
     }
@@ -864,7 +851,7 @@ impl CpuClient {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdRead8288Control)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdRead8288Control)?;
 
         Ok(buf[0])
     }
@@ -873,7 +860,7 @@ impl CpuClient {
         let mut buf: [u8; 2] = [0; 2];
         self.send_command_byte(ServerCommand::CmdReadDataBus)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdReadDataBus)?;
 
         let word = u16::from_le_bytes([buf[0], buf[1]]);
         Ok(word)
@@ -885,26 +872,26 @@ impl CpuClient {
         buf.copy_from_slice(&data.to_le_bytes());
 
         self.send_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdWriteDataBus)?;
 
         Ok(true)
     }
 
     pub fn prefetch_store(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdPrefetchStore)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdPrefetchStore)
     }
 
     pub fn finalize(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdFinalize)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdFinalize)
     }
 
     pub fn get_program_state(&mut self) -> Result<ProgramState, CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
         self.send_command_byte(ServerCommand::CmdGetProgramState)?;
         self.recv_buf(&mut buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdGetProgramState)?;
 
         ProgramState::try_from(buf[0])
     }
@@ -924,7 +911,7 @@ impl CpuClient {
         buf[1] = val as u8;
         self.send_command_byte(ServerCommand::CmdWritePin)?;
         self.send_buf(&mut buf)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdWritePin)
     }
 
     /// Get the per-cycle state of the CPU.
@@ -941,7 +928,7 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdGetCycleState)?;
         self.send_buf(&mut send_buf)?;
         self.recv_buf(&mut recv_buf)?;
-        self.read_result_code()?;
+        self.read_result_code(ServerCommand::CmdGetCycleState)?;
 
         let cycle_state = ServerCycleState {
             program_state: ProgramState::try_from(recv_buf[0])?,
@@ -951,6 +938,7 @@ impl CpuClient {
             bus_command_bits: recv_buf[4],
             address_bus: u32::from_le_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]]),
             data_bus: u16::from_le_bytes([recv_buf[9], recv_buf[10]]),
+            pins: 0,
         };
 
         //log::trace!("received buffer: {:0X?}", recv_buf);
@@ -962,24 +950,24 @@ impl CpuClient {
         let buf: [u8; 4] = flags.to_le_bytes();
         self.send_command_byte(ServerCommand::CmdSetFlags)?;
         self.send_buf(&buf)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdSetFlags)
     }
 
     pub fn storeall(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdStoreAll)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdStoreAll)
     }
 
     pub fn randomize_memory(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdRandomizeMemory)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdRandomizeMemory)
     }
 
     pub fn set_random_seed(&mut self, seed: u32) -> Result<bool, CpuClientError> {
-        let mut buf: [u8; 4] = seed.to_le_bytes();
+        let buf: [u8; 4] = seed.to_le_bytes();
         self.send_command_byte(ServerCommand::CmdSetRandomSeed)?;
         self.send_buf(&buf)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdSetRandomSeed)
     }
 
     pub fn set_memory(&mut self, address: u32, data_buf: &[u8]) -> Result<bool, CpuClientError> {
@@ -1001,6 +989,64 @@ impl CpuClient {
         self.send_buf(&mut buf)?;
         // Send data
         self.send_buf(data_buf)?;
-        self.read_result_code()
+        self.read_result_code(ServerCommand::CmdSetMemory)
+    }
+
+    pub fn get_cycle_states(&mut self) -> Result<Vec<ServerCycleState>, CpuClientError> {
+        let mut param_buf: [u8; 8] = [0; 8];
+
+        self.send_command_byte(ServerCommand::CmdGetCycleStates)?;
+        // We are guaranteed to have at least 8 bytes in the buffer, a count and a size
+        self.recv_buf(&mut param_buf)?;
+        let cycle_count =
+            u32::from_le_bytes([param_buf[0], param_buf[1], param_buf[2], param_buf[3]]);
+        let data_size =
+            u32::from_le_bytes([param_buf[4], param_buf[5], param_buf[6], param_buf[7]]);
+
+        let struct_size = data_size / cycle_count;
+        let mut receive_buf = vec![0; data_size as usize];
+        self.recv_buf(&mut receive_buf)?;
+
+        let mut cycles: Vec<ServerCycleState> = Vec::with_capacity(cycle_count as usize);
+
+        for i in 0..cycle_count {
+            let offset = (i * struct_size) as usize;
+            if offset + struct_size as usize > receive_buf.len() {
+                return Err(CpuClientError::ReadFailure);
+            }
+            let cycle_data = &receive_buf[offset..offset + struct_size as usize];
+            if cycle_data.len() < 12 {
+                return Err(CpuClientError::ReadFailure);
+            }
+            let cycle_state = ServerCycleState {
+                program_state: ProgramState::Execute,
+                address_bus: u32::from_le_bytes([
+                    cycle_data[0],
+                    cycle_data[1],
+                    cycle_data[2],
+                    cycle_data[3],
+                ]),
+                data_bus: u16::from_le_bytes([cycle_data[4], cycle_data[5]]),
+                cpu_state_bits: cycle_data[6],
+                cpu_status_bits: cycle_data[7],
+                bus_control_bits: cycle_data[8],
+                bus_command_bits: cycle_data[9],
+                pins: u16::from_le_bytes([cycle_data[10], cycle_data[11]]), // Skip pins [10][11]
+            };
+            cycles.push(cycle_state);
+        }
+
+        self.read_result_code(ServerCommand::CmdGetCycleStates)?;
+
+        Ok(cycles)
+    }
+
+    pub fn enable_debug(&mut self, enable: bool) -> Result<(), CpuClientError> {
+        let mut buf: [u8; 1] = [0; 1];
+        buf[0] = if enable { 1 } else { 0 };
+        self.send_command_byte(ServerCommand::CmdEnableDebug)?;
+        self.send_buf(&buf)?;
+        self.read_result_code(ServerCommand::CmdEnableDebug)?;
+        Ok(())
     }
 }

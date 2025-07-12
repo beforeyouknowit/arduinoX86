@@ -30,9 +30,6 @@
 //#include <BoardController.h>
 #include <config.h>
 
-#define FLAG_EMU_8080 0x00000001
-#define FLAG_EXECUTE_AUTOMATIC 0x00000002
-
 enum class ServerState: uint8_t {
   Reset = 0x00,
   CpuId = 0x01,
@@ -60,6 +57,10 @@ class CommandServer {
 public:
 
   using CmdFn = bool (CommandServer::*)();
+
+  static constexpr uint32_t FLAG_EMU_8080 = 0x00000001;
+  static constexpr uint32_t FLAG_EXECUTE_AUTOMATIC = 0x00000002;
+  static constexpr uint32_t FLAG_MEMORY_BACKEND = 0x00000004; // 0=SDRAM, 1=Hash Table
 
   enum class ServerCommand {
     CmdNone            = 0x00,
@@ -94,6 +95,8 @@ public:
     CmdSetRandomSeed   = 0x1D,
     CmdRandomizeMem    = 0x1E,
     CmdSetMemory       = 0x1F,
+    CmdGetCycleStates  = 0x20,
+    CmdEnableDebug     = 0x21,
     CmdInvalid
   };
 
@@ -118,6 +121,11 @@ public:
   uint32_t get_flags() const {
     return flags_;
   }
+
+  bool is_execute_automatic() const {
+    return (flags_ & FLAG_EXECUTE_AUTOMATIC) != 0;
+  }
+
   explicit CommandServer(BoardController<BoardType,HatType>& controller); 
 
 private:
@@ -196,21 +204,11 @@ private:
   }
 
   void debug_cmd(const char *msg) {
-    #if DEBUG_PROTO
-      DEBUG_SERIAL.print("## cmd ");
-      DEBUG_SERIAL.print(get_command_name(cmd_));
-      DEBUG_SERIAL.print(": ");
-      DEBUG_SERIAL.print(msg);
-      DEBUG_SERIAL.println(" ##");
-    #endif
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd: %s ##\n\r", msg);
   }
 
   void debug_proto(const char* msg) {
-    #if DEBUG_PROTO
-      DEBUG_SERIAL.print("## ");
-      DEBUG_SERIAL.print(msg);
-      DEBUG_SERIAL.println(" ##");
-    #endif
+    controller_.getBoard().debugPrintf(DebugType::PROTO, false, "## proto: %s ##\n\r", msg);
   }
 
   bool cmd_version(void);
@@ -244,5 +242,7 @@ private:
   bool cmd_set_random_seed(void);
   bool cmd_randomize_mem(void);
   bool cmd_set_memory(void);
+  bool cmd_get_cycle_states(void);
+  bool cmd_enable_debug(void);
   bool cmd_null(void);
 };

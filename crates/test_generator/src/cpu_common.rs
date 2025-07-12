@@ -20,7 +20,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-
+#![allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
 pub enum Displacement {
     NoDisp,
@@ -121,4 +121,53 @@ pub enum Register8 {
     CH,
     DH,
     BH,
+}
+
+#[derive(Debug)]
+pub enum BusStatusByte {
+    V1(u8),
+    V2(u8),
+}
+
+impl TryFrom<BusStatusByte> for BusOpType {
+    type Error = ();
+
+    fn try_from(value: BusStatusByte) -> Result<Self, Self::Error> {
+        match value {
+            BusStatusByte::V1(v) => match v & 0x7 {
+                0b00 => Ok(BusOpType::CodeRead),
+                0b001 => Ok(BusOpType::IoRead),
+                0b010 => Ok(BusOpType::IoWrite),
+                0b101 => Ok(BusOpType::MemRead),
+                0b110 => Ok(BusOpType::MemWrite),
+                _ => Err(()),
+            },
+            BusStatusByte::V2(v) => match v & 0xF {
+                0b0101 => Ok(BusOpType::MemRead),
+                0b0110 => Ok(BusOpType::MemWrite),
+                0b1001 => Ok(BusOpType::IoRead),
+                0b1010 => Ok(BusOpType::IoWrite),
+                0b1101 => Ok(BusOpType::CodeRead),
+                _ => Err(()),
+            },
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum BusOpType {
+    CodeRead,
+    MemRead,
+    MemWrite,
+    IoRead,
+    IoWrite,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct BusOp {
+    pub op_type: BusOpType,
+    pub addr: u32,
+    pub bhe: bool,
+    pub data: u16,
+    pub flags: u8,
 }

@@ -8,6 +8,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/ard808x_cpu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/exec_program/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ard808x_cpu/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/moo/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/test_generator/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/client/rust/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

@@ -1,5 +1,5 @@
 use crate::flags::*;
-use crate::Registers;
+use crate::registers::Registers;
 use ard808x_client::{RemoteCpuRegistersV1, RemoteCpuRegistersV2, ServerCpuType};
 
 pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
@@ -66,16 +66,6 @@ pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
         } else {
             'm'
         }
-    };
-
-    let nt_chr = if matches!(cpu_type, ServerCpuType::Intel80286) {
-        if f & CPU_FLAG_NT != 0 {
-            '1'
-        } else {
-            '0'
-        }
-    } else {
-        '1'
     };
 
     let nt_chr = if f & CPU_FLAG_NT != 0 { '1' } else { '0' };

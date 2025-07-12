@@ -36,7 +36,7 @@
 #include "Display.h"
 
 #include <BoardController.h>
-#include <BusEmulator.h>
+#include <bus_emulator/BusEmulator.h>
 #include <CommandServer.h>
 #include <CycleStateLogger.h>
 
@@ -471,17 +471,18 @@ void print_cpu_state() {
   char aiow_chr = !aiowc ? 'A' : '.';
   char iow_chr = !iowc ? 'W' : '.';
 
-  char reset_chr = READ_RESET_PIN ? 'R' : '.';
+  char ready_chr = READ_READY_PIN ? 'R' : '.';
+  char reset_chr = READ_RESET_PIN ? 'S' : '.';
   char intr_chr = READ_INTR_PIN ? 'I' : '.';
   char inta_chr = '.';
   char nmi_chr = READ_NMI_PIN ? 'N' : '.';
   char bhe_chr = !READ_BHE_PIN ? 'B' : '.';
+  char lock_chr = !READ_LOCK_PIN ? 'L' : '.';
 
-#if defined(FPU_8087)
+  #if defined(FPU_8087)
   char test_chr = READ_TEST_PIN ? 'T' : '.';
   char rq_chr = !READ_PIN_D03 ? 'R' : '.';
-  char fint_chr = READ_PIN_D20 ? 'I' : '.';
-  char lock_chr = !READ_LOCK_PIN ? 'L' : '.';
+  char fint_chr = READ_PIN_D20 ? 'I' : '.';  
 #endif
 
   char v_chr = ArduinoX86::Server.get_state_char(ArduinoX86::Server.state());
@@ -489,6 +490,11 @@ void print_cpu_state() {
   char q_char = QUEUE_STATUS_CHARS[q];
   //char s = CPU.status0 & 0x07;
   //char rout_chr = '.';
+
+  if (!Controller.getBoard().isDebugEnabled()) {
+    // If debug is not enabled, we don't print the CPU state.
+    return;
+  }
 
   // Set the bus string width
   if (CPU.width == BusWidthEight) {
@@ -549,7 +555,7 @@ void print_cpu_state() {
   }
 #endif
 
-  uint32_t address_bus = Controller.readAddressBus(true);
+  uint32_t address_bus = CPU.address_bus;
   int address_digits = Controller.getAddressDigits();
 
   snprintf(
@@ -580,11 +586,11 @@ void print_cpu_state() {
   snprintf(
       buf,
       buf_len,    
-      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c ",
+      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c%c%c ",
       seg_str,
       rs_chr, aws_chr, ws_chr,
       ior_chr, aiow_chr, iow_chr,
-      reset_chr, intr_chr, inta_chr, nmi_chr, bhe_chr);
+      reset_chr, ready_chr, lock_chr, intr_chr, inta_chr, nmi_chr, bhe_chr);
 
   DEBUG_SERIAL.print(buf);
 
@@ -743,9 +749,9 @@ void set_data_bus_width() {
 }
 
 void latch_address() {
-  uint32_t addr = Controller.readAddressBus(false);
-  CPU.address_bus = addr;
-  CPU.address_latch = addr;
+  //uint32_t addr = Controller.readAddressBus(false);
+  //CPU.address_bus = addr;
+  CPU.address_latch = CPU.address_bus;
 }
 
 void cycle() {
@@ -767,26 +773,43 @@ void cycle() {
   CPU.command_bits = Controller.readBusControllerCommandLines();
   // Decode the bus state from the read status. This varies per CPU.
   CPU.bus_state = Controller.decodeBusStatus(CPU.status0);
+  // Save last address bus value for skipped bus cycle detection.
+  CPU.last_address_bus = CPU.address_bus;
+  CPU.address_bus = Controller.readAddressBus(true);
 
+  CycleState cycle_state;
+  
+  cycle_state.cpu_status0 = CPU.status0;
+  cycle_state.bus_command_bits = CPU.command_bits;
+  cycle_state.bus_control_bits = Controller.readBusControllerControlLines();
+  cycle_state.address_bus = CPU.address_bus;
+  
   // Extract QS0-QS1 queue status
   uint8_t q = (CPU.status0 >> 6) & 0x03;
   CPU.qb = 0xFF;
   CPU.q_ff = false;
+
+  CPU.wait_state_ct++;
+  if (CPU.wait_state_ct >= CPU.wait_states) {
+    // If we have waited enough, we can clear the wait state.
+    Controller.writePin(OutputPin::Ready, true);
+    Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state cleared ##");
+  }
+
+  // Check for CPU shutdown.
+  if ((CPU.bus_state == HALT) && (CPU.address_bus == 0x000000)) {
+    Controller.getBoard().debugPrintln(DebugType::ERROR, "## CPU shutdown detected ##");
+    ArduinoX86::Server.change_state(ServerState::Error);
+    set_error("CPU shutdown detected!");
+  }
 
   // The ALE signal is issued to inform the motherboard to latch the address bus.
   // The full address is only valid on T1, when ALE is asserted, so if we need to
   // reference the address of the bus cycle later, we must latch it.
   if (Controller.readALEPin()) {
     // ALE signals start of bus cycle, so set cycle to t1.
-    #if DEBUG_TSTATE
-      debugPrintlnColor(ansi::yellow, "## Setting T-cycle to T1 on ALE");
-    #endif
-
-    // This logic doesn't work due to late resolution of Tw states
-    // if ((CPU.bus_cycle != T4) && (CPU.bus_cycle != TI)) {
-    //   debugPrintlnColor(ansi::red, "## Bad last t-state to enter T1.");
-    // }
-
+    Controller.getBoard().debugPrintln(DebugType::TSTATE, "## ALE is high, setting T-cycle to T1 ##");
+    
     CPU.bus_cycle = T1;
     // Address lines are only valid when ALE is high, so latch address now.
     latch_address();
@@ -794,6 +817,22 @@ void cycle() {
     set_data_bus_width();
     CPU.bus_state_latched = CPU.bus_state;
     CPU.data_bus_resolved = false;
+
+    // Test for a missed bus cycle (occasionally happens on 286)
+    // This is the case if the last bus cycle was Ti, and had the previous address on the bus,
+    // and the previous bus address was odd
+    if ((CPU.last_bus_cycle == 0) 
+      && (CPU.last_address_bus == (CPU.address_bus - 1)) 
+      && (CPU.last_address_bus & 1)) {
+      // We missed a bus cycle
+      Controller.getBoard().debugPrintf(
+        DebugType::ERROR, false, 
+        "## Missed bus cycle detected. Bus: %06lX, Last Bus: %06lX ##\n\r", 
+        CPU.address_bus, CPU.last_address_bus);
+      ArduinoX86::Server.change_state(ServerState::Error);
+      set_error("Missed bus cycle detected!");
+      return;
+    }
   }
 
   // We always enter Tw from T3, as we can't tell if the read/write is done yet on T3.
@@ -813,6 +852,8 @@ void cycle() {
     default:
       break;
   }
+
+  cycle_state.cpu_state = static_cast<uint8_t>(CPU.bus_cycle);
 
 // Handle queue activity
 #if HAVE_QUEUE_STATUS
@@ -990,7 +1031,7 @@ void cycle() {
     //  - Executing a HALT
     //  - Asserting NMI before the end of the instruction
     case ServerState::Execute:
-      if (ArduinoX86::Server.get_flags() & FLAG_EXECUTE_AUTOMATIC) {
+      if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, HatType>::FLAG_EXECUTE_AUTOMATIC) {
         handle_execute_automatic();
       }
       else {
@@ -1041,7 +1082,7 @@ void cycle() {
                 write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.ip, 0x00004, CPU.data_width);
               }
 
-              if (ArduinoX86::Server.get_flags() & FLAG_EXECUTE_AUTOMATIC) {
+              if (ArduinoX86::Server.is_execute_automatic()) {
                 // ExecuteDone is an interactive state, so we should not transition to it if 
                 // automatic execution is enabled. Instead, enter Store.
                 #if defined(CPU_286)
@@ -1053,6 +1094,12 @@ void cycle() {
               else {
                 ArduinoX86::Server.change_state(ServerState::ExecuteDone);
               }
+            }
+            else if (CPU.address_latch == 0) {
+              // We have a match for the NMI vector
+              Controller.getBoard().debugPrintln(DebugType::ERROR, "## EXECUTE_FINALIZE: Fetch at address 0!");
+              ArduinoX86::Server.change_state(ServerState::Error);
+              set_error("NMI vector fetch at address 0!");
             }
           } 
           else if (CPU.nmi_checkpoint > 0 && NMI_VECTOR.has_remaining()) {
@@ -1462,6 +1509,33 @@ void cycle() {
       break;
   }
 
+  // Log cycle state.
+  cycle_state.data_bus = CPU.data_bus;
+  cycle_state.pins = 0;
+
+  if (Controller.readALEPin()) {
+    cycle_state.pins |= CycleState::ALE;
+  }
+  if (Controller.readBHEPin()) {
+    cycle_state.pins |= CycleState::BHE;
+  }
+  if (Controller.readLockPin()) {
+    cycle_state.pins |= CycleState::LOCK;
+  }
+  if (Controller.readReadyPin()) {
+    cycle_state.pins |= CycleState::READY;
+  }
+  ArduinoX86::CycleLogger->log(cycle_state);
+
+  // Handle wait states - doing this after logging cycle simulates READY going low sometime during
+  // Tc.
+  if (Controller.readALEPin() && CPU.wait_states > 0) {
+    // Lower READY line on ALE.
+    Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state requested ##");
+    Controller.writePin(OutputPin::Ready, false);
+    CPU.wait_state_ct = 0;
+  }
+
   // Print deferred debug string if it exists
   Controller.getBoard().debugPrintDeferred();
 
@@ -1744,7 +1818,7 @@ void handle_storeall_286() {
   if (!Controller.readMWTCPin()) {
     // CPU is writing (MWTC active-low)
     Controller.getBoard().debugPrintf(DebugType::STORE, true, "## STOREALL_286: Sending write to bus emulator: %04X\n\r", CPU.data_bus);
-    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, Controller.readBHEPin());
+    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
   }
 }
 
@@ -1913,7 +1987,7 @@ void handle_execute_state() {
 
   if (cpu_mwtc) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator");
-    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, Controller.readBHEPin());
+    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
   }
 
   if ((cpu_mrdc || cpu_iodc) && CPU.bus_cycle == WRITE_CYCLE) {
@@ -1961,29 +2035,33 @@ void handle_execute_automatic() {
   bool cpu_iodc = !Controller.readIORCPin();
   bool cpu_mwtc = !Controller.readMWTCPin();
   bool cpu_iowc = !Controller.readIOWCPin();
+  static bool far_call_flag = false;
 
   if (cpu_mwtc) {
     // The CPU is writing to memory. Send it to the bus emulator.
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator");
-    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, Controller.readBHEPin());
+    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator", true);
+    ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
+    // Detect farcall / exception.
+    far_call_flag = ArduinoX86::Bus->far_call_detected();
   }
 
   if (cpu_mrdc && CPU.bus_cycle == WRITE_CYCLE) {
+    far_call_flag = false;
     // CPU is reading memory. Read from the bus emulator.
     
     // Set the fetch flag if we're in a code fetch cycle.
     bool is_fetch = (CPU.bus_state_latched == CODE);
+    CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch, !Controller.readBHEPin(), is_fetch);
+
     if (is_fetch) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Prefetching from bus emulator");
+      Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Prefetching from bus emulator: %04X\n\r", CPU.data_bus);
     }
     else {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Reading from bus emulator");
+      Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Reading from bus emulator: %04X\n\r", CPU.data_bus);
     }
-    CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch, Controller.readBHEPin(), is_fetch);
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);
 
-    Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE: Wrote bus: ");
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.data_bus, 16);
+    //Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Wrote bus: %04X\n\r", CPU.data_bus);
 
     if ((CPU.bus_state_latched == CODE) && (CPU.prefetching_store)) {
       CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## EXECUTE: Prefetching STORE program byte", CPU.data_bus);
@@ -1991,7 +2069,7 @@ void handle_execute_automatic() {
   }
 
   if (CPU.bus_state == HALT) {
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.");
+    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
     Controller.writePin(OutputPin::Nmi, true);
     return;
   }
@@ -2000,18 +2078,36 @@ void handle_execute_automatic() {
     // Use checkpoint "1" to specify that NMI has been detected. This just prevents the debug message from
     // printing every cycle after NMI.
     if (CPU.nmi_checkpoint == 0) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI pin high - Execute will end at IVT fetch.");
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI pin high - Execute will end at IVT fetch.", true);
       CPU.nmi_checkpoint = 1;
+      ArduinoX86::CycleLogger->disable_logging();
     }
   }
 
-  if (Controller.readALEPin() && CPU.bus_state == MEMR) {
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.");
-    // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
-    if (CPU.address_latch == 0x00008) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...");
-      CPU.nmi_terminate = true;
-      ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
+  if (Controller.readALEPin()) {
+    
+    if (CPU.exception_armed && CPU.bus_state == CODE) {
+      // Hook code fetch after exception and write halt opcode.
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception armed and CODE fetch detected. Writing HALT opcode.", true);
+      ArduinoX86::Bus->mem_write_u8(CPU.address_latch, OPCODE_HALT);
+    }
+    
+    if (CPU.bus_state == MEMR) {
+      //Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.", true);
+
+      if ((CPU.address_latch < 0x400) 
+        && ((CPU.address_latch & !0x07) == 0)
+        && far_call_flag) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Detected Exception/Interrupt!", true);
+        CPU.exception_armed = true;
+      }
+
+      // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
+      if (CPU.address_latch == 0x00008) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...", true);
+        CPU.nmi_terminate = true;
+        ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
+      }
     }
   }
 }
@@ -2186,13 +2282,14 @@ void loop() {
                   (ArduinoX86::Server.get_state() == ServerState::ExecuteDone) ||
                   (ArduinoX86::Server.get_state() == ServerState::StoreAll);
 
-  if (executing && (ArduinoX86::Server.get_flags() & FLAG_EXECUTE_AUTOMATIC)) {
+  if (executing && (ArduinoX86::Server.is_execute_automatic())) {
     CPU.execute_cycle_ct++;
     if (CPU.execute_cycle_ct < EXECUTE_TIMEOUT) {
       cycle();
     }
     else if (CPU.execute_cycle_ct == EXECUTE_TIMEOUT) {
       Controller.getBoard().debugPrintln(DebugType::ERROR, "## Execute cycle timeout reached! Ending execution.");
+      ArduinoX86::Server.change_state(ServerState::Error);
     }
   }
 }

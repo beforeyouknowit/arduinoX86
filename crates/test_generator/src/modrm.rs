@@ -20,7 +20,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-
+#![allow(dead_code)]
 //! Module for handling ModRM bytes in x86 instructions.
 //! [ModRmByte] is designed to be `'static`, so that reading a ModRM byte resolves to
 //! a static reference in a const table of [ModRmByte], plus a displacement which can

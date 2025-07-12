@@ -82,7 +82,9 @@ class HatBase {
        return Derived::cpuIsWritingImpl(write_type);
     }
 
-    static bool readBHEPin()   { return Derived::readBHEPinImpl(); }
+    bool readBHEPin()   { return static_cast<Derived*>(this)->readBHEPinImpl(); }
+    bool readLockPin()  { return static_cast<Derived*>(this)->readLockPinImpl(); }
+    bool readReadyPin() { return static_cast<Derived*>(this)->readReadyPinImpl(); }
 
     // The following methods are not static as they may need to access state for bus controller emulation.
     bool readALEPin()   { return static_cast<Derived*>(this)->readALEPinImpl(); }

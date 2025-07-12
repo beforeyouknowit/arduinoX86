@@ -44,8 +44,10 @@ enum class DebugType : uint32_t {
     TSTATE     = 1u << 14, // DEBUG_TSTATE
     PIN_CMD    = 1u << 15, // DEBUG_PIN_CMD
     BUS        = 1u << 16, // DEBUG_BUS
-    PROTO      = 1u << 17, // DEBUG_PROTO (0 in macro, but reserving bit)
-    CMD        = 1u << 18, // DEBUG_CMD (0 in macro, but reserving bit)
+    PROTO      = 1u << 17, // DEBUG_PROTO
+    CMD        = 1u << 18, // DEBUG_CMD
+    DUMP       = 1u << 19, // DEBUG_DUMP
+    SERVER     = 1u << 20, // DEBUG_SERVER
 };
 
 class DebugFilter {

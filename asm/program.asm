@@ -5,6 +5,6 @@ cpu	286
 org	0h
 
 start:
-    cwd
+    lock add [bx+si], ax
     hlt
 

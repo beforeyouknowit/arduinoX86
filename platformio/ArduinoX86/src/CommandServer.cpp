@@ -35,9 +35,9 @@
 #include <programs.h>
 
 #if defined (ARDUINO_GIGA)
-#define MAX_BUFFER_LEN 4096
+#define MAX_BUFFER_LEN 4096ul
 #else
-#define MAX_BUFFER_LEN 512
+#define MAX_BUFFER_LEN 512ul
 #endif
 
 template<typename BoardType, typename HatType>
@@ -191,6 +191,8 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
       case ServerCommand::CmdSetRandomSeed: return "CmdSetRandomSeed";
       case ServerCommand::CmdRandomizeMem: return "CmdRandomizeMem";
       case ServerCommand::CmdSetMemory: return "CmdSetMemory";
+      case ServerCommand::CmdGetCycleStates: return "CmdGetCycleStates";
+      case ServerCommand::CmdEnableDebug: return "CmdEnableDebug";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -316,6 +318,10 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_randomize_mem();
     case ServerCommand::CmdSetMemory:
         return cmd_set_memory();
+    case ServerCommand::CmdGetCycleStates:
+        return cmd_get_cycle_states();
+    case ServerCommand::CmdEnableDebug:
+        return cmd_enable_debug();
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -382,6 +388,8 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
         case ServerCommand::CmdSetRandomSeed: return 4; // Parameter: uint32_t seed for randomization
         case ServerCommand::CmdRandomizeMem: return 0;
         case ServerCommand::CmdSetMemory: return 8; // Parameters: address (4 bytes) and size (4 bytes).
+        case ServerCommand::CmdGetCycleStates: return 0; 
+        case ServerCommand::CmdEnableDebug: return 1; // Parameter: 0 to disable debug, 1 to enable debug
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -433,6 +441,8 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.doing_reset = false;
       break;
     case ServerState::Load:
+      CPU.wait_states = 1;
+      CPU.wait_state_ct = 0;
       CPU.loadall_checkpoint = 0;
       if (CPU.cpu_type == CpuType::i80286) {
         // Use LOADALL instead of load program on 286.
@@ -453,14 +463,18 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.program->set_pc(4); // Set v_pc to 4 to skip IVT segment:offset
       break;
     case ServerState::Execute:
-      CPU.execute_cycle_ct = 0; // Reset execute cycle counter
+      // Reset cycle logger.
+      ArduinoX86::CycleLogger->reset();
+      ArduinoX86::CycleLogger->enable_logging();
+      ArduinoX86::Bus->enable_logging();
+      CPU.exception_armed = false;
+      CPU.execute_cycle_ct = 0;
       CPU.nmi_checkpoint = 0;
       CPU.program->reset();
       if (CPU.do_emulation) {
         // Set v_pc to 4 to skip IVT segment:offset
         CPU.program->set_pc(4);
       }
-      ArduinoX86::Bus->enable_logging();
       break;
     case ServerState::ExecuteFinalize:
       NMI_VECTOR.reset();
@@ -503,7 +517,7 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       break;
     case ServerState::Error:
       CPU.error_cycle_ct = 0;
-      controller_.getBoard().debugPrint(DebugType::ERROR, "Entering error state. Please reset the CPU.");
+      controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering error state. Please reset the CPU.");
       break;
     default:
       controller_.getBoard().debugPrint(DebugType::ERROR, "Unhandled state change to: ");
@@ -1097,7 +1111,7 @@ bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
             (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
             (static_cast<uint32_t>(commandBuffer_[3]) << 24);
 
-  if (flags_ & FLAG_EMU_8080) {
+  if (flags_ & CommandServer::FLAG_EMU_8080) {
       // Enable 8080 emulation mode
     if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
       // Simply toggle the emulation flag
@@ -1111,7 +1125,7 @@ bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
     }
   }
 
-  if (flags_ & FLAG_EXECUTE_AUTOMATIC) {
+  if (flags_ & CommandServer::FLAG_EXECUTE_AUTOMATIC) {
     controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling automatic execution ##");
   }
 
@@ -1209,20 +1223,58 @@ bool CommandServer<BoardType, HatType>::cmd_set_memory() {
 
   // Read `size` bytes from the serial stream, MAX_BUFFER_LEN bytes at a time.
   size_t total_bytes_read = 0;
+  constexpr unsigned long READ_TIMEOUT = 100; // Timeout for reading data in milliseconds
+  unsigned long start_time = millis();
+  unsigned long timeout_time = start_time + READ_TIMEOUT;
+
   while (total_bytes_read < size) {
     size_t bytes_available = proto_available();
-    size_t bytes_to_read = min(bytes_available, MAX_BUFFER_LEN);
+    if (bytes_available) {
+      size_t bytes_to_read = min(bytes_available, MAX_BUFFER_LEN);
 
-    size_t bytes_read = proto_read(read_buffer, bytes_to_read);
-    if (bytes_read == 0) {
-      set_error("cmd_set_memory(): Timeout reading memory data");
-      return false;
+      size_t bytes_read = proto_read(read_buffer, bytes_to_read);
+      if (bytes_read == 0) {
+        controller_.getBoard().debugPrintf(DebugType::ERROR, false, "cmd_set_memory(): Failed to read available bytes\n\r");
+        set_error("cmd_set_memory(): Failed to read available bytes");
+        return false;
+      }
+      ArduinoX86::Bus->set_memory(address + total_bytes_read, read_buffer, bytes_read);
+      total_bytes_read += bytes_read;
     }
-    ArduinoX86::Bus->set_memory(address + total_bytes_read, read_buffer, bytes_read);
-    total_bytes_read += bytes_read;
+    else {
+      // Check for timeout
+      if (millis() >= timeout_time) {
+        controller_.getBoard().debugPrintf(DebugType::ERROR, false, "cmd_set_memory(): Timeout waiting for memory data\n\r");
+        set_error("cmd_set_memory(): Timeout waiting for memory data");
+        return false;
+      }
+      // No data available, wait a bit before checking again
+      delay(1);
+    }
+  }
+
+  controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_memory(): Set %lu bytes of memory successfully\n\r", total_bytes_read);
+  //ArduinoX86::Bus->debug_memory(address, total_bytes_read);
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_get_cycle_states() {
+  ArduinoX86::CycleLogger->dump_states();
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_enable_debug() {
+  bool enabled = static_cast<bool>(commandBuffer_[0]);
+  if (enabled) {
+    controller_.getBoard().setDebugEnabled(true);
+    controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_enable_debug(): Enabling debug mode");
+  } else {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_enable_debug(): Disabling debug mode");
+    controller_.getBoard().setDebugEnabled(false);
   }
   
-  controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_set_memory(): Memory set successfully");
   return true;
 }
 

@@ -49,6 +49,8 @@ constexpr const char* getColor(DebugType stage) {
     case DebugType::PROTO:     return yellow;
     case DebugType::CMD:       return bright_cyan;
     case DebugType::ERROR:     return red;
+    case DebugType::DUMP:      return bright_yellow;
+    case DebugType::SERVER:    return bright_green;
     default:                  return reset;
   }
 }
@@ -64,6 +66,7 @@ private:
   char *buffer_ptr_ = buffer_;
   size_t buffer_remain_ = BUFFER_SIZE;
   char have_deferred_buffer_ = false;
+  bool enabled_ = true;
 
 protected:
   SerialPort& serial;
@@ -83,8 +86,8 @@ public:
 
   // String overload
   inline void debugPrint(DebugType stage, const char* text, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
-    
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
+
     if (defer) {
       // Defer printing to avoid blocking
       snprintf(buffer_ptr_, buffer_remain_, "%s%s%s", getColor(stage), text, ansi::reset);
@@ -101,7 +104,7 @@ public:
   // Generic value overload
   template<typename T>
   inline void debugPrint(DebugType stage, T value, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
 
     if(defer) {
       String s = String(value);
@@ -120,7 +123,7 @@ public:
   
   template<typename T>
   inline void debugPrint(DebugType stage, T value, int base, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
     if(defer) {
       // Must convert base
       if (base == 16) {
@@ -142,8 +145,8 @@ public:
 
   // String overload
   inline void debugPrintln(DebugType stage, const char* text, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
-    
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
+
     if (defer) {
       snprintf(buffer_ptr_, buffer_remain_, "%s%s%s\n\r", getColor(stage), text, ansi::reset);
       buffer_ptr_ += strlen(buffer_ptr_);
@@ -159,7 +162,7 @@ public:
   // Generic value overload
   template<typename T>
   inline void debugPrintln(DebugType stage, T value, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
 
     if (defer) {
       // Convert value to string
@@ -178,7 +181,7 @@ public:
   // Generic value with base
   template<typename T>
   inline void debugPrintln(DebugType stage, T value, int base, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
 
     if (defer) {
       // Must convert base
@@ -199,7 +202,7 @@ public:
 
   // Println with no arguments, just newline with color
   inline void debugPrintln(DebugType stage, bool defer = false) {
-    if (!serial || !filter.isEnabled(stage)) return;
+    if (!serial || !filter.isEnabled(stage) || !enabled_) return;
 
     if (defer) {
       // Defer printing to avoid blocking
@@ -225,5 +228,13 @@ public:
 
   inline bool haveDeferredBuffer() {
     return have_deferred_buffer_;
+  }
+
+  inline void setDebugEnabled(bool enabled) {
+    enabled_ = enabled;
+  }
+
+  inline bool isDebugEnabled() const {
+    return enabled_;
   }
 };

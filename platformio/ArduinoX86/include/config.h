@@ -47,15 +47,15 @@
 // What vector to use for the BRKEM call. No reason to change this really.
 #define BRKEM_VECTOR ((uint8_t)0x00)
 
-// Print a character to the debugging output on each load command.
-#define LOAD_INDICATOR 1
-// Print a character to the debugging output on each store command.
-#define STORE_INDICATOR 1
+#define SILENT_MODE 0 // If set, disables all traces and debugs.
 
-#define RELEASE_MODE 0 // If set, disables all traces and debugs.
+// Print a character to the debugging output on each load command.
+#define LOAD_INDICATOR (SILENT_MODE)
+// Print a character to the debugging output on each store command.
+#define STORE_INDICATOR (SILENT_MODE)
 
 #define TRACE_ALL 1 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
-#define TRACE_NONE (0 | RELEASE_MODE) // TRACE_NONE will override all set traces
+#define TRACE_NONE (0 | SILENT_MODE) // TRACE_NONE will override all set traces
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
@@ -72,33 +72,28 @@
 #define TRACE_FINALIZE  ((0 | TRACE_ALL) & ~TRACE_NONE)
 
 #define DEBUG_ALL 0  // DEBUG_ALL will enable all debugs (DEBUG_NONE overrides)
-#define DEBUG_NONE (0 | RELEASE_MODE) // DEBUG_NONE will override all set debugs
+#define DEBUG_NONE (0 | SILENT_MODE) // DEBUG_NONE will override all set debugs
 
-#define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Report state changes and time spent in each state
-#define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about the reset process
-#define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about the CPU setup routine, if applicable
-#define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about jump vector program execution
-#define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Print info about CPU identification
-#define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE)
-#define DEBUG_LOAD_DONE ((0 | DEBUG_ALL) & ~DEBUG_NONE)
-#define DEBUG_EXECUTE   ((1 | DEBUG_ALL) & ~DEBUG_NONE)
-#define DEBUG_STORE     ((1 | DEBUG_ALL) & ~DEBUG_NONE)
-#define DEBUG_FINALIZE  ((1 | DEBUG_ALL) & ~DEBUG_NONE)
+#define DEBUG_SERVER    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the server state
+#define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about state changes and time spent in each state
+#define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
+#define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
+#define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about jump vector program execution
+#define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about CPU identification
+#define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
+#define DEBUG_LOAD_DONE ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD_DONE state
+#define DEBUG_EXECUTE   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during EXECUTE state
+#define DEBUG_STORE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during STORE state
+#define DEBUG_FINALIZE  ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during FINALIZE state
 #define DEBUG_INSTR     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Print instruction mnemonics as they are executed from queue
-#define DEBUG_EMU       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Print debugging information concerning 8080 emulation mode state
-#define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Debugging output for queue operations (flushes, regular queue ops are always reported)
+#define DEBUG_EMU       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about 8080 emulation mode state
+#define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
 #define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
-#define DEBUG_PROTO     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Debug the serial cpu_server protocol
-#define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE)
-
-#define DEBUG_BUS_COLOR (ansi::bright_green)
-#define DEBUG_QUEUE_COLOR (ansi::bright_yellow)
-#define DEBUG_STORE_COLOR (ansi::magenta)
-#define DEBUG_VECTOR_COLOR (ansi::cyan)
-#define DEBUG_ID_COLOR (ansi::green)
-#define ERROR_COLOR (ansi::bright_red)
+#define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the serial cpu_server protocol (verbose)
+#define DEBUG_CMD       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
+#define DEBUG_DUMP      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about dump commands
 
 #define MAX_ERR_LEN 50 // Maximum length of an error string
 

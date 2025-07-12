@@ -20,11 +20,14 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+
+use std::io::Write;
+
 use binrw::BinReaderExt;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::*;
 use rand::Rng;
-use std::io::{Cursor, Write};
+use rand_distr::{Beta, Distribution};
 
 #[derive(Debug)]
 pub enum RemoteCpuRegisters {
@@ -262,7 +265,7 @@ impl Default for SegmentDescriptorV1 {
 }
 
 impl SegmentDescriptorV1 {
-    pub fn to_buffer<W: Write>(&self, mut buffer: &mut W) -> std::io::Result<()> {
+    pub fn to_buffer<W: Write>(&self, buffer: &mut W) -> std::io::Result<()> {
         let bytes = self.clone().into_bytes();
         buffer.write_all(&bytes)?;
         Ok(())
@@ -436,10 +439,14 @@ impl Default for RemoteCpuRegistersV2 {
 pub struct RandomizeOpts {
     pub weight_zero: f32,
     pub weight_ones: f32,
+    pub weight_sp_odd: f32,
+    pub sp_min_value: u16,
     pub randomize_flags: bool,
     pub clear_trap_flag: bool,
     pub clear_interrupt_flag: bool,
     pub randomize_general: bool,
+    pub randomize_ip: bool,
+    pub ip_mask: u16,
     pub randomize_x: bool,
     pub randomize_msw: bool,
     pub randomize_tr: bool,
@@ -544,18 +551,25 @@ impl RemoteCpuRegistersV2 {
             .with_limit(0xFFFF);
     }
 
-    pub fn weighted_u16(weight_zero: f32, weight_ones: f32, rand: &mut rand::rngs::StdRng) -> u16 {
+    pub fn weighted_u16(
+        weight_zero: f32,
+        weight_ones: f32,
+        rand: &mut rand::rngs::StdRng,
+        register_beta: &mut Beta<f64>,
+    ) -> u16 {
         let random_value: f32 = rand.random();
         if random_value < weight_zero {
             0
         } else if random_value < weight_zero + weight_ones {
             0xFFFF // All bits set to 1
         } else {
-            rand.random::<u16>() // Random value
+            let value: u16 = (register_beta.sample(rand) * u16::MAX as f64) as u16;
+            value
         }
     }
 
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng) {
+    #[rustfmt::skip]
+    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>) {
         *self = RemoteCpuRegistersV2::default(); // Reset all registers to default values
 
         if opts.randomize_flags {
@@ -569,19 +583,36 @@ impl RemoteCpuRegistersV2 {
         }
 
         if opts.randomize_general {
-            self.ax = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.bx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.cx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.dx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.sp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.bp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.si = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.di = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.ds = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.ss = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.es = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.cs = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
-            self.ip = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand);
+            self.ax = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.bx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.cx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.dx = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.sp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.bp = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.si = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.di = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ds = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ss = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.es = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.cs = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+
+        }
+
+        if opts.randomize_ip {
+            self.ip = rand.random::<u16>() & opts.ip_mask;
+        }
+
+        // Set SP to even value.
+        self.sp = self.sp & !1;
+        // Use the sp_odd_chance to set it to an odd value based on the configured percentage.
+        let odd_chance = rand.random::<f32>();
+        if odd_chance < opts.weight_sp_odd {
+            self.sp |= 1; // Set the least significant bit to 1 to make it odd
+        }
+
+        // Set sp to minimum value if beneath.
+        if self.sp < opts.sp_min_value {
+            self.sp = opts.sp_min_value;
         }
 
         if opts.randomize_x {

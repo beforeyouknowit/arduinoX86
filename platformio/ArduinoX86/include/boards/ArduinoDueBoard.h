@@ -61,8 +61,8 @@ public:
     setDebugType(DebugType::BUS,       DEBUG_BUS);
     setDebugType(DebugType::PROTO,     DEBUG_PROTO);
     setDebugType(DebugType::CMD,       DEBUG_CMD);
-
-
+    setDebugType(DebugType::DUMP,      DEBUG_DUMP);
+    setDebugType(DebugType::SERVER,    DEBUG_SERVER);
   }
 
   inline void clockHighDelay() {

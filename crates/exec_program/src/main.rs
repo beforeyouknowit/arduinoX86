@@ -93,7 +93,7 @@ fn main() {
     }
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(args.com_port.clone()) {
+    let mut cpu_client = match CpuClient::init(args.com_port.clone(), Some(2000)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client

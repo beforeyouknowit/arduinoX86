@@ -1,31 +1,40 @@
 [test_gen]
 
-cpu_type = "intel80286"
+cpu_type = "Intel80286"
 # Execution mode - real, unreal, protected
 cpu_mode = "real"
-seed = 1234
+base_seed = 0xDEADBEEF
 termination_condition = "halt"
 output_dir = "e:/test_output_286/"
+trace_file = "trace.txt"
+moo_version = 1
+moo_arch = "C286"
+
 address_mask = 0xFFFFFF # 24-bit address mask for 286
+ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
 
 extended_opcode = false # Use extended opcodes (0x0F)
-opcode_range = [0x00, 0x00]
+opcode_range = [0x4C, 0x5F]
 group_extension_range = [0, 7] # Range for group extensions
 excluded_opcodes = [0xF1]
 
-test_count = 1
-append_file = true
+test_count = 10000
+append_file = false
 
-segment_override_chance = 0.10 # Chance of segment override prefix (10%)
-lock_chance = 0.025 # Chance of LOCK prefix (2.5%)
+# Probabilities for random number generation
+register_beta = [0.65, 0.65] # Beta distribution for register value selection.
+max_prefixes = 6 # Maximum number of prefixes per instruction
+prefix_beta = [0.25, 1.5] # Beta distribution for prefix count
+lock_prefix_chance = 0.025 # Chance of LOCK prefix
+lock_prefix_opcode = 0xF0
+reg_zero_chance = 0.05 # Chance of zeroed register
+reg_ff_chance = 0.05 # Chance of an all-bit-set register
 
-reg_zero_chance = 0.05 # Chance of zeroed register (5%)
-reg_ff_chance = 0.05 # Chance of an all-bit-set register (5%)
-
-mem_zero_chance = 0.05 # Chance of zeroed memory (5%)
-mem_ff_chance = 0.05 # Chance of all-bit-set memory (5%)
-
+mem_zero_chance = 0.05 # Chance of zeroed memory
+mem_ff_chance = 0.05 # Chance of all-bit-set memory
+sp_odd_chance = 0.1 # Chance of SP being odd
+sp_min_value = 0x0008 # Minimum value for SP
 extended_prefix = 0x0F
 
 group_opcodes = [
@@ -115,4 +124,12 @@ disable_lock_prefix = [
 randomize_mem_interval = 1000
 
 [test_exec]
-polling_sleep = 100 # Polling rate in milliseconds per poll
+serial_debug_default = false
+serial_debug_test = 3191
+test_retry = 5 # Number of retries per test overall.
+load_retry = 6 # Number of retries for LOADALL.
+polling_sleep = 10 # Polling rate in milliseconds per poll
+print_instruction = true
+print_initial_regs = false
+print_final_regs = false
+show_gen_time = true

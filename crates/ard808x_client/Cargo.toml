@@ -16,3 +16,5 @@ serialport.workspace = true
 binrw.workspace = true
 modular-bitfield.workspace = true
 rand.workspace = true
+rand_distr.workspace = true
+thiserror.workspace = true
