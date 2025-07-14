@@ -34,6 +34,11 @@
 #include <serial_config.h>
 #include <arduinoX86.h>
 
+#include <bus_emulator/IBusBackend.h>
+#include <bus_emulator/SdramBackend.h>
+#include <bus_emulator/HashBackend.h>
+#include <bus_emulator/NullBackend.h>
+
 #if defined(ARDUINO_GIGA)
 #define MEMORY_SIZE (2 * 1024 * 1024) // 4MB for Giga
 #else
@@ -135,25 +140,6 @@ private:
   int    consecutive_writes_ = 0; // For detecting far calls/exceptions
 };
 
-// Abstract interface for bus backing implementations
-class IBusBackend {
-public:
-  virtual ~IBusBackend() {}
-  virtual uint8_t  read_u8(uint32_t address) = 0;
-  virtual uint16_t read_u16(uint32_t address) = 0;
-  virtual uint16_t read_bus(uint32_t address, bool bhe) = 0;
-  virtual void     write_u8(uint32_t address, uint8_t  value) = 0;
-  virtual void     write_u16(uint32_t address, uint16_t value) = 0;
-  virtual void     write_bus(uint32_t address, uint16_t value, bool bhe) = 0;
-  virtual uint8_t  io_read_u8(uint16_t port) = 0;
-  virtual uint16_t io_read_u16(uint16_t port) = 0;
-  virtual void     io_write_u8(uint16_t port, uint8_t  value) = 0;
-  virtual void     io_write_u16(uint16_t port, uint16_t value) = 0;
-  virtual void     set_memory(uint32_t address, const uint8_t* buffer, size_t length) = 0;
-  virtual void     randomize_memory() = 0;
-  virtual void     debug_mem(uint32_t address, size_t length) = 0; // For debugging purposes
-};
-
 class BusEmulator {
 public:
   explicit BusEmulator(IBusBackend* backend)
@@ -212,6 +198,11 @@ public:
     //logger_.log({BusOperationType::IoRead16, port, val});
     return val;
   }
+  uint16_t io_read_bus(uint16_t port, bool bhe) {
+    uint16_t val = backend_->io_read_bus(port, bhe);
+    logger_.log({BusOperationType::IoRead16, bus_width(port, bhe), port, val});
+    return val;
+  }
   void io_write_u8(uint16_t port, uint8_t value) {
     backend_->io_write_u8(port, value);
     //logger_.log({BusOperationType::IoWrite8, port, value});
@@ -239,8 +230,8 @@ public:
   }
 
   /// @brief Randomizes the contents of the emulated memory with random data.
-  void randomize_memory() {
-    backend_->randomize_memory();
+  void randomize_memory(uint32_t seed) {
+    backend_->randomize_memory(seed);
   }
   void enable_logging() {
     logger_.enable();
@@ -255,6 +246,9 @@ public:
     // Check that the last 3 bus operations were writes. 
     // This is indicative of a far call or exception if we are reading from the IVT.
     return logger_.get_consecutive_writes() >= 3;
+  }
+  void set_memory_strategy(IBusBackend::DefaultStrategy strategy, uint32_t start, uint32_t end) {
+    backend_->set_strategy(strategy, start, end);
   }
 
   // Expose log info
@@ -296,9 +290,10 @@ private:
 
 // Factory helper: choose backend based on platform
 inline BusEmulator* create_bus_emulator() {
-#ifdef ARDUINO_GIGA
+#if defined(ARDUINO_GIGA)
   return new BusEmulator(
-      new SdramBackend(MEMORY_SIZE, ADDRESS_SPACE_MASK)
+      //new SdramBackend(MEMORY_SIZE, ADDRESS_SPACE_MASK)
+      new HashBackend()
   );
 #else
   return new BusEmulator(

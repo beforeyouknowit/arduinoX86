@@ -1,69 +1,16 @@
-use crate::chunk::{MooBytesChunk, MooChunkType, MooFileHeader, MooNameChunk, MooTestChunk};
-use crate::types::{MooCycleState, MooRamEntries, MooRamEntry};
-use crate::types::{MooRegisters1, MooRegisters1Init};
-use binrw::{BinResult, BinWrite};
+use std::io::{Cursor, Read, Seek, Write};
+
+use crate::chunk::{
+    MooBytesChunk, MooChunkHeader, MooChunkType, MooFileHeader, MooHashChunk, MooNameChunk,
+    MooTestChunk,
+};
+use crate::types::errors::MooError;
+use crate::types::state::MooTestState;
+use crate::types::MooRegisters1;
+use crate::types::{MooCycleState, MooRamEntries, MooStateType};
+
+use binrw::{BinRead, BinResult, BinWrite};
 use sha1::Digest;
-use std::io::{Cursor, Write};
-
-pub struct MooTestState {
-    pub regs: MooRegisters1,
-    pub queue: Vec<u8>,
-    pub ram: MooRamEntries,
-}
-
-impl MooTestState {
-    pub fn new(
-        regs_start: &MooRegisters1Init,
-        regs_final: Option<&MooRegisters1Init>,
-        queue: Vec<u8>,
-        ram: Vec<MooRamEntry>,
-    ) -> Self {
-        let regs = if let Some(final_regs) = regs_final {
-            MooRegisters1::from((regs_start, final_regs))
-        } else {
-            MooRegisters1::from(regs_start)
-        };
-
-        let ram_entries = MooRamEntries {
-            entry_count: ram.len() as u32,
-            entries: ram,
-        };
-        Self {
-            regs,
-            queue,
-            ram: ram_entries,
-        }
-    }
-
-    pub fn regs(&self) -> &MooRegisters1 {
-        &self.regs
-    }
-
-    pub fn queue(&self) -> &[u8] {
-        &self.queue
-    }
-
-    pub fn ram(&self) -> &[MooRamEntry] {
-        &self.ram.entries
-    }
-
-    pub fn write<W: Write + std::io::Seek>(&self, _writer: &mut W) -> BinResult<()> {
-        // // Write the registers
-        // self.regs.write_le(writer)?;
-        //
-        // // Write the queue
-        // writer.write_all(&self.queue)?;
-        //
-        // // Write the RAM entries
-        //
-        // for entry in &self.ram.entries {
-        //     writer.write_all(&entry.address.to_le_bytes())?;
-        //     writer.write_all(&entry.value.to_le_bytes())?;
-        // }
-
-        Ok(())
-    }
-}
 
 pub struct MooTest {
     name: String,
@@ -122,7 +69,322 @@ impl MooTestFile {
         &self.tests
     }
 
-    pub fn write<W: Write + std::io::Seek>(&self, writer: &mut W) -> BinResult<()> {
+    pub fn test_ct(&self) -> usize {
+        self.tests.len()
+    }
+
+    pub fn read<RS: Read + Seek>(reader: &mut RS) -> BinResult<MooTestFile> {
+        // Seek to the start of the reader.
+        reader.seek(std::io::SeekFrom::Start(0))?;
+
+        // Get reader len.
+        let reader_len = MooTestFile::get_reader_len(reader)?;
+
+        // Read the file header chunk.
+        let header_chunk = MooChunkHeader::read(reader)?;
+        if !matches!(header_chunk.chunk_type, MooChunkType::FileHeader) {
+            return Err(binrw::Error::Custom {
+                pos: reader.stream_position().unwrap_or(0),
+                err: Box::new(MooError::ParseError(
+                    "Expected FileHeader chunk at the start of the file.".to_string(),
+                )),
+            });
+        }
+        // Read the file header.
+        let header: MooFileHeader = MooFileHeader::read(reader)?;
+
+        let mut new_file = MooTestFile::new(
+            header.version,
+            String::from_utf8_lossy(&header.cpu_name).to_string(),
+            header.test_count as usize,
+        );
+
+        log::debug!(
+            "Reading MooTestFile: version {}, arch: {} test_ct: {}",
+            new_file.version,
+            new_file.arch,
+            header.test_count
+        );
+
+        let mut in_test = false;
+        let mut test_num = 0;
+        let mut have_initial_state = false;
+        let mut have_final_state = false;
+
+        // Read chunks until exhausted.
+        loop {
+            if test_num == header.test_count as usize {
+                // We have read all tests, exit the loop.
+                log::trace!("Reached expected test count: {}", test_num);
+                log::trace!(
+                    "{} bytes remaining in reader.",
+                    reader_len - reader.stream_position()?
+                );
+                break;
+            }
+
+            let top_level_chunk_offset = reader.stream_position()?;
+            let chunk = MooChunkHeader::read(reader)?;
+
+            // log::trace!(
+            //     "Read chunk: {:?} pos: {:06X} size: {}",
+            //     chunk.chunk_type,
+            //     top_level_chunk_offset,
+            //     chunk.size
+            // );
+            match chunk.chunk_type {
+                MooChunkType::FileHeader => {
+                    log::warn!("Unexpected FileHeader chunk!.");
+                }
+                MooChunkType::TestHeader => {
+                    // Do a sanity check - did the previous test have both required states?
+                    if in_test && (!have_initial_state || !have_final_state) {
+                        return Err(binrw::Error::Custom {
+                            pos: reader.stream_position().unwrap_or(0),
+                            err: Box::new(MooError::ParseError(format!(
+                                "Test {} did not have both initial and final states.",
+                                test_num
+                            ))),
+                        });
+                    }
+
+                    // Reset the flags for the next test.
+                    in_test = true;
+                    have_initial_state = false;
+                    have_final_state = false;
+
+                    let mut test_name = String::new();
+                    let mut test_bytes = Vec::new();
+
+                    // Read the test chunk body.
+                    //log::debug!("Reading test body for test {}", test_num);
+                    let test_chunk = MooTestChunk::read(reader)?;
+                    if test_chunk.index != (test_num as u32) {
+                        log::warn!(
+                            "Test index mismatch: expected {}, got {}",
+                            test_num,
+                            test_chunk.index
+                        );
+                    }
+
+                    test_num += 1;
+
+                    // Read the test chunk length into a Cursor.
+                    let mut test_buffer = vec![0; chunk.size as usize - size_of::<MooTestChunk>()];
+                    // Read the test chunk body into the buffer.
+                    reader.read_exact(&mut test_buffer)?;
+                    let mut test_reader = Cursor::new(test_buffer);
+
+                    let mut initial_state = MooTestState::default();
+                    let mut final_state = MooTestState::default();
+
+                    let mut hash = None;
+                    let mut cycle_vec = Vec::new();
+
+                    loop {
+                        // Read the next chunk type.
+                        let bytes_remaining =
+                            test_reader.get_ref().len() - test_reader.position() as usize;
+                        if bytes_remaining == 0 {
+                            // Push the test to the file.
+                            new_file.add_test(MooTest {
+                                name: test_name.clone(),
+                                bytes: test_bytes.clone(),
+                                initial_state: initial_state.clone(),
+                                final_state: final_state.clone(),
+                                cycles: cycle_vec.clone(),
+                            });
+                        }
+                        if bytes_remaining > 0 && bytes_remaining < 8 {
+                            return Err(binrw::Error::Custom {
+                                pos: top_level_chunk_offset + test_reader.position(),
+                                err: Box::new(MooError::ParseError(format!(
+                                    "Remaining data bytes ({}) too short to contain a valid chunk.",
+                                    bytes_remaining
+                                ))),
+                            });
+                        }
+                        // log::debug!(
+                        //     "{} bytes remaining in chunk.",
+                        //     test_reader.get_ref().len() - test_reader.position() as usize
+                        // );
+                        if test_reader.position() >= test_reader.get_ref().len() as u64 {
+                            break; // End of test chunk
+                        }
+
+                        let next_chunk = MooChunkHeader::read(&mut test_reader)?;
+
+                        match next_chunk.chunk_type {
+                            MooChunkType::Name => {
+                                // Read the name chunk.
+                                let name_chunk: MooNameChunk = BinRead::read(&mut test_reader)?;
+                                test_name = name_chunk.name.clone();
+                                log::trace!(
+                                    "Reading NAME chunk: name: {} len: {}",
+                                    name_chunk.name,
+                                    name_chunk.len
+                                );
+                            }
+                            MooChunkType::Bytes => {
+                                // Read the bytes chunk.
+                                let bytes_chunk: MooBytesChunk = BinRead::read(&mut test_reader)?;
+                                test_bytes = bytes_chunk.bytes;
+                            }
+                            MooChunkType::InitialState => {
+                                initial_state = MooTestFile::read_state(
+                                    MooStateType::Initial,
+                                    &mut test_reader,
+                                    next_chunk.size.into(),
+                                )?;
+                                have_initial_state = true;
+                            }
+                            MooChunkType::FinalState => {
+                                final_state = MooTestFile::read_state(
+                                    MooStateType::Final,
+                                    &mut test_reader,
+                                    next_chunk.size.into(),
+                                )?;
+                                have_final_state = true;
+                            }
+                            MooChunkType::CycleStates => {
+                                // Read the cycle states chunk.
+                                cycle_vec.clear();
+                                let cycle_count: u32 = BinRead::read_le(&mut test_reader)?;
+                                //log::debug!("Reading {} cycles", cycle_count);
+                                for _ in 0..cycle_count {
+                                    let cycle_state = MooCycleState::read(&mut test_reader)?;
+                                    cycle_vec.push(cycle_state);
+                                }
+                            }
+                            MooChunkType::Hash => {
+                                // Read the hash chunk.
+                                let hash_chunk = MooHashChunk::read(&mut test_reader)?;
+                                // log::debug!(
+                                //     "Reading HASH chunk, pos: {:06X} len: {}",
+                                //     top_level_chunk_offset + chunk_offset,
+                                //     next_chunk.size
+                                // );
+                                hash = Some(hash_chunk.hash);
+                            }
+                            _ => {
+                                log::warn!(
+                                    "Unexpected chunk type in test: {:?}, skipping next {} bytes",
+                                    next_chunk.chunk_type,
+                                    next_chunk.size
+                                );
+                                // Skip the chunk by advancing reader.
+                                test_reader
+                                    .seek(std::io::SeekFrom::Current(next_chunk.size as i64))?;
+                            }
+                        }
+                    }
+                }
+                _ => break, // End of file or unknown chunk type
+            }
+        }
+
+        Ok(new_file)
+    }
+
+    fn get_reader_len<RS: Read + Seek>(reader: &mut RS) -> BinResult<u64> {
+        // Get the current position in the stream.
+        let saved_pos = reader.stream_position()?;
+        // Seek to the end of the stream.
+        reader.seek(std::io::SeekFrom::End(0))?;
+        // Get the length of the stream.
+        let len = reader.stream_position()?;
+        // Restore the original position.
+        reader.seek(std::io::SeekFrom::Start(saved_pos))?;
+        Ok(len)
+    }
+
+    fn read_state<RS: Read + Seek>(
+        s_type: MooStateType,
+        reader: &mut RS,
+        data_len: u64,
+    ) -> BinResult<MooTestState> {
+        let mut have_regs = false;
+        let mut have_ram = false;
+        let mut have_queue = false;
+
+        let mut new_state = MooTestState {
+            s_type,
+            regs: MooRegisters1::default(),
+            queue: Vec::new(),
+            ram: MooRamEntries {
+                entry_count: 0,
+                entries: Vec::new(),
+            },
+        };
+
+        // Get stream length.
+        let saved_pos = reader.stream_position()?;
+        reader.seek(std::io::SeekFrom::End(0))?;
+        let stream_end = reader.stream_position()?;
+        // Restore stream pos.
+        reader.seek(std::io::SeekFrom::Start(saved_pos))?;
+
+        if data_len > (stream_end - saved_pos) {
+            return Err(binrw::Error::Custom {
+                pos: reader.stream_position().unwrap_or(0),
+                err: Box::new(MooError::ParseError(
+                    "Test state chunk is larger than the remaining stream data.".to_string(),
+                )),
+            });
+        }
+
+        let stream_end = saved_pos + data_len;
+
+        loop {
+            // Read the next chunk type.
+            if reader.stream_position()? >= stream_end {
+                return if have_regs && have_ram {
+                    // RAM and registers are mandatory, queue is optional.
+                    Ok(new_state)
+                } else {
+                    Err(binrw::Error::Custom {
+                        pos: reader.stream_position().unwrap_or(0),
+                        err: Box::new(MooError::ParseError(
+                            "Test state chunk is missing required registers or RAM.".to_string(),
+                        )),
+                    })
+                };
+            }
+            // Read the next chunk type.
+            let next_chunk = MooChunkHeader::read(reader)?;
+
+            match next_chunk.chunk_type {
+                MooChunkType::Registers16 => {
+                    // Read the registers chunk.
+                    let regs = MooRegisters1::read(reader)?;
+                    new_state.regs = regs;
+                    have_regs = true;
+                }
+                MooChunkType::Ram => {
+                    // Read the RAM chunk.
+                    let ram_entries = MooRamEntries::read(reader)?;
+                    new_state.ram = ram_entries;
+                    have_ram = true;
+                }
+                MooChunkType::QueueState => {
+                    // Read the queue chunk.
+                    let queue = MooBytesChunk::read(reader)?;
+                    new_state.queue = queue.bytes;
+                    have_queue = true;
+                }
+                _ => {
+                    log::warn!(
+                        "Unexpected chunk type in test state: {:?}",
+                        next_chunk.chunk_type
+                    );
+                    // Skip the chunk by advancing reader.
+                    reader.seek(std::io::SeekFrom::Current(next_chunk.size as i64))?;
+                }
+            }
+        }
+    }
+
+    pub fn write<WS: Write + Seek>(&self, writer: &mut WS) -> BinResult<()> {
         // Write the file header chunk.
 
         MooChunkType::FileHeader.write(
@@ -144,56 +406,24 @@ impl MooTestFile {
             MooTestChunk { index: ti as u32 }.write(&mut test_buffer)?;
 
             // Write the name chunk.
-            let mut name_buffer = Cursor::new(Vec::new());
-            MooNameChunk {
+            let name_chunk = MooNameChunk {
                 len: test.name.len() as u32,
-            }
-            .write(&mut name_buffer)?;
-            name_buffer.write_all(test.name.as_bytes())?;
-            MooChunkType::Name.write(&mut test_buffer, &name_buffer.into_inner())?;
+                name: test.name.clone(),
+            };
+            MooChunkType::Name.write(&mut test_buffer, &name_chunk)?;
 
             // Write the bytes chunk.
-            let mut bytes_buffer = Cursor::new(Vec::new());
-            MooBytesChunk {
+            let bytes_chunk = MooBytesChunk {
                 len: test.bytes.len() as u32,
-            }
-            .write(&mut bytes_buffer)?;
-            bytes_buffer.write_all(test.bytes.as_slice())?;
-            MooChunkType::Bytes.write(&mut test_buffer, &bytes_buffer.into_inner())?;
-
-            let mut initial_state_buffer = Cursor::new(Vec::new());
-
-            // Write the initial regs.
-            MooChunkType::Registers16.write(&mut initial_state_buffer, &test.initial_state.regs)?;
-
-            // Write the initial queue, if not empty.
-            if !test.initial_state.queue.is_empty() {
-                MooChunkType::QueueState
-                    .write(&mut initial_state_buffer, &test.initial_state.queue)?;
-            }
-
-            // Write the initial ram.
-            MooChunkType::Ram.write(&mut initial_state_buffer, &test.initial_state.ram)?;
+                bytes: test.bytes.clone(),
+            };
+            MooChunkType::Bytes.write(&mut test_buffer, &bytes_chunk)?;
 
             // Write the initial state chunk.
-            MooChunkType::InitialState
-                .write(&mut test_buffer, &initial_state_buffer.into_inner())?;
-
-            let mut final_state_buffer = Cursor::new(Vec::new());
-
-            // Write the final regs.
-            MooChunkType::Registers16.write(&mut final_state_buffer, &test.final_state.regs)?;
-
-            // Write the final queue, if not empty.
-            if !test.final_state.queue.is_empty() {
-                MooChunkType::QueueState.write(&mut final_state_buffer, &test.final_state.queue)?;
-            }
-
-            // Write the final ram.
-            MooChunkType::Ram.write(&mut final_state_buffer, &test.final_state.ram)?;
+            test.initial_state.write(&mut test_buffer)?;
 
             // Write the final state chunk.
-            MooChunkType::FinalState.write(&mut test_buffer, &final_state_buffer.into_inner())?;
+            test.final_state.write(&mut test_buffer)?;
 
             let mut cycle_buffer = Cursor::new(Vec::new());
             // Write the count of cycles to the cycle buffer.

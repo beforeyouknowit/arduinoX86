@@ -21,6 +21,8 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+#include <cstdarg>
+
 #include <Arduino.h>
 #include <config.h>
 
@@ -30,9 +32,8 @@
 #include <BoardController.h>
 #include <CommandServer.h>
 #include <DebugFilter.h>
-
-#include <cstdarg>
 #include <programs.h>
+#include <bus_emulator/IBusBackend.h>
 
 #if defined (ARDUINO_GIGA)
 #define MAX_BUFFER_LEN 4096ul
@@ -193,6 +194,8 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
       case ServerCommand::CmdSetMemory: return "CmdSetMemory";
       case ServerCommand::CmdGetCycleStates: return "CmdGetCycleStates";
       case ServerCommand::CmdEnableDebug: return "CmdEnableDebug";
+      case ServerCommand::CmdSetMemoryStrategy: return "CmdSetMemoryStrategy";
+      case ServerCommand::CmdGetFlags: return "CmdGetFlags";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -322,6 +325,10 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_get_cycle_states();
     case ServerCommand::CmdEnableDebug:
         return cmd_enable_debug();
+    case ServerCommand::CmdSetMemoryStrategy:
+        return cmd_set_memory_strategy();
+    case ServerCommand::CmdGetFlags:
+        return cmd_get_flags();
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -386,10 +393,12 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
         case ServerCommand::CmdInitScreen: return 0;
         case ServerCommand::CmdStoreAll: return 0;
         case ServerCommand::CmdSetRandomSeed: return 4; // Parameter: uint32_t seed for randomization
-        case ServerCommand::CmdRandomizeMem: return 0;
+        case ServerCommand::CmdRandomizeMem: return 4; // Parameter: uint32_t seed for randomization
         case ServerCommand::CmdSetMemory: return 8; // Parameters: address (4 bytes) and size (4 bytes).
         case ServerCommand::CmdGetCycleStates: return 0; 
         case ServerCommand::CmdEnableDebug: return 1; // Parameter: 0 to disable debug, 1 to enable debug
+        case ServerCommand::CmdSetMemoryStrategy: return 9; // Parameters: Strategy (1 byte), start_addr (4 bytes), end_addr (4 bytes).
+        case ServerCommand::CmdGetFlags: return 0;
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -467,6 +476,7 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       ArduinoX86::CycleLogger->reset();
       ArduinoX86::CycleLogger->enable_logging();
       ArduinoX86::Bus->enable_logging();
+      CPU.predicted_fetch = 0;
       CPU.exception_armed = false;
       CPU.execute_cycle_ct = 0;
       CPU.nmi_checkpoint = 0;
@@ -514,6 +524,10 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
     case ServerState::StoreDone:
       break;  
     case ServerState::Done:
+      break;
+    case ServerState::Shutdown:
+      CPU.error_cycle_ct = 0;
+      controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering shutdown state. Please reset the CPU.");
       break;
     case ServerState::Error:
       CPU.error_cycle_ct = 0;
@@ -1128,6 +1142,9 @@ bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
   if (flags_ & CommandServer::FLAG_EXECUTE_AUTOMATIC) {
     controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling automatic execution ##");
   }
+  if (flags_ & CommandServer::FLAG_HALT_AFTER_JUMP) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling halt after jump ##");
+  }
 
   flags_ = new_flags;
   return true;
@@ -1198,8 +1215,14 @@ bool CommandServer<BoardType, HatType>::cmd_set_random_seed() {
 
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_randomize_mem() {
+
+  uint32_t seed = commandBuffer_[0] | 
+                  (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
+                  (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
+                  (static_cast<uint32_t>(commandBuffer_[3]) << 24);
+
   unsigned long start_time = millis();
-  ArduinoX86::Bus->randomize_memory();
+  ArduinoX86::Bus->randomize_memory(seed);
   unsigned long end_time = millis();
   unsigned long elapsed = end_time - start_time;
   controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_randomize_mem(): Memory randomized in %lu ms\n\r", elapsed);
@@ -1275,6 +1298,35 @@ bool CommandServer<BoardType, HatType>::cmd_enable_debug() {
     controller_.getBoard().setDebugEnabled(false);
   }
   
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_set_memory_strategy() {
+
+  IBusBackend::DefaultStrategy strategy = static_cast<IBusBackend::DefaultStrategy>(commandBuffer_[0]);
+  uint32_t start_address = commandBuffer_[1] | 
+                    (static_cast<uint32_t>(commandBuffer_[2]) << 8) |
+                    (static_cast<uint32_t>(commandBuffer_[3]) << 16) |
+                    (static_cast<uint32_t>(commandBuffer_[4]) << 24);
+  uint32_t end_address = commandBuffer_[5] | 
+                    (static_cast<uint32_t>(commandBuffer_[6]) << 8) |
+                    (static_cast<uint32_t>(commandBuffer_[7]) << 16) |
+                    (static_cast<uint32_t>(commandBuffer_[8]) << 24);
+  if (strategy < IBusBackend::DefaultStrategy::Invalid) {
+    ArduinoX86::Bus->set_memory_strategy(strategy, start_address, end_address);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_memory_strategy(): Set memory strategy to: %d: %06lX %06lX\n\r", strategy, start_address, end_address);
+    return true;
+  } else {
+    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "cmd_set_memory_strategy(): Invalid memory strategy: %d\n\r", strategy);
+    set_error("Invalid memory strategy: %d", strategy);
+    return false;
+  }
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_get_flags() {
+  proto_write(reinterpret_cast<const uint8_t*>(&flags_), sizeof(flags_));
   return true;
 }
 

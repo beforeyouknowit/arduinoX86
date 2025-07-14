@@ -20,6 +20,12 @@ pub struct MooCycleState {
 
 impl Display for MooCycleState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ale_str = if self.pins0 & MooCycleState::PIN_ALE != 0 {
+            "A:"
+        } else {
+            "  "
+        };
+
         let r_chr = if self.memory_status & 0b100 != 0 {
             "R"
         } else {
@@ -34,8 +40,8 @@ impl Display for MooCycleState {
 
         write!(
             f,
-            "{:06X}:{:04X} m:{}.{} i:... ",
-            self.address_bus, self.data_bus, r_chr, w_chr,
+            "{}{:06X}:{:04X} m:{}.{} i:... ",
+            ale_str, self.address_bus, self.data_bus, r_chr, w_chr,
         )
     }
 }

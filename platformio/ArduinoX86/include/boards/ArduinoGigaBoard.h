@@ -24,10 +24,13 @@
 #pragma once
 
 #include <Arduino.h>
+#include <SDRAM.h>
+
 #include <config.h>
 #include <gpio_pins.h>
 #include <serial_config.h>
 #include <DebugPrint.h>
+
 #include "../hats/HatTraits.h"
 
 template<typename Hat>
@@ -36,6 +39,10 @@ public:
   ArduinoGigaBoard() : DebugPrintMixin(Serial2) {}
 
   void init() {
+
+    // Initialize SDRAM
+    SDRAM.begin();
+
     // Initialize GPIO via the hat
     Hat::initPins();
 
@@ -65,8 +72,6 @@ public:
     setDebugType(DebugType::CMD,       DEBUG_CMD);
     setDebugType(DebugType::DUMP,      DEBUG_DUMP);
     setDebugType(DebugType::SERVER,    DEBUG_SERVER);
+    setDebugType(DebugType::EMIT,      true);
   }
-
-
-
 };

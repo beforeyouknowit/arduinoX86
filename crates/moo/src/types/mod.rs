@@ -1,17 +1,25 @@
 pub mod cycles;
+pub mod errors;
 pub mod ram;
 pub mod registers;
+pub mod state;
 
+use binrw::binrw;
 pub use cycles::*;
 pub use ram::*;
 pub use registers::*;
+pub use state::*;
 
 #[cfg(feature = "ard808x_client")]
 use ard808x_client::ServerCpuType;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[binrw]
+#[br(repr(u8))]
+#[bw(repr(u8))]
 pub enum MooCpuType {
+    #[default]
     Intel8088,
     Intel8086,
     NecV20,
@@ -19,6 +27,13 @@ pub enum MooCpuType {
     Intel80188,
     Intel80186,
     Intel80286,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub enum MooStateType {
+    #[default]
+    Initial,
+    Final,
 }
 
 impl MooCpuType {

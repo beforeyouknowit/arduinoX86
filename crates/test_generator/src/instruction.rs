@@ -35,7 +35,9 @@ use moo::types::MooCpuType;
 
 pub struct TestInstruction {
     name: String,
+    opcode: u8,
     bytes: Vec<u8>,
+    test_seed: u64,
     instr_range: Range<usize>,
     sequence_range: Range<usize>,
     prefix_range: Range<usize>,
@@ -49,11 +51,17 @@ impl TestInstruction {
     pub fn new(
         config: &TestGen,
         opcode: u8,
+        opcode_ext: Option<u8>,
         base_seed: u64,
         test_num: usize,
+        gen_number: usize,
     ) -> anyhow::Result<Self> {
-        // Create a new rng seeded by the base seed XOR test number for repeatability.
-        let mut rng = StdRng::seed_from_u64(base_seed ^ (test_num as u64));
+        // Put the gen_number into the top 8 bits of the test seed.
+        // This allows us to generate tests based off the test number and gen count together.
+        let test_seed = base_seed ^ ((test_num as u64) | ((gen_number as u64) << 24));
+
+        // Create a new rng seeded by the base seed XOR test seed for repeatability.
+        let mut rng = StdRng::seed_from_u64(test_seed);
 
         let mut instruction_bytes = VecDeque::new();
 
@@ -71,6 +79,14 @@ impl TestInstruction {
 
         // Generate a random modrm.
         let modrm = rng.random();
+
+        // If the opcode has an extension, set it in the modrm reg field.
+        let modrm = if let Some(ext) = opcode_ext {
+            // Set the reg field of the modrm to the extension value.
+            (modrm & 0b1100_0111) | ((ext & 0x07) << 3)
+        } else {
+            modrm
+        };
 
         // We can do specific filters on modrm values here if needed.
         match config.cpu_type {
@@ -114,8 +130,8 @@ impl TestInstruction {
 
         if !config.disable_lock_prefix.contains(&opcode) {
             // Roll for lock prefix chance.
-            let lock_prefix_chance = rng.random_range(0.0..1.0);
-            if lock_prefix_chance < config.lock_prefix_chance {
+            let lock_prefix_roll = rng.random_range(0.0..1.0);
+            if lock_prefix_roll < config.lock_prefix_chance {
                 if prefix_ct > 0 {
                     // Replace one of the prefixes with a lock prefix.
                     // Roll for which prefix to replace.
@@ -128,6 +144,28 @@ impl TestInstruction {
                     instruction_bytes[replace_index] = config.lock_prefix_opcode;
                 } else {
                     instruction_bytes.push_front(config.lock_prefix_opcode);
+                    prefix_ct += 1;
+                }
+            }
+        }
+
+        if config.rep_opcodes.contains(&opcode) {
+            // Roll for REP prefix chance.
+            let rep_prefix_roll = rng.random_range(0.0..1.0);
+            if rep_prefix_roll < config.rep_prefix_chance {
+                if prefix_ct > 0 {
+                    // Replace one of the prefixes with a REP prefix.
+                    // Roll for which prefix to replace.
+                    let replace_index = rng.random_range(0..prefix_ct);
+                    log::trace!(
+                        "Replacing prefix at index {} with REP prefix",
+                        replace_index
+                    );
+                    // Replace the prefix at the chosen index with the REP prefix.
+                    instruction_bytes[replace_index] =
+                        *config.rep_prefixes.choose(&mut rng).unwrap();
+                } else {
+                    instruction_bytes.push_front(*config.rep_prefixes.choose(&mut rng).unwrap());
                     prefix_ct += 1;
                 }
             }
@@ -176,7 +214,9 @@ impl TestInstruction {
 
         Ok(TestInstruction {
             name: instr_text,
+            opcode,
             bytes: instruction_bytes,
+            test_seed,
             instr_range: Range {
                 start: 0,
                 end: instruction_byte_ct,

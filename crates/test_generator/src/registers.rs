@@ -155,4 +155,16 @@ impl Registers {
             Registers::V2(regs) => regs.cs_desc.base_address(),
         }
     }
+    pub fn cx(&self) -> u16 {
+        match self {
+            Registers::V1(regs) => regs.cx,
+            Registers::V2(regs) => regs.cx,
+        }
+    }
+    pub fn set_cx(&mut self, value: u16) {
+        match self {
+            Registers::V1(regs) => regs.cx = value,
+            Registers::V2(regs) => regs.cx = value,
+        }
+    }
 }

@@ -14,9 +14,19 @@ pub use registers::*;
 
 pub struct ServerFlags;
 
+#[derive(Copy, Clone, Debug)]
+pub enum MemoryStrategy {
+    Random,
+    Zero,
+    Ones,
+}
+
+#[rustfmt::skip]
 impl ServerFlags {
-    pub const EMU_8080: u32 = 0x0000_0001; // 8080 emulation enabled
-    pub const EXECUTE_AUTOMATIC: u32 = 0x0000_0002; // Execute automatically after load
+    pub const EMU_8080: u32             = 0x0000_0001; // 8080 emulation enabled
+    pub const EXECUTE_AUTOMATIC: u32    = 0x0000_0002; // Execute automatically after load
+    pub const HASH_BACKEND: u32         = 0x0000_0004; // Use hash backend for memory
+    pub const HALT_AFTER_JUMP: u32      = 0x0000_0008; // Insert halt after flow control
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
@@ -56,6 +66,8 @@ pub enum ServerCommand {
     CmdSetMemory = 0x1F,
     CmdGetCycleStates = 0x20,
     CmdEnableDebug = 0x21,
+    CmdSetMemoryStrategy = 0x22,
+    CmdGetFlags = 0x23,
     CmdInvalid,
 }
 
@@ -358,6 +370,7 @@ pub enum ProgramState {
     StoreDone,
     Done,
     StoreAll,
+    Shutdown,
     Error,
 }
 
@@ -953,13 +966,24 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdSetFlags)
     }
 
+    pub fn get_flags(&mut self) -> Result<u32, CpuClientError> {
+        let mut buf: [u8; 4] = [0; 4];
+        self.send_command_byte(ServerCommand::CmdGetFlags)?;
+        self.recv_buf(&mut buf)?;
+        self.read_result_code(ServerCommand::CmdGetFlags)?;
+
+        Ok(u32::from_le_bytes(buf))
+    }
+
     pub fn storeall(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdStoreAll)?;
         self.read_result_code(ServerCommand::CmdStoreAll)
     }
 
-    pub fn randomize_memory(&mut self) -> Result<bool, CpuClientError> {
+    pub fn randomize_memory(&mut self, seed: u32) -> Result<bool, CpuClientError> {
+        let buf: [u8; 4] = seed.to_le_bytes();
         self.send_command_byte(ServerCommand::CmdRandomizeMemory)?;
+        self.send_buf(&buf)?;
         self.read_result_code(ServerCommand::CmdRandomizeMemory)
     }
 
@@ -1039,6 +1063,22 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdGetCycleStates)?;
 
         Ok(cycles)
+    }
+
+    pub fn set_memory_strategy(
+        &mut self,
+        strategy: MemoryStrategy,
+        start: u32,
+        end: u32,
+    ) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 9] = [0; 9];
+        buf[0] = strategy as u8;
+        buf[1..5].copy_from_slice(&start.to_le_bytes());
+        buf[5..9].copy_from_slice(&end.to_le_bytes());
+
+        self.send_command_byte(ServerCommand::CmdSetMemoryStrategy)?;
+        self.send_buf(&buf)?;
+        self.read_result_code(ServerCommand::CmdSetMemoryStrategy)
     }
 
     pub fn enable_debug(&mut self, enable: bool) -> Result<(), CpuClientError> {

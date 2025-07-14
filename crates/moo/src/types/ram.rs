@@ -1,6 +1,6 @@
 use binrw::binrw;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 #[binrw]
 #[brw(little)]
 pub struct MooRamEntries {
@@ -9,7 +9,7 @@ pub struct MooRamEntries {
     pub entries: Vec<MooRamEntry>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 #[binrw]
 #[brw(little)]
 pub struct MooRamEntry {

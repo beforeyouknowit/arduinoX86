@@ -48,6 +48,7 @@ enum class DebugType : uint32_t {
     CMD        = 1u << 18, // DEBUG_CMD
     DUMP       = 1u << 19, // DEBUG_DUMP
     SERVER     = 1u << 20, // DEBUG_SERVER
+    EMIT       = 1u << 21, // DEBUG_EMIT
 };
 
 class DebugFilter {

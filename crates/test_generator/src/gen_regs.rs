@@ -25,16 +25,31 @@ use crate::{registers::Registers, Config, CpuMode, TestContext, TestGen};
 use ard808x_client::{RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
 use moo::types::MooCpuType;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use rand_distr::Beta;
 use std::ops::Range;
 
 pub struct TestRegisters {
     pub regs: Registers,
+    pub reg_seed: u64,
     pub instruction_address: u32,
 }
 
 impl TestRegisters {
-    pub fn new(context: &mut TestContext, config: &Config, rng: &mut StdRng) -> Self {
+    pub fn new(
+        context: &mut TestContext,
+        config: &Config,
+        base_seed: u64,
+        test_num: usize,
+        gen_number: usize,
+    ) -> Self {
+        // Put the gen_number into the top 8 bits of the test seed.
+        // This allows us to generate tests based off the test number and gen count together.
+        let reg_seed = base_seed ^ ((test_num as u64) | ((gen_number as u64) << 24) | 0x8000_0000);
+
+        // Create a new rng seeded by the base seed XOR test seed for repeatability.
+        let mut rng = StdRng::seed_from_u64(reg_seed);
+
         // Randomize the registers.
         let instruction_range: Range<u32> = Range {
             start: config.test_gen.instruction_address_range[0],
@@ -49,7 +64,7 @@ impl TestRegisters {
             initial_regs = match config.test_gen.cpu_type {
                 MooCpuType::Intel80286 => {
                     let mut random_v2 = Registers::V2(RemoteCpuRegistersV2::default());
-                    randomize_v2(context, config.test_gen.clone(), rng, &mut random_v2);
+                    randomize_v2(context, config.test_gen.clone(), &mut rng, &mut random_v2);
 
                     if config.test_exec.print_initial_regs {
                         print_regs(&random_v2, config.test_gen.cpu_type.into());
@@ -74,6 +89,7 @@ impl TestRegisters {
 
         TestRegisters {
             regs: initial_regs,
+            reg_seed,
             instruction_address,
         }
     }

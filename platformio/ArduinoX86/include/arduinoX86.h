@@ -256,6 +256,7 @@ typedef struct cpu {
   int wait_states;
   int wait_state_ct;
   bool exception_armed;
+  uint32_t predicted_fetch;
 } Cpu;
 
 typedef struct i8288 {
@@ -362,6 +363,7 @@ void handle_emu_enter_state(uint8_t q);
 void handle_storeall_286();
 void handle_execute_state();
 void handle_execute_automatic();
+void handle_execute_finalize_state();
 void detect_fpu_type();
 void detect_cpu_type(uint32_t cpuid_cycles);
 void reset_screen();

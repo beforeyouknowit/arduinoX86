@@ -54,22 +54,22 @@
 // Print a character to the debugging output on each store command.
 #define STORE_INDICATOR (SILENT_MODE)
 
-#define TRACE_ALL 1 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
+#define TRACE_ALL 0 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
 #define TRACE_NONE (0 | SILENT_MODE) // TRACE_NONE will override all set traces
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
-#define TRACE_RESET     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
-#define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
-#define TRACE_VECTOR    ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
+#define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
+#define TRACE_SETUP     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
+#define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
 #define TRACE_LOAD      ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.
 #define TRACE_EMU_ENTER ((0 | TRACE_ALL) & ~TRACE_NONE)
 #define TRACE_EMU_EXIT  ((0 | TRACE_ALL) & ~TRACE_NONE)
 #define TRACE_EXECUTE   ((1 | TRACE_ALL) & ~TRACE_NONE)
-#define TRACE_STORE     ((1 | TRACE_ALL) & ~TRACE_NONE)
-#define TRACE_FINALIZE  ((0 | TRACE_ALL) & ~TRACE_NONE)
+#define TRACE_STORE     ((0 | TRACE_ALL) & ~TRACE_NONE)
+#define TRACE_FINALIZE  ((1 | TRACE_ALL) & ~TRACE_NONE)
 
 #define DEBUG_ALL 0  // DEBUG_ALL will enable all debugs (DEBUG_NONE overrides)
 #define DEBUG_NONE (0 | SILENT_MODE) // DEBUG_NONE will override all set debugs
@@ -77,7 +77,7 @@
 #define DEBUG_SERVER    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the server state
 #define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about state changes and time spent in each state
 #define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
-#define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
+#define DEBUG_SETUP     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
 #define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about jump vector program execution
 #define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about CPU identification
 #define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
@@ -92,7 +92,7 @@
 #define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
 #define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
 #define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the serial cpu_server protocol (verbose)
-#define DEBUG_CMD       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
+#define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
 #define DEBUG_DUMP      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about dump commands
 
 #define MAX_ERR_LEN 50 // Maximum length of an error string

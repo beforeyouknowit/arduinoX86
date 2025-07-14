@@ -63,6 +63,7 @@ public:
     setDebugType(DebugType::CMD,       DEBUG_CMD);
     setDebugType(DebugType::DUMP,      DEBUG_DUMP);
     setDebugType(DebugType::SERVER,    DEBUG_SERVER);
+    setDebugType(DebugType::EMIT,      true);
   }
 
   inline void clockHighDelay() {

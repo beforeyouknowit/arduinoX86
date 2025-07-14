@@ -776,6 +776,7 @@ void cycle() {
   // Save last address bus value for skipped bus cycle detection.
   CPU.last_address_bus = CPU.address_bus;
   CPU.address_bus = Controller.readAddressBus(true);
+  CPU.data_bus = Controller.readDataBus(CPU.data_width, true);
 
   CycleState cycle_state;
   
@@ -799,7 +800,7 @@ void cycle() {
   // Check for CPU shutdown.
   if ((CPU.bus_state == HALT) && (CPU.address_bus == 0x000000)) {
     Controller.getBoard().debugPrintln(DebugType::ERROR, "## CPU shutdown detected ##");
-    ArduinoX86::Server.change_state(ServerState::Error);
+    ArduinoX86::Server.change_state(ServerState::Shutdown);
     set_error("CPU shutdown detected!");
   }
 
@@ -1049,118 +1050,7 @@ void cycle() {
     // supports the 80186 without queue status lines.
     case ServerState::ExecuteFinalize:
 
-      if (READ_NMI_PIN) {
-        if (!CPU.data_bus_resolved && !Controller.readMRDCPin()) {
-          // NMI is active and CPU is reading memory.  Let's check if it is the NMI handler.
-          if (CPU.address_latch == 0x00008) {
-            Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: CPU is reading NMI IVT entry...");
-            CPU.nmi_checkpoint = 1;
-          }
-
-          if (CPU.bus_state_latched == CODE) {
-            // CPU is reading CODE in ExecuteFinalize with NMI high.
-            // This should hopefully be at the address of the NMI vector, so we can enter ExecuteDone
-            run_address = calc_flat_address(STORE_SEG, 0);
-            if (CPU.address_latch == run_address) {
-              Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Fetch at STORE_SEG.");
-
-              if(CPU.nmi_buf_cursor == 0) {
-                Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: NMI stack cursor is 0. Probably a 286 CPU. Popping from BusEmulator.");
-                CPU.nmi_stack_frame = ArduinoX86::Bus->log_peek_call_frame();
-
-                Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Popped NMI stack frame. Flags: ");
-                Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.flags, 16);
-                Controller.getBoard().debugPrint(DebugType::EXECUTE, " CS: ");
-                Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.cs, 16);
-                Controller.getBoard().debugPrint(DebugType::EXECUTE, " IP: ");
-                Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_stack_frame.ip, 16);
-
-                // Write the NMI stack frame to the NMI stack buffer.
-                CPU.nmi_buf_cursor = 0;
-                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.flags, 0x00000, CPU.data_width);
-                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.cs, 0x00002, CPU.data_width);
-                write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.ip, 0x00004, CPU.data_width);
-              }
-
-              if (ArduinoX86::Server.is_execute_automatic()) {
-                // ExecuteDone is an interactive state, so we should not transition to it if 
-                // automatic execution is enabled. Instead, enter Store.
-                #if defined(CPU_286)
-                  ArduinoX86::Server.change_state(ServerState::StoreAll);
-                #else
-                  ArduinoX86::Server.change_state(ServerState::Store); 
-                #endif
-              }
-              else {
-                ArduinoX86::Server.change_state(ServerState::ExecuteDone);
-              }
-            }
-            else if (CPU.address_latch == 0) {
-              // We have a match for the NMI vector
-              Controller.getBoard().debugPrintln(DebugType::ERROR, "## EXECUTE_FINALIZE: Fetch at address 0!");
-              ArduinoX86::Server.change_state(ServerState::Error);
-              set_error("NMI vector fetch at address 0!");
-            }
-          } 
-          else if (CPU.nmi_checkpoint > 0 && NMI_VECTOR.has_remaining()) {
-            // Feed the CPU the NMI vector.
-            CPU.data_bus = NMI_VECTOR.read(CPU.address_latch, CPU.data_width);
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Feeding CPU reset vector data: ");
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, " new v_pc: ");
-            Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.v_pc);
-            CPU.data_bus_resolved = true;
-            Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-
-            if (CPU.nmi_checkpoint == 1 && CPU.address_latch == 0x0000A) {
-              Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Read of NMI IVT with NMI pin high - Resetting STORE PC");
-              CPU.nmi_checkpoint = 2;
-              CPU.data_bus_resolved = true;
-              CPU.s_pc = 0;
-            }
-            break;
-          }
-        }
-
-        if (!CPU.data_bus_resolved && !Controller.readMWTCPin() && CPU.nmi_checkpoint > 1) {
-          // NMI is active and CPU is writing memory. Probably to stack.
-          write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.data_bus, CPU.address_latch, CPU.data_width);
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Stack write: ");
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, " New buf cursor: ");
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_buf_cursor);
-          CPU.data_bus_resolved = true;
-        }
-      }
-
-      if (!Controller.readMRDCPin() && CPU.bus_state == PASV) {
-        // CPU is reading (MRDC active-low)
-        if (CPU.bus_state_latched == CODE) { 
-          // CPU is fetching code
-
-          // Since client does not cycle the CPU in this state, we have to fetch from the
-          // STORE or EMU_EXIT program ourselves
-          CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
-          CPU.data_type = QueueDataType::ProgramEnd;
-          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Wrote next PGM word to bus: ");
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
-          Controller.getBoard().debugPrint(DebugType::EXECUTE, " new s_pc: ");
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.s_pc);
-        } else {
-          Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-        }
-      }
-
-      if (CPU.q_ff && (CPU.qt == QueueDataType::ProgramEnd)) {
-        // We read a flagged NOP, meaning the previous instruction has completed and it is safe to
-        // execute the Store routine.
-        if (CPU.in_emulation) {
-          ArduinoX86::Server.change_state(ServerState::EmuExit);
-        } else {
-          ArduinoX86::Server.change_state(ServerState::ExecuteDone);
-        }
-      }
+      handle_execute_finalize_state();
       break;
 
     case ServerState::EmuExit:
@@ -1370,10 +1260,10 @@ void cycle() {
 
 #if DEBUG_EMU
             uint16_t *flags_ptr = (uint16_t *)&CPU.post_regs.flags;
-            debugPrintColor(DEBUG_STORE_COLOR, "## New flags are: ");
-            debugPrintColor(DEBUG_STORE_COLOR, *flags_ptr, 16);
-            debugPrintColor(DEBUG_STORE_COLOR, "## Readback ptr diff: ");
-            debugPrintlnColor(DEBUG_STORE_COLOR, diff);
+            debugPrintColor(ansi::bright_magenta, "## New flags are: ");
+            debugPrintColor(ansi::bright_magenta, *flags_ptr, 16);
+            debugPrintColor(ansi::bright_magenta, "## Readback ptr diff: ");
+            debugPrintlnColor(ansi::bright_magenta, diff);
 #endif
           }
         } else {
@@ -1432,6 +1322,7 @@ void cycle() {
       break;
     case ServerState::Done:
       break;
+    case ServerState::Shutdown: // FALLTHROUGH
     case ServerState::Error:
       if (CPU.error_cycle_ct < MAX_ERROR_CYCLES) {
         CPU.error_cycle_ct++;
@@ -2032,7 +1923,7 @@ void handle_execute_state() {
 void handle_execute_automatic() {
 
   bool cpu_mrdc = !Controller.readMRDCPin();
-  bool cpu_iodc = !Controller.readIORCPin();
+  bool cpu_iorc = !Controller.readIORCPin();
   bool cpu_mwtc = !Controller.readMWTCPin();
   bool cpu_iowc = !Controller.readIOWCPin();
   static bool far_call_flag = false;
@@ -2068,6 +1959,11 @@ void handle_execute_automatic() {
     }
   }
 
+  if (cpu_iorc && CPU.bus_cycle == WRITE_CYCLE) {
+    // The CPU is reading from the I/O bus. Read from the bus emulator.
+    CPU.data_bus = ArduinoX86::Bus->io_read_bus(CPU.address_latch, !Controller.readBHEPin());
+  }
+
   if (CPU.bus_state == HALT) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
     Controller.writePin(OutputPin::Nmi, true);
@@ -2085,12 +1981,36 @@ void handle_execute_automatic() {
   }
 
   if (Controller.readALEPin()) {
-    
-    if (CPU.exception_armed && CPU.bus_state == CODE) {
-      // Hook code fetch after exception and write halt opcode.
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception armed and CODE fetch detected. Writing HALT opcode.", true);
-      ArduinoX86::Bus->mem_write_u8(CPU.address_latch, OPCODE_HALT);
+    if (CPU.bus_state == CODE) {
+      if (CPU.exception_armed) {
+        // Hook code fetch after exception and write halt opcode.
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception armed and CODE fetch detected. Writing HALT opcode.", true);
+        ArduinoX86::Bus->mem_write_u8(CPU.address_latch, OPCODE_HALT);
+      }
+
+      if ((CPU.predicted_fetch > 0) && (CPU.address_latch != CPU.predicted_fetch)) {
+        // We have a code fetch at the predicted address.
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: CODE fetch not at predicted address. Flow control change detected!", true);
+
+        if (ArduinoX86::Server.halt_after_jump()) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Injecting halt opcode.", false);
+          ArduinoX86::Bus->mem_write_u8(CPU.address_latch, OPCODE_HALT);
+        }
+
+        CPU.predicted_fetch = 0;  // Reset predicted fetch
+      }
+
+
+      if (CPU.address_latch & 1) {
+        // Fetch at odd address. Predict next fetch at even address.
+        CPU.predicted_fetch = CPU.address_latch + 1;
+      }
+      else {
+        // Fetch at even address.
+        CPU.predicted_fetch = CPU.address_latch + 2;
+      }
     }
+
     
     if (CPU.bus_state == MEMR) {
       //Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.", true);
@@ -2108,6 +2028,123 @@ void handle_execute_automatic() {
         CPU.nmi_terminate = true;
         ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
       }
+    }
+  }
+}
+
+void handle_execute_finalize_state() {
+  static uint32_t run_address = 0;
+
+  if (READ_NMI_PIN) {
+    if (!CPU.data_bus_resolved && !Controller.readMRDCPin()) {
+      // NMI is active and CPU is reading memory.  Let's check if it is the NMI handler.
+      if (CPU.address_latch == 0x00008) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: CPU is reading NMI IVT entry...");
+        CPU.nmi_checkpoint = 1;
+      }
+
+      if (CPU.bus_state_latched == CODE) {
+        // CPU is reading CODE in ExecuteFinalize with NMI high.
+        // This should hopefully be at the address of the NMI vector, so we can enter ExecuteDone
+        run_address = calc_flat_address(STORE_SEG, 0);
+        if (CPU.address_latch == run_address) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Fetch at STORE_SEG.");
+
+          if(CPU.nmi_buf_cursor == 0) {
+            Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: NMI stack cursor is 0. Probably a 286 CPU. Popping from BusEmulator.");
+            CPU.nmi_stack_frame = ArduinoX86::Bus->log_peek_call_frame();
+
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Popped NMI stack frame. Flags: ");
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.flags, 16);
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, " CS: ");
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.cs, 16);
+            Controller.getBoard().debugPrint(DebugType::EXECUTE, " IP: ");
+            Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_stack_frame.ip, 16);
+
+            // Write the NMI stack frame to the NMI stack buffer.
+            CPU.nmi_buf_cursor = 0;
+            write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.flags, 0x00000, CPU.data_width);
+            write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.cs, 0x00002, CPU.data_width);
+            write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.nmi_stack_frame.ip, 0x00004, CPU.data_width);
+          }
+
+          if (ArduinoX86::Server.is_execute_automatic()) {
+            // ExecuteDone is an interactive state, so we should not transition to it if 
+            // automatic execution is enabled. Instead, enter Store.
+            #if defined(CPU_286)
+              ArduinoX86::Server.change_state(ServerState::StoreAll);
+            #else
+              ArduinoX86::Server.change_state(ServerState::Store); 
+            #endif
+          }
+          else {
+            ArduinoX86::Server.change_state(ServerState::ExecuteDone);
+          }
+        }
+        else if (CPU.address_latch == 0) {
+          // We have a match for the NMI vector
+          Controller.getBoard().debugPrintln(DebugType::ERROR, "## EXECUTE_FINALIZE: Fetch at address 0!");
+          ArduinoX86::Server.change_state(ServerState::Error);
+          set_error("NMI vector fetch at address 0!");
+        }
+      } 
+      else if (CPU.nmi_checkpoint > 0 && NMI_VECTOR.has_remaining()) {
+        // Feed the CPU the NMI vector.
+        CPU.data_bus = NMI_VECTOR.read(CPU.address_latch, CPU.data_width);
+        Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Feeding CPU reset vector data: ");
+        Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+        Controller.getBoard().debugPrint(DebugType::EXECUTE, " new v_pc: ");
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.v_pc);
+        CPU.data_bus_resolved = true;
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+
+        if (CPU.nmi_checkpoint == 1 && CPU.address_latch == 0x0000A) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Read of NMI IVT with NMI pin high - Resetting STORE PC");
+          CPU.nmi_checkpoint = 2;
+          CPU.data_bus_resolved = true;
+          CPU.s_pc = 0;
+        }
+        return;
+      }
+    }
+
+    if (!CPU.data_bus_resolved && !Controller.readMWTCPin() && CPU.nmi_checkpoint > 1) {
+      // NMI is active and CPU is writing memory. Probably to stack.
+      write_buffer(NMI_STACK_BUFFER, &CPU.nmi_buf_cursor, CPU.data_bus, CPU.address_latch, CPU.data_width);
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Stack write: ");
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, " New buf cursor: ");
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_buf_cursor);
+      CPU.data_bus_resolved = true;
+    }
+  }
+
+  if (!Controller.readMRDCPin() && CPU.bus_state == PASV) {
+    // CPU is reading (MRDC active-low)
+    if (CPU.bus_state_latched == CODE) { 
+      // CPU is fetching code
+
+      // Since client does not cycle the CPU in this state, we have to fetch from the
+      // STORE or EMU_EXIT program ourselves
+      CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
+      CPU.data_type = QueueDataType::ProgramEnd;
+      Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Wrote next PGM word to bus: ");
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.data_bus, 16);
+      Controller.getBoard().debugPrint(DebugType::EXECUTE, " new s_pc: ");
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.s_pc);
+    } else {
+      Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+    }
+  }
+
+  if (CPU.q_ff && (CPU.qt == QueueDataType::ProgramEnd)) {
+    // We read a flagged NOP, meaning the previous instruction has completed and it is safe to
+    // execute the Store routine.
+    if (CPU.in_emulation) {
+      ArduinoX86::Server.change_state(ServerState::EmuExit);
+    } else {
+      ArduinoX86::Server.change_state(ServerState::ExecuteDone);
     }
   }
 }

@@ -34,17 +34,17 @@ mod state;
 
 use anyhow::Context;
 //use iced_x86::{Decoder, DecoderOptions};
-use ard808x_client::{CpuClient, RegisterSetType, ServerCpuType};
+use ard808x_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
 use clap::Parser;
 use moo::types::MooCpuType;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Cursor};
 use std::time::Instant;
 use std::{fs, path::PathBuf};
 
 #[derive(Copy, Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum CpuMode {
     Real,
     Unreal,
@@ -52,21 +52,56 @@ pub enum CpuMode {
 }
 
 #[derive(Copy, Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum TerminationCondition {
     Queue,
     Halt,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct OpcodeMetadata {
+    status: String,
+    arch: String,
+    flags: Option<String>,
+    flags_mask: Option<u32>,
+    reg: Option<HashMap<String, OpcodeMetadata>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TestMetadata {
+    repo: String,
+    version: String,
+    syntax_version: u32,
+    cpu: String,
+    cpu_detail: String,
+    generator: String,
+    author: String,
+    date: String,
+    opcodes: HashMap<String, OpcodeMetadata>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CountOverride {
+    count: usize,
+    opcode_range: [u8; 2],
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct GroupExtensionOverride {
+    opcode: u8,
+    group_extension_range: [u8; 2],
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     test_gen: TestGen,
     test_exec: TestExec,
+    metadata: TestMetadata,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TestExec {
     polling_sleep: u32,
+    max_gen: u32,
     test_retry: u32,
     load_retry: u32,
     print_instruction: bool,
@@ -87,15 +122,23 @@ pub struct TestGen {
     trace_file: PathBuf,
     moo_version: u8,
     moo_arch: String,
+
     address_mask: u32,
     ip_mask: u16,
     instruction_address_range: [u32; 2],
+
+    extended_opcode: bool,
     opcode_range: Vec<u8>,
+    group_extension_range: [u8; 2],
+    group_extension_overrides: Vec<GroupExtensionOverride>,
+
     excluded_opcodes: Vec<u8>,
-    prefixes: Vec<u8>,
-    segment_prefixes: Vec<u8>,
+
     test_count: usize,
     append_file: bool,
+
+    writeless_null_shifts: bool,
+    shift_mask: u16,
 
     register_beta: [f64; 2],
     max_prefixes: usize,
@@ -103,17 +146,34 @@ pub struct TestGen {
 
     lock_prefix_chance: f32,
     lock_prefix_opcode: u8,
+    rep_prefix_chance: f32,
 
     reg_zero_chance: f32,
     reg_ff_chance: f32,
 
-    mem_zero_chance: f32,
-    mem_ff_chance: f32,
     sp_odd_chance: f32,
     sp_min_value: u16,
+    sp_max_value: u16,
+    mem_zero_chance: f32,
+    mem_ones_chance: f32,
+    mem_strategy_start: u32,
+    mem_strategy_end: u32,
+
+    extended_prefix: u8,
+    group_opcodes: Vec<u8>,
+    extended_group_opcodes: Vec<u8>,
+    esc_opcodes: Vec<u8>,
+    flow_control_opcodes: Vec<u8>,
+    prefixes: Vec<u8>,
+    segment_prefixes: Vec<u8>,
+    rep_prefixes: Vec<u8>,
+    rep_opcodes: Vec<u8>,
+    rep_cx_mask: u16,
 
     disable_seg_overrides: Vec<u8>,
     disable_lock_prefix: Vec<u8>,
+
+    count_overrides: Vec<CountOverride>,
 
     randomize_mem_interval: usize,
 }
@@ -144,6 +204,7 @@ pub struct TestContext {
     trace_log: BufWriter<File>,
 
     dry_run: bool,
+    last_program_state: Option<ProgramState>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -173,7 +234,6 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    cpu_client.randomize_memory()?;
     let server_cpu = ServerCpuType::from(config.test_gen.cpu_type);
 
     // Create a BufWriter using the trace log file.
@@ -195,6 +255,7 @@ fn main() -> anyhow::Result<()> {
         gen_stop: Instant::now(),
         trace_log,
         dry_run: cli.dry_run,
+        last_program_state: None,
     };
 
     gen_tests::gen_tests(&mut context, &config)?;

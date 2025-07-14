@@ -22,6 +22,7 @@ pub struct MooRegisters1Init {
     pub flags: u16,
 }
 
+#[derive(Copy, Clone)]
 #[binrw]
 #[brw(little)]
 pub struct MooRegisters1 {
@@ -54,6 +55,28 @@ pub struct MooRegisters1 {
     ip: u16,
     #[brw(if(reg_mask & 0x2000 != 0))]
     flags: u16,
+}
+
+impl Default for MooRegisters1 {
+    fn default() -> Self {
+        Self {
+            reg_mask: 0,
+            ax: 0,
+            bx: 0,
+            cx: 0,
+            dx: 0,
+            cs: 0,
+            ss: 0,
+            ds: 0,
+            es: 0,
+            sp: 0,
+            bp: 0,
+            si: 0,
+            di: 0,
+            ip: 0,
+            flags: 0,
+        }
+    }
 }
 
 impl From<&MooRegisters1Init> for MooRegisters1 {

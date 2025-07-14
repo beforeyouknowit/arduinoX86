@@ -22,13 +22,18 @@
 */
 
 #pragma once
-#include <bus_emulator/BusEmulator.h>
+
+#include <limits>
+#include <SDRAM.h>
+
+#include <bus_emulator/IBusBackend.h>
+#include <serial_config.h>
 
 class SdramBackend : public IBusBackend {
 public:
   SdramBackend(size_t size, size_t mask)
     : size_(size), mask_(mask) {
-      SDRAM.begin();
+      
       mem_ = (uint8_t*)SDRAM.malloc(4 * 1024 * 1024);
       if (!mem_) {
           DEBUG_SERIAL.println("## SDRAM: Failed to allocate memory!");
@@ -120,11 +125,17 @@ public:
   uint16_t io_read_u16(uint16_t port) override {
     return 0xFFFF;
   };
+  uint16_t io_read_bus(uint16_t port, bool bhe) override {
+    return 0xFFFF; // Not implemented for SDRAM
+  };
   void io_write_u8(uint16_t port, uint8_t val) override {
     return;
   };
   void io_write_u16(uint16_t port, uint16_t val) override {
     return;
+  };
+  void io_write_bus(uint16_t port, uint16_t val, bool bhe) override {
+    return; // Not implemented for SDRAM
   };
 
   void set_memory(uint32_t address, const uint8_t* buffer, size_t length) override {
@@ -152,7 +163,8 @@ public:
     }
   };
 
-  void randomize_memory() override {
+  void randomize_memory(uint32_t seed) override {
+    base_seed_ = seed;
     if (!mem_) {
       return;
     }
@@ -171,8 +183,42 @@ public:
     }
   };
 
+  void set_strategy(DefaultStrategy strategy, uint32_t start, uint32_t end) override {
+    if (start < strategy_start_ || end > size_) {
+      DEBUG_SERIAL.println("## SDRAM: Invalid strategy range");
+      return;
+    }
+    strategy_start_ = start;
+    strategy_end_ = end;
+    base_seed_ = 0x1024; // Reset base seed for new strategy.
+  };
+
 private:
   size_t   size_;
   size_t   mask_;
   uint8_t* mem_;
+  uint32_t base_seed_;
+  uint32_t strategy_start_ = 0x1024; // Address below which to ignore strategy.
+  uint32_t strategy_end_ = 0xFFFFFF; // Address above which to ignore strategy.
+
+  uint16_t gen_default_u16(DefaultStrategy strategy) {
+    // Generate a default 16-bit value based on the strategy.
+    switch (strategy) {
+      case DefaultStrategy::Zero:
+        return 0x0000;
+      case DefaultStrategy::Ones:
+        return 0xFFFF;
+      case DefaultStrategy::Random:
+        return gen_random_u16(0);
+      default:
+        return 0x0000; // Fallback to zero if unknown strategy
+    }
+  }
+
+  uint16_t gen_random_u16(uint32_t address) {
+    // Generate a pseudo-random 16-bit value based on the address and base seed.
+    uint32_t seed = base_seed_ ^ address;
+    randomSeed(seed);
+    return static_cast<uint16_t>(random(std::numeric_limits<uint16_t>::max()));
+  }
 };

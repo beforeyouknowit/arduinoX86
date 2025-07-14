@@ -145,7 +145,6 @@ pub fn initial_state_from_ops(
                                     op_data
                                 );
                             }
-                            assert_eq!(*data, op_data);
                             //log::debug!("Validated initial instruction fetch: [{:05X}]:{:02X}", op.addr, op.data);
                         } else {
                             // How can we be fetching the same byte twice?
@@ -242,7 +241,10 @@ pub fn bytes_from_bus_op(op: &BusOp) -> Vec<(u32, u8)> {
     bytes
 }
 
-pub fn final_state_from_ops(initial_state: IndexMap<u32, u8>, all_ops: &[BusOp]) -> Vec<[u32; 2]> {
+pub fn final_state_from_ops(
+    initial_state: IndexMap<u32, u8>,
+    all_ops: &[BusOp],
+) -> anyhow::Result<Vec<[u32; 2]>> {
     let mut ram_ops = all_ops.to_vec();
     // We modify the initial state by inserting write operations into it.
     let mut final_state = initial_state.clone();
@@ -265,9 +267,11 @@ pub fn final_state_from_ops(initial_state: IndexMap<u32, u8>, all_ops: &[BusOp])
                         Some(d) => {
                             if *d != data {
                                 // Read op doesn't match initial state. Invalid!
-                                panic!(
+                                bail!(
                                     "Memop sync fail. MemRead [{:05X}]:{:02X}, hash value: {:02X}",
-                                    addr, data, d
+                                    addr,
+                                    data,
+                                    d
                                 );
                             }
                         }
@@ -278,7 +282,7 @@ pub fn final_state_from_ops(initial_state: IndexMap<u32, u8>, all_ops: &[BusOp])
                                 // initial state.
                             } else {
                                 // We never wrote to this address, and it's not in the initial state. This is invalid!
-                                panic!("Memop sync fail. MemRead from address not in initial state and not written: [{:05X}]:{:02X}", addr, data);
+                                bail!("Memop sync fail. MemRead from address not in initial state and not written: [{:05X}]:{:02X}", addr, data);
                             }
                         }
                     }
@@ -313,5 +317,5 @@ pub fn final_state_from_ops(initial_state: IndexMap<u32, u8>, all_ops: &[BusOp])
     // v2: Don't sort the final ram vector. Leave in order of operation.
     //ram_vec.sort_by(|a, b| a[0].cmp(&b[0]));
 
-    ram_vec
+    Ok(ram_vec)
 }

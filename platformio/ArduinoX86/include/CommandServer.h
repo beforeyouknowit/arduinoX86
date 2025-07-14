@@ -47,6 +47,7 @@ enum class ServerState: uint8_t {
   StoreDone = 0x0D,
   Done = 0x0E,
   StoreAll = 0x0F,
+  Shutdown = 0x10,
   Error
 };
 
@@ -61,6 +62,7 @@ public:
   static constexpr uint32_t FLAG_EMU_8080 = 0x00000001;
   static constexpr uint32_t FLAG_EXECUTE_AUTOMATIC = 0x00000002;
   static constexpr uint32_t FLAG_MEMORY_BACKEND = 0x00000004; // 0=SDRAM, 1=Hash Table
+  static constexpr uint32_t FLAG_HALT_AFTER_JUMP = 0x00000008; // Halt after flow control instruction.
 
   enum class ServerCommand {
     CmdNone            = 0x00,
@@ -97,6 +99,8 @@ public:
     CmdSetMemory       = 0x1F,
     CmdGetCycleStates  = 0x20,
     CmdEnableDebug     = 0x21,
+    CmdSetMemoryStrategy = 0x22,
+    CmdGetFlags        = 0x23,
     CmdInvalid
   };
 
@@ -124,6 +128,10 @@ public:
 
   bool is_execute_automatic() const {
     return (flags_ & FLAG_EXECUTE_AUTOMATIC) != 0;
+  }
+
+  bool halt_after_jump() const {
+    return (flags_ & FLAG_HALT_AFTER_JUMP) != 0;
   }
 
   explicit CommandServer(BoardController<BoardType,HatType>& controller); 
@@ -244,5 +252,7 @@ private:
   bool cmd_set_memory(void);
   bool cmd_get_cycle_states(void);
   bool cmd_enable_debug(void);
+  bool cmd_set_memory_strategy(void);
+  bool cmd_get_flags(void);
   bool cmd_null(void);
 };

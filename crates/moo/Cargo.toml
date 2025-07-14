@@ -13,12 +13,14 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-binrw.workspace = true
+binrw = { workspace = true }
 sha1 = "0.11.0-pre.5"
 
 # Optional dependencies
 ard808x_client = { path = "../ard808x_client", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
+log = "0.4.21"
+thiserror = "2.0"
 
 [features]
 default = ["serde"]
