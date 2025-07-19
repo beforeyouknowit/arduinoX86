@@ -1,0 +1,271 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+use crate::{
+    cpu_common::{BusOp, BusOpType},
+    cycles::MyServerCycleState,
+    registers::Registers,
+    trace_log,
+    Config,
+    TestContext,
+};
+use arduinox86_client::ServerCpuType;
+use iced_x86::{Mnemonic, OpKind};
+use moo::types::{MooCpuType, MooException};
+
+pub struct BusOps {
+    ops: Vec<BusOp>,
+}
+
+impl From<&[MyServerCycleState]> for BusOps {
+    fn from(cycle_states: &[MyServerCycleState]) -> Self {
+        let mut bus_ops = Vec::new();
+
+        let mut latched_bus_op = None;
+        for cycle_state in cycle_states {
+            if let Ok(bus_op) = BusOp::try_from(cycle_state) {
+                //log::trace!("Collected bus op: {:?}", bus_op);
+                latched_bus_op = Some(bus_op);
+            }
+            else {
+                if let Some(mut latched_bus_op_inner) = latched_bus_op {
+                    latched_bus_op_inner.data = cycle_state.data_bus();
+                    bus_ops.push(BusOp::from(latched_bus_op_inner));
+                    latched_bus_op = None; // Reset the latched bus operation.
+                }
+            }
+        }
+
+        BusOps { ops: bus_ops }
+    }
+}
+
+impl BusOps {
+    pub fn new(ops: &[BusOp]) -> Self {
+        let mut ops = ops.to_vec();
+        BusOps { ops }
+    }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    pub fn log(&self, context: &mut TestContext) {
+        trace_log!(context, "Bus operations ({})", self.len());
+        for (i, bus_op) in self.ops.iter().enumerate() {
+            trace_log!(
+                context,
+                "{:02}: Addr: {:06X}, Data: {:04X?}, Type: {:?}",
+                i,
+                bus_op.addr,
+                bus_op.data,
+                bus_op.op_type
+            );
+        }
+    }
+
+    pub fn ops(&self) -> &[BusOp] {
+        &self.ops
+    }
+
+    pub fn validate(
+        &self,
+        config: &Config,
+        registers: &Registers,
+        opcode: u8,
+        instruction: &iced_x86::Instruction,
+        op0: OpKind,
+        op1: OpKind,
+    ) -> anyhow::Result<()> {
+        let has_memory_read = self.ops.iter().any(|op| op.op_type == BusOpType::MemRead);
+        let has_memory_write = self.ops.iter().any(|op| op.op_type == BusOpType::MemWrite);
+
+        match op0 {
+            OpKind::Memory => {
+                if !has_memory_read {
+                    if matches!(config.test_gen.cpu_type, MooCpuType::Intel80286)
+                        && config.test_gen.esc_opcodes.contains(&opcode)
+                    {
+                        // 80286 ESC instructions do not automatically read memory.
+                    }
+                    else if !matches!(instruction.mnemonic(), Mnemonic::Mov) {
+                        // Mov just overwrites its operand, so we don't need a read.
+                        return Err(anyhow::anyhow!(
+                            "Expected memory read operation for Op0, but none found."
+                        ));
+                    }
+                }
+
+                if !has_memory_write {
+                    if matches!(config.test_gen.cpu_type, MooCpuType::Intel80286)
+                        && config.test_gen.esc_opcodes.contains(&opcode)
+                    {
+                        // Okay
+                    }
+                    else {
+                        match instruction.mnemonic() {
+                            Mnemonic::Jmp
+                            | Mnemonic::Test
+                            | Mnemonic::Cmp
+                            | Mnemonic::Xlatb
+                            | Mnemonic::Mul
+                            | Mnemonic::Imul
+                            | Mnemonic::Div
+                            | Mnemonic::Idiv => {
+                                // These mnemonics have a memory operand0 without a write operation.
+                            }
+                            Mnemonic::Rcl
+                            | Mnemonic::Rcr
+                            | Mnemonic::Shl
+                            | Mnemonic::Shr
+                            | Mnemonic::Sal
+                            | Mnemonic::Sar
+                            | Mnemonic::Rol
+                            | Mnemonic::Ror => {
+                                match op1 {
+                                    OpKind::Immediate8 => {
+                                        let masked_imm = (instruction.immediate8() as u16) & config.test_gen.shift_mask;
+
+                                        if config.test_gen.writeless_null_shifts && (masked_imm == 0) {
+                                            // Ok
+                                        }
+                                        else {
+                                            return Err(anyhow::anyhow!(
+                                                "Expected memory write operation for Op0, but none found. Masked imm8: {:04X}",
+                                                masked_imm
+                                            ));
+                                        }
+                                    }
+                                    _ => {
+                                        let masked_cx = registers.cx() & config.test_gen.shift_mask;
+                                        // If masked cx is 0, these instructions won't write to memory.
+                                        if config.test_gen.writeless_null_shifts && (masked_cx == 0) {
+                                            // Ok
+                                        }
+                                        else {
+                                            return Err(anyhow::anyhow!(
+                                                "Expected memory write operation for Op0, but none found. Masked CX: {:04X}",
+                                                masked_cx
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(anyhow::anyhow!(
+                                    "Expected memory write operation for Op0, but none found."
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            OpKind::NearBranch16 => {
+                // Shouldn't have any reads or writes.
+                if !matches!(instruction.mnemonic(), Mnemonic::Call) {
+                    if has_memory_read || has_memory_write {
+                        return Err(anyhow::anyhow!(
+                            "Expected no memory operations for branch instruction {:?}, but found some.",
+                            instruction.mnemonic()
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if let OpKind::Memory = op1 {
+            if !has_memory_read {
+                if !matches!(instruction.mnemonic(), Mnemonic::Lea) {
+                    return Err(anyhow::anyhow!(
+                        "Expected memory read operation for Op1, but none found."
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn detect_exception(&self, _cpu_type: ServerCpuType) -> Option<MooException> {
+        // Check for an exception in the bus operations.
+
+        let mut have_stack_frame = false;
+        let mut flag_address = 0;
+        let last_write = self
+            .ops
+            .iter()
+            .rev()
+            .find(|bus_op| matches!(bus_op.op_type, BusOpType::MemWrite));
+
+        if let Some(last_write) = last_write {
+            let sp_is_odd = last_write.addr & 1 != 0;
+
+            have_stack_frame = if sp_is_odd {
+                // Look for six consecutive writes to the stack frame.
+                self.ops.windows(6).rev().any(|window| {
+                    let all_writes = window.iter().all(|op| op.op_type == BusOpType::MemWrite);
+
+                    if all_writes {
+                        flag_address = window[0].addr;
+                    }
+
+                    all_writes
+                })
+            }
+            else {
+                // Look for three consecutive writes to the stack frame.
+                self.ops.windows(3).rev().any(|window| {
+                    let all_writes = window.iter().all(|op| op.op_type == BusOpType::MemWrite);
+
+                    if all_writes {
+                        flag_address = window[0].addr;
+                    }
+
+                    all_writes
+                })
+            }
+        }
+
+        let mut exception_num = 0;
+        let have_two_consecutive_ivr_reads = self.ops.windows(2).any(|window| {
+            let have_exception = window[0].op_type == BusOpType::MemRead
+                && window[1].op_type == BusOpType::MemRead
+                && window[0].addr < 0x1024
+                && window[1].addr < 0x1024;
+            if have_exception {
+                exception_num = window[0].addr / 4;
+            }
+            have_exception
+        });
+
+        if have_stack_frame && have_two_consecutive_ivr_reads {
+            return Some(MooException {
+                exception_num: exception_num as u8,
+                flag_address,
+            });
+        }
+
+        None
+    }
+}

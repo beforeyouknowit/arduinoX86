@@ -33,6 +33,7 @@
 #include <BusTypes.h>
 #include <serial_config.h>
 #include <arduinoX86.h>
+#include <globals.h>
 
 #include <bus_emulator/IBusBackend.h>
 #include <bus_emulator/SdramBackend.h>
@@ -65,6 +66,9 @@ public:
        (op.op_type == BusOperationType::MemWrite16)) 
     {
       consecutive_writes_++;
+      if (consecutive_writes_ == 3) {
+        //DEBUG_SERIAL.println("## BusLogger: Detected 3 consecutive writes. Possible far call or exception.");
+      }
     }
     else {
       consecutive_writes_ = 0; // Reset on non-write operations
@@ -90,6 +94,7 @@ public:
     CallStackFrame frame = { 0 };
     if (idx < 2) {
       // Not enough data to form a valid frame
+      DEBUG_SERIAL.println("## BusLogger: Not enough data to form a valid call frame!");
       return frame; // Return empty frame
     }
 
@@ -99,11 +104,13 @@ public:
       frame.cs = ops_[idx - 1].data; // Assuming previous data holds CS
       frame.flags = ops_[idx - 2].data; // Assuming two previous data holds IP
       return frame;
-    } else {
+    } 
+    else {
       //DEBUG_SERIAL.println("## BusLogger: Using 8-bit bus width for call frame");
       // Eight-bit bus width, we need to combine two entries
       if (idx < 5) {
         // Not enough data to form a valid frame
+        DEBUG_SERIAL.println("## BusLogger: Not enough data to form a valid call frame!");
         return frame; // Return empty frame
       }
       frame.ip = ((ops_[idx].data & 0x00FF) << 8) | ((ops_[idx - 1].data & 0xFF00) >> 8); // Combine two 8-bit reads for IP

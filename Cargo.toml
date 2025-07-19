@@ -1,8 +1,9 @@
 [workspace]
 members = [
-    "crates/ard808x_client",
+    "crates/arduinox86_client",
     "crates/ard808x_cpu",
-    "crates/exec_program", "crates/moo", "crates/test_generator",
+    "crates/exec_program",
+    "crates/test_generator",
 ]
 resolver = "2"
 default-members = ["crates/exec_program"]
@@ -32,6 +33,6 @@ indexmap = "2.2"
 version = "1.21"
 default-features = false
 # See below for all features
-features = ["std", "decoder", "nasm", "instr_info", "serde"]
+features = ["std", "encoder", "decoder", "nasm", "instr_info", "serde"]
 
 #serialport = { git = "https://github.com/dbalsom/serialport-rs", branch = "arduino-fix" }

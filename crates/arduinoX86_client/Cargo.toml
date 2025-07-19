@@ -1,12 +1,12 @@
 [package]
-name = "ard808x_client"
-description = "A library crate that implements a client for the Arduino808x serial protocol."
+name = "arduinox86_client"
+description = "A library crate that implements a client for the ArduinoX86 serial protocol."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [lib]
-name = "ard808x_client"
+name = "arduinox86_client"
 path = "src/lib.rs"
 crate-type = ["cdylib", "lib"]
 

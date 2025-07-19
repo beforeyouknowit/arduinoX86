@@ -68,23 +68,32 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 [[package]]
 name = "ard808x_client"
 version = "0.3.0"
+source = "git+https://github.com/dbalsom/arduinox86#6235767fc6e31469bd1376555dbae4cccf1c6c35"
 dependencies = [
- "binrw",
  "log",
- "modular-bitfield",
- "rand",
- "rand_distr",
- "serialport",
- "thiserror",
+ "serialport 4.3.1-alpha.0",
 ]
 
 [[package]]
 name = "ard808x_cpu"
 version = "0.3.0"
 dependencies = [
- "ard808x_client",
+ "arduinox86_client",
  "env_logger",
  "log",
+]
+
+[[package]]
+name = "arduinox86_client"
+version = "0.3.0"
+dependencies = [
+ "binrw",
+ "log",
+ "modular-bitfield",
+ "rand",
+ "rand_distr",
+ "serialport 4.7.2",
+ "thiserror",
 ]
 
 [[package]]
@@ -468,6 +477,7 @@ dependencies = [
 [[package]]
 name = "moo-rs"
 version = "0.3.0"
+source = "git+https://github.com/dbalsom/moo#a691d8126698113ee2ea0aaab0d6e4e8fe0549d9"
 dependencies = [
  "ard808x_client",
  "binrw",
@@ -663,6 +673,24 @@ dependencies = [
 
 [[package]]
 name = "serialport"
+version = "4.3.1-alpha.0"
+source = "git+https://github.com/dbalsom/serialport-rs?branch=arduino-fix#fd42cd35dca389ce97e6538933e270c25c151a42"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "core-foundation-sys",
+ "io-kit-sys",
+ "libudev",
+ "mach2",
+ "nix",
+ "regex",
+ "scopeguard",
+ "unescaper",
+ "winapi",
+]
+
+[[package]]
+name = "serialport"
 version = "4.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb0bc984f6af6ef8bab54e6cf2071579ee75b9286aa9f2319a0d220c28b0a2b"
@@ -730,7 +758,7 @@ name = "test_generator"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "ard808x_client",
+ "arduinox86_client",
  "clap",
  "env_logger",
  "iced-x86",

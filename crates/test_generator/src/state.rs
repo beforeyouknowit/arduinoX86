@@ -1,11 +1,37 @@
-use crate::cpu_common::{BusOp, BusOpType};
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+use crate::{
+    bus_ops::BusOps,
+    cpu_common::{BusOp, BusOpType},
+};
 use anyhow::bail;
-use ard808x_client::CpuWidth;
+use arduinox86_client::CpuWidth;
 use indexmap::IndexMap;
 
 pub struct InitialState {
     pub initial_state: IndexMap<u32, u8>,
-    pub initial_ram: Vec<[u32; 2]>,
+    pub initial_ram:   Vec<[u32; 2]>,
 }
 
 /// Try to calculate the initial memory state from a list of Bus operations.
@@ -15,7 +41,7 @@ pub fn initial_state_from_ops(
     ip: u16,
     instr_bytes: &[u8],
     prefetch_len: usize,
-    all_ops: &Vec<BusOp>,
+    ops: &BusOps,
 ) -> anyhow::Result<InitialState> {
     let mut initial_state: IndexMap<u32, u8> = IndexMap::new();
     let mut code_addresses: IndexMap<u32, (u8, bool)> = IndexMap::new();
@@ -53,11 +79,7 @@ pub fn initial_state_from_ops(
             let mut skip_bytes = 0;
             if flat_addr & 1 != 0 {
                 // Odd address. Add the first fetch with the low byte masked off.
-                log::trace!(
-                    "Inserting {:02X} at odd address {:05X}",
-                    instr_bytes[0],
-                    flat_addr
-                );
+                log::trace!("Inserting {:02X} at odd address {:05X}", instr_bytes[0], flat_addr);
                 code_addresses.insert(flat_addr, (instr_bytes[0], true));
                 initial_state.insert(flat_addr, instr_bytes[0]);
                 pc = pc.wrapping_add(1);
@@ -74,7 +96,8 @@ pub fn initial_state_from_ops(
                     code_addresses.insert(flat_addr.wrapping_add(1), ((word >> 8) as u8, true));
                     initial_state.insert(flat_addr.wrapping_add(1), (word >> 8) as u8);
                     pc = pc.wrapping_add(2);
-                } else {
+                }
+                else {
                     // Last byte, so just insert it as a single byte.
                     let word = chunk[0] as u16;
                     log::trace!("Inserting {:04X} at address {:05X}", word, flat_addr);
@@ -100,7 +123,7 @@ pub fn initial_state_from_ops(
     let mut read_addresses: IndexMap<u32, u16> = IndexMap::new();
     let mut write_addresses: IndexMap<u32, u16> = IndexMap::new();
 
-    for op in all_ops {
+    for op in ops.ops() {
         match op.op_type {
             BusOpType::MemRead => {
                 for (addr, data) in bytes_from_bus_op(op).into_iter() {
@@ -110,12 +133,9 @@ pub fn initial_state_from_ops(
                 if write_addresses.get(&op.addr).is_some() {
                     // Reading from an address the instruction wrote to (not sure if this ever happens?)
                     // In any case, don't add this to the initial state since it happened after a write.
-                    log::debug!(
-                        "Reading from written address: [{:05X}]:{:02X}!",
-                        op.addr,
-                        op.data
-                    );
-                } else {
+                    log::debug!("Reading from written address: [{:05X}]:{:02X}!", op.addr, op.data);
+                }
+                else {
                     // This address was never written to, so the value here must have been part of the
                     // initial state.
                     for (addr, data) in bytes_from_bus_op(op).into_iter() {
@@ -146,11 +166,13 @@ pub fn initial_state_from_ops(
                                 );
                             }
                             //log::debug!("Validated initial instruction fetch: [{:05X}]:{:02X}", op.addr, op.data);
-                        } else {
+                        }
+                        else {
                             // How can we be fetching the same byte twice?
                             bail!("Illegal duplicate fetch!");
                         }
-                    } else {
+                    }
+                    else {
                         // Fetch outside of instruction boundaries.
 
                         // Check if we are fetching from a shadowed address.
@@ -182,7 +204,8 @@ pub fn initial_state_from_ops(
                             //         }
                             //     }
                             // }
-                        } else {
+                        }
+                        else {
                             // Address wasn't shadowed, so safe to add this fetch to the initial state.
                             //log::debug!("Adding subsequent instruction fetch to initial state [{:05X}]:{:02X}", op.addr, op.data);
                             initial_state.insert(addr, op_data);
@@ -195,7 +218,8 @@ pub fn initial_state_from_ops(
                     // Check if this address was read from previously.
                     if read_addresses.get(&addr).is_some() || code_addresses.get(&addr).is_some() {
                         // Modifying a previously read address. This is fine.
-                    } else {
+                    }
+                    else {
                         // This address was never read from, so this write shadows
                         // the original value at this address. Mark it as a
                         // shadowed address.
@@ -212,10 +236,7 @@ pub fn initial_state_from_ops(
     }
 
     // Collapse initial state hash into vector of arrays
-    let ram_vec: Vec<[u32; 2]> = initial_state
-        .iter()
-        .map(|(&addr, &data)| [addr, data as u32])
-        .collect();
+    let ram_vec: Vec<[u32; 2]> = initial_state.iter().map(|(&addr, &data)| [addr, data as u32]).collect();
 
     // v2: Don't sort the initial ram vector; leave it in order of operation
     //ram_vec.sort_by(|a, b| a[0].cmp(&b[0]));
@@ -241,11 +262,8 @@ pub fn bytes_from_bus_op(op: &BusOp) -> Vec<(u32, u8)> {
     bytes
 }
 
-pub fn final_state_from_ops(
-    initial_state: IndexMap<u32, u8>,
-    all_ops: &[BusOp],
-) -> anyhow::Result<Vec<[u32; 2]>> {
-    let mut ram_ops = all_ops.to_vec();
+pub fn final_state_from_ops(initial_state: IndexMap<u32, u8>, all_ops: &BusOps) -> anyhow::Result<Vec<[u32; 2]>> {
+    let mut ram_ops = all_ops.ops().to_vec();
     // We modify the initial state by inserting write operations into it.
     let mut final_state = initial_state.clone();
 
@@ -280,7 +298,8 @@ pub fn final_state_from_ops(
                             if write_addresses.get(&addr).is_some() {
                                 // Ok, we wrote to this address at some point, so we can read it even if it wasn't in the
                                 // initial state.
-                            } else {
+                            }
+                            else {
                                 // We never wrote to this address, and it's not in the initial state. This is invalid!
                                 bail!("Memop sync fail. MemRead from address not in initial state and not written: [{:05X}]:{:02X}", addr, data);
                             }
@@ -300,10 +319,7 @@ pub fn final_state_from_ops(
     }
 
     // Collapse ram hash into vector of arrays
-    let mut ram_vec: Vec<[u32; 2]> = final_state
-        .iter()
-        .map(|(&addr, &data)| [addr, data as u32])
-        .collect();
+    let mut ram_vec: Vec<[u32; 2]> = final_state.iter().map(|(&addr, &data)| [addr, data as u32]).collect();
 
     // Remove entries from final RAM vector that are present in the initial state.
     ram_vec.retain(|&[addr, data]| {

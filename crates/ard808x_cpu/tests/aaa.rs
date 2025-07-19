@@ -1,14 +1,14 @@
-use ard808x_client::*;
 use ard808x_cpu::*;
+use arduinox86_client::*;
 
 #[derive(Copy, Clone)]
 pub struct AaaResult {
-    ax: u16,
+    ax:    u16,
     flags: u16,
-    of: bool,
-    sf: bool,
-    zf: bool,
-    pf: bool,
+    of:    bool,
+    sf:    bool,
+    zf:    bool,
+    pf:    bool,
 }
 
 #[test]
@@ -16,15 +16,15 @@ fn test_aaa() {
     // Create a cpu_client connection to cpu_server.
 
     let mut results = [AaaResult {
-        ax: 0,
+        ax:    0,
         flags: 0,
-        of: false,
-        sf: false,
-        zf: false,
-        pf: false,
+        of:    false,
+        sf:    false,
+        zf:    false,
+        pf:    false,
     }; 512];
 
-    let cpu_client = match CpuClient::init(None) {
+    let cpu_client = match CpuClient::init(None, None) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -44,19 +44,19 @@ fn test_aaa() {
         for i in 0..256 {
             //println!("i:{}", i);
             let mut regs = RemoteCpuRegistersV1 {
-                ax: i as u16,
-                bx: 0,
-                cx: 0,
-                dx: 0,
-                ss: 0,
-                ds: 0,
-                es: 0,
-                sp: 0xFFFF,
-                bp: 0,
-                si: 0,
-                di: 0,
-                cs: 0xF000,
-                ip: 0x0000,
+                ax:    i as u16,
+                bx:    0,
+                cx:    0,
+                dx:    0,
+                ss:    0,
+                ds:    0,
+                es:    0,
+                sp:    0xFFFF,
+                bp:    0,
+                si:    0,
+                di:    0,
+                cs:    0xF000,
+                ip:    0x0000,
                 flags: 0,
             };
 
@@ -97,7 +97,8 @@ fn test_aaa() {
                         log::error!("Program execution failed!");
                     }
                 }
-            } else {
+            }
+            else {
                 log::error!("Register setup failed: {}", cpu.get_last_error());
             }
         }

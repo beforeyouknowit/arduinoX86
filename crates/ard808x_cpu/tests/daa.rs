@@ -1,13 +1,13 @@
-use ard808x_client::*;
 use ard808x_cpu::*;
+use arduinox86_client::*;
 
 #[derive(Copy, Clone)]
 pub struct DaaResult {
-    ax: u16,
+    ax:    u16,
     flags: u16,
-    af: bool,
-    cf: bool,
-    of: bool,
+    af:    bool,
+    cf:    bool,
+    of:    bool,
 }
 
 pub fn daa(mut al: u8, mut af: bool, mut cf: bool) -> (u8, bool, bool) {
@@ -23,7 +23,8 @@ pub fn daa(mut al: u8, mut af: bool, mut cf: bool) -> (u8, bool, bool) {
         // Set carry flag on overflow from AL + 6
         //self.set_flag_state(Flag::Carry, old_cf || temp16 & 0xFF00 != 0);
         af = true;
-    } else {
+    }
+    else {
         af = false;
     }
 
@@ -33,7 +34,8 @@ pub fn daa(mut al: u8, mut af: bool, mut cf: bool) -> (u8, bool, bool) {
         //self.set_register8(Register8::AL, temp16.wrapping_add(0x60) as u8);
         al = al.wrapping_add(0x60);
         cf = true;
-    } else {
+    }
+    else {
         cf = false;
     }
 
@@ -47,14 +49,14 @@ fn test_daa() {
     // Create a cpu_client connection to cpu_server.
 
     let mut results = [DaaResult {
-        ax: 0,
+        ax:    0,
         flags: 0,
-        af: false,
-        cf: false,
-        of: false,
+        af:    false,
+        cf:    false,
+        of:    false,
     }; 512];
 
-    let cpu_client = match CpuClient::init(None) {
+    let cpu_client = match CpuClient::init(None, None) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -74,19 +76,19 @@ fn test_daa() {
         for i in 0..256 {
             //println!("i:{}", i);
             let mut regs = RemoteCpuRegistersV1 {
-                ax: i as u16,
-                bx: 0,
-                cx: 0,
-                dx: 0,
-                ss: 0,
-                ds: 0,
-                es: 0,
-                sp: 0xFFFF,
-                bp: 0,
-                si: 0,
-                di: 0,
-                cs: 0xF000,
-                ip: 0x0000,
+                ax:    i as u16,
+                bx:    0,
+                cx:    0,
+                dx:    0,
+                ss:    0,
+                ds:    0,
+                es:    0,
+                sp:    0xFFFF,
+                bp:    0,
+                si:    0,
+                di:    0,
+                cs:    0xF000,
+                ip:    0x0000,
                 flags: 0,
             };
 
@@ -126,7 +128,8 @@ fn test_daa() {
                         log::error!("Program execution failed!");
                     }
                 }
-            } else {
+            }
+            else {
                 log::error!("Register setup failed: {}", cpu.get_last_error());
             }
         }
@@ -134,32 +137,34 @@ fn test_daa() {
 
     for i in 0..256 {
         let (d_al, d_cf, d_af) = daa((i & 0xFF) as u8, false, cf);
-        println!("{:04X} (af==0): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
-                 i & 0xFF,
-                 results[i].ax,
-                 results[i].flags,
-                 results[i].af,
-                 results[i].cf,
-                 results[i].of,
-                 d_al as u16,
-                 d_af,
-                 d_cf,
-                 false
+        println!(
+            "{:04X} (af==0): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
+            i & 0xFF,
+            results[i].ax,
+            results[i].flags,
+            results[i].af,
+            results[i].cf,
+            results[i].of,
+            d_al as u16,
+            d_af,
+            d_cf,
+            false
         );
     }
     for i in 256..512 {
         let (d_al, d_cf, d_af) = daa((i & 0xFF) as u8, true, cf);
-        println!("{:04X} (af==1): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
-                 i & 0xFF,
-                 results[i].ax,
-                 results[i].flags,
-                 results[i].af,
-                 results[i].cf,
-                 results[i].of,
-                 d_al as u16,
-                 d_af,
-                 d_cf,
-                 false
+        println!(
+            "{:04X} (af==1): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
+            i & 0xFF,
+            results[i].ax,
+            results[i].flags,
+            results[i].af,
+            results[i].cf,
+            results[i].of,
+            d_al as u16,
+            d_af,
+            d_cf,
+            false
         );
     }
 }

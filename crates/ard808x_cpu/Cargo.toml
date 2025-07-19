@@ -13,6 +13,6 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ard808x_client = { path = "../ard808x_client" }
+arduinox86_client = { path = "../arduinox86_client" }
 env_logger.workspace = true
 log.workspace = true

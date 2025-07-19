@@ -20,12 +20,10 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::display::print_regs;
-use crate::{registers::Registers, Config, CpuMode, TestContext, TestGen};
-use ard808x_client::{RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
-use moo::types::MooCpuType;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use crate::{display::print_regs, registers::Registers, Config, CpuMode, TestContext, TestGen};
+use arduinox86_client::{RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
+use moo::types::{MooCpuType, MooRegisters1};
+use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::Beta;
 use std::ops::Range;
 
@@ -35,17 +33,39 @@ pub struct TestRegisters {
     pub instruction_address: u32,
 }
 
+impl From<&MooRegisters1> for TestRegisters {
+    fn from(regs: &MooRegisters1) -> Self {
+        let mut v2 = RemoteCpuRegistersV2 {
+            ax: regs.ax,
+            bx: regs.bx,
+            cx: regs.cx,
+            dx: regs.dx,
+            sp: regs.sp,
+            bp: regs.bp,
+            si: regs.si,
+            di: regs.di,
+            cs: regs.cs,
+            ds: regs.ds,
+            es: regs.es,
+            ss: regs.ss,
+            ip: regs.ip,
+            flags: regs.flags,
+            ..Default::default()
+        };
+        v2.normalize_descriptors();
+        TestRegisters {
+            regs: Registers::V2(v2),
+            reg_seed: 0, // Seed not applicable for conversion
+            instruction_address: ((regs.cs as u32) << 4) + (regs.ip as u32),
+        }
+    }
+}
+
 impl TestRegisters {
-    pub fn new(
-        context: &mut TestContext,
-        config: &Config,
-        base_seed: u64,
-        test_num: usize,
-        gen_number: usize,
-    ) -> Self {
+    pub fn new(context: &mut TestContext, config: &Config, test_num: usize, gen_number: usize) -> Self {
         // Put the gen_number into the top 8 bits of the test seed.
         // This allows us to generate tests based off the test number and gen count together.
-        let reg_seed = base_seed ^ ((test_num as u64) | ((gen_number as u64) << 24) | 0x8000_0000);
+        let reg_seed = context.file_seed ^ ((test_num as u64) | ((gen_number as u64) << 24) | 0x8000_0000);
 
         // Create a new rng seeded by the base seed XOR test seed for repeatability.
         let mut rng = StdRng::seed_from_u64(reg_seed);
@@ -53,7 +73,7 @@ impl TestRegisters {
         // Randomize the registers.
         let instruction_range: Range<u32> = Range {
             start: config.test_gen.instruction_address_range[0],
-            end: config.test_gen.instruction_address_range[1],
+            end:   config.test_gen.instruction_address_range[1],
         };
         let mut registers_good = false;
         let mut instruction_address = 0;
@@ -80,8 +100,7 @@ impl TestRegisters {
             }
 
             // Check if the instruction is valid with the current registers.
-            instruction_address =
-                initial_regs.calculate_code_address() & config.test_gen.address_mask;
+            instruction_address = initial_regs.calculate_code_address() & config.test_gen.address_mask;
             if instruction_range.contains(&instruction_address) {
                 registers_good = true;
             }
@@ -95,15 +114,10 @@ impl TestRegisters {
     }
 }
 
-pub fn randomize_v2(
-    _context: &mut TestContext,
-    config: TestGen,
-    rng: &mut StdRng,
-    regs: &mut Registers,
-) {
+pub fn randomize_v2(_context: &mut TestContext, config: TestGen, rng: &mut StdRng, regs: &mut Registers) {
     let random_opts = RandomizeOpts {
         weight_zero: config.reg_zero_chance,
-        weight_ones: config.reg_ff_chance,
+        weight_ones: config.reg_ones_chance,
         weight_sp_odd: config.sp_odd_chance,
         sp_min_value: config.sp_min_value,
         randomize_flags: true,

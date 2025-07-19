@@ -21,7 +21,7 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use ard808x_client::{CpuWidth, DataWidth};
+use arduinox86_client::{CpuWidth, DataWidth};
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum QueueDataType {
@@ -35,8 +35,8 @@ pub enum QueueDataType {
 #[derive(Copy, Clone)]
 pub struct QueueEntry {
     opcode: u8,
-    dtype: QueueDataType,
-    addr: u32,
+    dtype:  QueueDataType,
+    addr:   u32,
 }
 
 pub struct InstructionQueue {
@@ -60,8 +60,8 @@ impl InstructionQueue {
             q: vec![
                 QueueEntry {
                     opcode: 0,
-                    dtype: QueueDataType::Program,
-                    addr: 0,
+                    dtype:  QueueDataType::Program,
+                    addr:   0,
                 };
                 width.queue_size()
             ],
@@ -112,7 +112,8 @@ impl InstructionQueue {
                     log::error!("Bad DataWidth for queue push: {:?}", width);
                 }
             }
-        } else {
+        }
+        else {
             if !self.silent {
                 log::error!("Queue overrun!");
             }
@@ -128,7 +129,8 @@ impl InstructionQueue {
             self.len -= 1;
 
             (q_entry.opcode, q_entry.dtype, q_entry.addr)
-        } else {
+        }
+        else {
             if !self.silent {
                 log::error!("Queue underrun!");
             }
@@ -146,10 +148,7 @@ impl InstructionQueue {
         let mut base_str = "".to_string();
 
         for i in 0..self.len {
-            base_str.push_str(&format!(
-                "{:02X}",
-                self.q[(self.back + i) % self.size].opcode
-            ));
+            base_str.push_str(&format!("{:02X}", self.q[(self.back + i) % self.size].opcode));
         }
         base_str
     }

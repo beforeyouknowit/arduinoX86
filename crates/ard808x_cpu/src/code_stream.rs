@@ -23,9 +23,8 @@
 
 use std::collections::VecDeque;
 
-use crate::opcodes::OPCODE_NOP;
-use crate::queue::QueueDataType;
-use ard808x_client::CpuWidth;
+use crate::{opcodes::OPCODE_NOP, queue::QueueDataType};
+use arduinox86_client::CpuWidth;
 
 pub struct CodeStream {
     width: CpuWidth,
@@ -84,23 +83,14 @@ impl CodeStream {
     pub fn pop_data_bus(&mut self) -> CodeStreamValue {
         match self.width {
             CpuWidth::Eight => {
-                let byte0_val = self
-                    .bytes
-                    .pop_front()
-                    .unwrap_or((OPCODE_NOP, QueueDataType::Fill));
+                let byte0_val = self.bytes.pop_front().unwrap_or((OPCODE_NOP, QueueDataType::Fill));
                 let bus_value = byte0_val.0 as u16;
 
                 CodeStreamValue::Byte(bus_value, byte0_val.1)
             }
             CpuWidth::Sixteen => {
-                let byte0_val = self
-                    .bytes
-                    .pop_front()
-                    .unwrap_or((OPCODE_NOP, QueueDataType::Fill));
-                let byte1_val = self
-                    .bytes
-                    .pop_front()
-                    .unwrap_or((OPCODE_NOP, QueueDataType::Fill));
+                let byte0_val = self.bytes.pop_front().unwrap_or((OPCODE_NOP, QueueDataType::Fill));
+                let byte1_val = self.bytes.pop_front().unwrap_or((OPCODE_NOP, QueueDataType::Fill));
                 let bus_value = (byte0_val.0 as u16) | ((byte1_val.0 as u16) << 8);
 
                 CodeStreamValue::Word(bus_value, byte0_val.1, byte1_val.1)

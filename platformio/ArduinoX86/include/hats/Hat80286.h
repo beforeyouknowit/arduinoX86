@@ -188,6 +188,18 @@ void cycle();
   // What logic level RESET is when deasserted
   #define RESET_DEASSERT 0
 
+#define LOOP_COUNT 20
+
+#define SPIN_LOOP(count)                          \
+  do {                                            \
+    for (volatile unsigned int _spin_i = 0;       \
+         _spin_i < (count);                      \
+         ++_spin_i) {                             \
+      /* prevent the compiler from discarding the loop */ \
+      __asm__ __volatile__ ("" ::: "memory");    \
+    }                                             \
+  } while (0)
+
 class Hat80286 : public HatBase<Hat80286> {
 
 private:
@@ -386,10 +398,12 @@ public:
     WRITE_PIN_D04(1);
     if (ClockLowDelay > 0) {
       delayMicroseconds(ClockLowDelay);
+      //SPIN_LOOP(LOOP_COUNT);
     }
     WRITE_PIN_D04(0);
     if (ClockHighDelay > 0) {
       delayMicroseconds(ClockHighDelay);
+      //SPIN_LOOP(LOOP_COUNT);
     }
     // // Check 82288 outputs here.
     // if(!READ_IORC_PIN) {
@@ -402,10 +416,12 @@ public:
     WRITE_PIN_D04(1);
     if (ClockLowDelay > 0) {
       delayMicroseconds(ClockLowDelay);
+      //SPIN_LOOP(LOOP_COUNT);
     }
     WRITE_PIN_D04(0);
     if (ClockHighDelay > 0) {
       delayMicroseconds(ClockHighDelay);
+      //SPIN_LOOP(LOOP_COUNT);
     }
 
     // if(!READ_IORC_PIN) {

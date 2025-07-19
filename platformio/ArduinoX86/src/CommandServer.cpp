@@ -473,6 +473,7 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       break;
     case ServerState::Execute:
       // Reset cycle logger.
+      ArduinoX86::Bus->reset_logging();
       ArduinoX86::CycleLogger->reset();
       ArduinoX86::CycleLogger->enable_logging();
       ArduinoX86::Bus->enable_logging();
@@ -518,6 +519,7 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.readback_p = (uint8_t *)&CPU.post_regs;
       break;
     case ServerState::StoreAll:
+      CPU.wait_states = 2;
       CPU.program = &STOREALL_PROGRAM;
       CPU.program->reset();
       break;

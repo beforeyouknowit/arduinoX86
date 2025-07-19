@@ -235,7 +235,7 @@ impl TryFrom<u8> for ServerCpuType {
             0x05 => Ok(ServerCpuType::Intel80188((value & 0x80) != 0)),
             0x06 => Ok(ServerCpuType::Intel80186((value & 0x80) != 0)),
             0x07 => Ok(ServerCpuType::Intel80286),
-            _ => Err(CpuClientError::BadValue),
+            _ => Err(CpuClientError::TypeConversionError),
         }
     }
 }
@@ -395,8 +395,9 @@ impl TryFrom<u8> for ProgramState {
             0x0D => Ok(ProgramState::StoreDone),
             0x0E => Ok(ProgramState::Done),
             0x0F => Ok(ProgramState::StoreAll),
-            0x10 => Ok(ProgramState::Error),
-            _ => Err(CpuClientError::BadValue),
+            0x10 => Ok(ProgramState::Shutdown),
+            0x11 => Ok(ProgramState::Error),
+            _ => Err(CpuClientError::TypeConversionError),
         }
     }
 }
@@ -520,8 +521,10 @@ pub enum CpuClientError {
     ReadFailure,
     #[error("Failed to write to serial port.")]
     WriteFailure,
-    #[error("Received invalid value from command.")]
-    BadValue,
+    #[error("Type conversion failed.")]
+    TypeConversionError,
+    #[error("{0:?} command received invalid value from server.")]
+    BadValue(ServerCommand),
     #[error("Command was given an invalid parameter: {0}")]
     BadParameter(String),
     #[error("Response timeout waiting for command.")]
@@ -787,7 +790,7 @@ impl CpuClient {
             }
             _ => {
                 // invalid register set type
-                return Err(CpuClientError::BadValue);
+                return Err(CpuClientError::BadValue(ServerCommand::CmdStore));
             }
         }
         self.recv_buf(reg_data)?;
@@ -1003,7 +1006,9 @@ impl CpuClient {
         let mut buf: [u8; 4] = address.to_le_bytes();
         let data_buf_len = data_buf.len() as u32;
         if data_buf_len == 0 {
-            return Err(CpuClientError::BadValue);
+            return Err(CpuClientError::BadParameter(
+                "Data buffer cannot be empty".to_string(),
+            ));
         }
         self.send_command_byte(ServerCommand::CmdSetMemory)?;
         // Send address

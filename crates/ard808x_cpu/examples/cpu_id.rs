@@ -20,14 +20,13 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use ard808x_client::*;
-use ard808x_cpu::*;
+use arduinox86_client::*;
 
 fn main() {
     env_logger::init();
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(None) {
+    let mut cpu_client = match CpuClient::init(None, None) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_808X server!");
             ard_client

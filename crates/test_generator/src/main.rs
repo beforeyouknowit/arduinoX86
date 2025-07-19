@@ -21,6 +21,7 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+mod bus_ops;
 mod cpu_common;
 mod cycles;
 mod display;
@@ -34,15 +35,18 @@ mod state;
 
 use anyhow::Context;
 //use iced_x86::{Decoder, DecoderOptions};
-use ard808x_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
+use arduinox86_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
 use clap::Parser;
 use moo::types::MooCpuType;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Cursor};
-use std::time::Instant;
-use std::{fs, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    fs::File,
+    io::{BufWriter, Cursor},
+    path::PathBuf,
+    time::Instant,
+};
 
 #[derive(Copy, Clone, Debug, Deserialize)]
 pub enum CpuMode {
@@ -93,14 +97,15 @@ pub struct GroupExtensionOverride {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    test_gen: TestGen,
+    test_gen:  TestGen,
     test_exec: TestExec,
-    metadata: TestMetadata,
+    metadata:  TestMetadata,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TestExec {
     polling_sleep: u32,
+    validate_count: u32,
     max_gen: u32,
     test_retry: u32,
     load_retry: u32,
@@ -114,12 +119,16 @@ pub struct TestExec {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TestGen {
+    set_version_major: u8,
+    set_version_minor: u8,
     cpu_type: MooCpuType,
     cpu_mode: CpuMode,
     base_seed: u64,
     termination_condition: TerminationCondition,
-    output_dir: PathBuf,
-    trace_file: PathBuf,
+    test_output_dir: PathBuf,
+    trace_output_dir: PathBuf,
+    verify_trace_output_dir: PathBuf,
+    trace_file_suffix: PathBuf,
     moo_version: u8,
     moo_arch: String,
 
@@ -132,24 +141,30 @@ pub struct TestGen {
     group_extension_range: [u8; 2],
     group_extension_overrides: Vec<GroupExtensionOverride>,
 
-    excluded_opcodes: Vec<u8>,
+    excluded_opcodes:    Vec<u8>,
+    exclude_esc_opcodes: bool,
 
-    test_count: usize,
+    test_count:  usize,
     append_file: bool,
 
     writeless_null_shifts: bool,
     shift_mask: u16,
 
     register_beta: [f64; 2],
-    max_prefixes: usize,
-    prefix_beta: [f64; 2],
+    max_prefixes:  usize,
+    prefix_beta:   [f64; 2],
 
     lock_prefix_chance: f32,
     lock_prefix_opcode: u8,
-    rep_prefix_chance: f32,
+    rep_prefix_chance:  f32,
 
-    reg_zero_chance: f32,
-    reg_ff_chance: f32,
+    reg_zero_chance:  f32,
+    reg_ones_chance:  f32,
+    imm_zero_chance:  f32,
+    imm_ones_chance:  f32,
+    imm8s_min_chance: f32,
+    imm8s_max_chance: f32,
+    near_branch_ban:  u16,
 
     sp_odd_chance: f32,
     sp_min_value: u16,
@@ -171,7 +186,7 @@ pub struct TestGen {
     rep_cx_mask: u16,
 
     disable_seg_overrides: Vec<u8>,
-    disable_lock_prefix: Vec<u8>,
+    disable_lock_prefix:   Vec<u8>,
 
     count_overrides: Vec<CountOverride>,
 
@@ -190,6 +205,9 @@ struct Cli {
 
     #[arg(long)]
     dry_run: bool,
+
+    #[arg(long)]
+    validate: bool,
 }
 
 pub struct TestContext {
@@ -199,9 +217,12 @@ pub struct TestContext {
     server_cpu: ServerCpuType,
     register_set_type: RegisterSetType,
 
+    file_seed: u64,
     gen_start: Instant,
     gen_stop: Instant,
+    gen_ct: usize,
     trace_log: BufWriter<File>,
+    mnemonic_set: HashMap<String, usize>,
 
     dry_run: bool,
     last_program_state: Option<ProgramState>,
@@ -214,11 +235,11 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Read the file into a string
-    let text = fs::read_to_string(&cli.config_file)
-        .with_context(|| format!("reading {}", cli.config_file.display()))?;
+    let text =
+        fs::read_to_string(&cli.config_file).with_context(|| format!("reading {}", cli.config_file.display()))?;
 
     // Parse as TOML
-    let config: Config = toml::from_str(&text).context("parsing TOML into Config")?;
+    let mut config: Config = toml::from_str(&text).context("parsing TOML into Config")?;
 
     // Initialize the random number generator
 
@@ -236,11 +257,27 @@ fn main() -> anyhow::Result<()> {
 
     let server_cpu = ServerCpuType::from(config.test_gen.cpu_type);
 
+    // Create the trace output directory if it doesn't exist.
+    if !config.test_gen.trace_output_dir.exists() {
+        fs::create_dir_all(&config.test_gen.trace_output_dir).with_context(|| {
+            format!(
+                "Creating trace output directory: {}",
+                config.test_gen.trace_output_dir.display()
+            )
+        })?;
+    }
+    if !config.test_gen.verify_trace_output_dir.exists() {
+        fs::create_dir_all(&config.test_gen.verify_trace_output_dir).with_context(|| {
+            format!(
+                "Creating trace output directory: {}",
+                config.test_gen.verify_trace_output_dir.display()
+            )
+        })?;
+    }
+    let trace_filename = PathBuf::from(format!("init{}", config.test_gen.trace_file_suffix.clone().display()));
+
     // Create a BufWriter using the trace log file.
-    let trace_log_path = config
-        .test_gen
-        .output_dir
-        .join(config.test_gen.trace_file.clone());
+    let trace_log_path = config.test_gen.trace_output_dir.join(trace_filename);
     let trace_log_file = File::create(&trace_log_path)
         .with_context(|| format!("Creating trace log file: {}", trace_log_path.display()))?;
     let trace_log = BufWriter::new(trace_log_file);
@@ -251,14 +288,29 @@ fn main() -> anyhow::Result<()> {
         store_register_buffer: vec![0; 102],
         server_cpu,
         register_set_type: RegisterSetType::from(server_cpu),
+        file_seed: 0,
         gen_start: Instant::now(),
         gen_stop: Instant::now(),
+        gen_ct: 0,
         trace_log,
+        mnemonic_set: Default::default(),
         dry_run: cli.dry_run,
         last_program_state: None,
     };
 
-    gen_tests::gen_tests(&mut context, &config)?;
+    if config.test_gen.exclude_esc_opcodes {
+        config
+            .test_gen
+            .excluded_opcodes
+            .extend(config.test_gen.esc_opcodes.clone());
+    }
+
+    if cli.validate {
+        gen_tests::validate_tests(&mut context, &config)?;
+    }
+    else {
+        gen_tests::gen_tests(&mut context, &config)?;
+    }
 
     Ok(())
 }

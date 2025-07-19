@@ -1,6 +1,28 @@
-use crate::flags::*;
-use crate::registers::Registers;
-use ard808x_client::{RemoteCpuRegistersV1, RemoteCpuRegistersV2, ServerCpuType};
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+use crate::{flags::*, registers::Registers};
+use arduinox86_client::{RemoteCpuRegistersV1, RemoteCpuRegistersV2, ServerCpuType};
 
 pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
     let reg_str = format!(
@@ -31,39 +53,31 @@ pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
     let f = regs.flags;
     let c_chr = if CPU_FLAG_CARRY & f != 0 { 'C' } else { 'c' };
     let p_chr = if CPU_FLAG_PARITY & f != 0 { 'P' } else { 'p' };
-    let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 {
-        'A'
-    } else {
-        'a'
-    };
+    let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 { 'A' } else { 'a' };
     let z_chr = if CPU_FLAG_ZERO & f != 0 { 'Z' } else { 'z' };
     let s_chr = if CPU_FLAG_SIGN & f != 0 { 'S' } else { 's' };
     let t_chr = if CPU_FLAG_TRAP & f != 0 { 'T' } else { 't' };
-    let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 {
-        'I'
-    } else {
-        'i'
-    };
-    let d_chr = if CPU_FLAG_DIRECTION & f != 0 {
-        'D'
-    } else {
-        'd'
-    };
+    let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 { 'I' } else { 'i' };
+    let d_chr = if CPU_FLAG_DIRECTION & f != 0 { 'D' } else { 'd' };
     let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
     let m_chr = if cpu_type.is_intel() {
         if matches!(cpu_type, ServerCpuType::Intel80286) {
             if CPU_FLAG_F15 & f != 0 {
                 '1'
-            } else {
+            }
+            else {
                 '0'
             }
-        } else {
+        }
+        else {
             '1'
         }
-    } else {
+    }
+    else {
         if f & CPU_FLAG_MODE != 0 {
             'M'
-        } else {
+        }
+        else {
             'm'
         }
     };
@@ -74,19 +88,7 @@ pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
 
     println!(
         "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-        m_chr,
-        nt_chr,
-        iopl1_chr,
-        iopl0_chr,
-        o_chr,
-        d_chr,
-        i_chr,
-        t_chr,
-        s_chr,
-        z_chr,
-        a_chr,
-        p_chr,
-        c_chr
+        m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
     );
 }
 
@@ -99,10 +101,7 @@ pub fn print_regs_v2(regs: &RemoteCpuRegistersV2, cpu_type: ServerCpuType) {
 
     let v1_regs = RemoteCpuRegistersV1::from(regs);
 
-    println!(
-        "MSW: {:04X} TR: {:04X} LDT: {:04X}",
-        regs.msw, regs.tr, regs.ldt
-    );
+    println!("MSW: {:04X} TR: {:04X} LDT: {:04X}", regs.msw, regs.tr, regs.ldt);
 
     print_regs_v1(&v1_regs, cpu_type);
 }

@@ -2054,12 +2054,16 @@ void handle_execute_finalize_state() {
             Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE_FINALIZE: NMI stack cursor is 0. Probably a 286 CPU. Popping from BusEmulator.");
             CPU.nmi_stack_frame = ArduinoX86::Bus->log_peek_call_frame();
 
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, "## EXECUTE_FINALIZE: Popped NMI stack frame. Flags: ");
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.flags, 16);
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, " CS: ");
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, CPU.nmi_stack_frame.cs, 16);
-            Controller.getBoard().debugPrint(DebugType::EXECUTE, " IP: ");
-            Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.nmi_stack_frame.ip, 16);
+            Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE_FINALIZE: Popped NMI stack frame. Flags: %04X CS: %04X IP: %04X\n\r",
+              CPU.nmi_stack_frame.flags, CPU.nmi_stack_frame.cs, CPU.nmi_stack_frame.ip);
+
+            // Sanity check, flags cannot be 0 due to reserved bit 1.
+            if (CPU.nmi_stack_frame.flags == 0x0000) {
+              Controller.getBoard().debugPrintln(DebugType::ERROR, "## EXECUTE_FINALIZE: NMI stack frame flags are 0! Invalid state.");
+              ArduinoX86::Server.change_state(ServerState::Error);
+              set_error("NMI stack frame flags are 0!");
+              return;
+            }
 
             // Write the NMI stack frame to the NMI stack buffer.
             CPU.nmi_buf_cursor = 0;

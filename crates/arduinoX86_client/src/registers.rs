@@ -456,6 +456,9 @@ pub struct RandomizeOpts {
 }
 
 impl RemoteCpuRegistersV2 {
+    pub const FLAGS_RESERVED_SET: u16 = 0x0002; // Reserved bit in flags register, always set to 1.
+    pub const FLAGS_RESERVED_MASK: u16 = 0xFFD7; // Reserved bit in flags register, always cleared to 0.
+
     pub fn to_buffer<W: Write>(&self, buffer: &mut W) {
         buffer.write_all(&self.x0.to_le_bytes()).unwrap();
         buffer.write_all(&self.x1.to_le_bytes()).unwrap();
@@ -573,7 +576,7 @@ impl RemoteCpuRegistersV2 {
         *self = RemoteCpuRegistersV2::default(); // Reset all registers to default values
 
         if opts.randomize_flags {
-            self.flags = rand.random::<u16>() | 0x0002; // Set reserved bit
+            self.flags = (rand.random::<u16>() | RemoteCpuRegistersV2::FLAGS_RESERVED_SET) & RemoteCpuRegistersV2::FLAGS_RESERVED_MASK; // Set reserved bit
         }
         if opts.clear_trap_flag {
             self.clear_trap_flag();
@@ -595,7 +598,6 @@ impl RemoteCpuRegistersV2 {
             self.ss = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
             self.es = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
             self.cs = RemoteCpuRegistersV2::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-
         }
 
         if opts.randomize_ip {

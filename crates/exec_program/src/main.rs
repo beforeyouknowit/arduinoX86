@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
-use ard808x_client::*;
-use ard808x_cpu::ard808x_client;
-use ard808x_cpu::*;
+use ard808x_cpu::{arduinox86_client, *};
+use arduinox86_client::*;
 use clap::Parser;
 
 const SCREEN_INIT_TIME: u64 = 3; // Seconds to wait for the screen to initialize.
@@ -80,10 +79,7 @@ fn main() {
     });
 
     let mount_addr = u32::from_str_radix(&args.mount_addr, 16).unwrap_or_else(|e| {
-        eprintln!(
-            "Couldn't parse code mount address '{}': {}",
-            args.mount_addr, e
-        );
+        eprintln!("Couldn't parse code mount address '{}': {}", args.mount_addr, e);
         std::process::exit(1);
     });
 
@@ -109,7 +105,8 @@ fn main() {
         if let Err(e) = cpu_client.storeall() {
             eprintln!("Error executing STOREALL: {e}");
             std::process::exit(1);
-        } else {
+        }
+        else {
             println!("STOREALL executed successfully.");
             return;
         }
@@ -122,11 +119,13 @@ fn main() {
 
     let nmi_on = if let Some(nmi_cycle) = args.nmi_on {
         nmi_cycle
-    } else {
+    }
+    else {
         if args.single_step {
             // If single step mode is enabled, we can use NMI on cycle 1.
             1
-        } else {
+        }
+        else {
             // Otherwise, we don't use NMI.
             0
         }
@@ -214,7 +213,8 @@ fn main() {
                 log::error!("Program execution failed!");
             }
         }
-    } else {
+    }
+    else {
         log::error!("Register setup failed: {}", cpu.get_last_error());
     }
 }

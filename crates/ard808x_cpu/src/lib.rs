@@ -32,15 +32,15 @@ mod remote_program;
 use std::str::FromStr;
 
 // Re-export the client module for convenience
-pub use ard808x_client;
-use ard808x_client::*;
+pub use arduinox86_client;
+use arduinox86_client::*;
 
 use code_stream::CodeStream;
 use opcodes::*;
 use queue::*;
 use remote_program::RemoteProgram;
 
-pub use ard808x_client::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
+pub use arduinox86_client::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
 pub use queue::QueueDataType;
 
 pub const WAIT_STATES: u32 = 0;
@@ -167,7 +167,7 @@ pub struct RemoteCpu<'a> {
     run_state: RunState,
 
     do_prefetch: bool,
-    do_emu8080: bool,
+    do_emu8080:  bool,
 
     active_pgm: Option<&'a RemoteProgram>,
     preload_pgm: Option<RemoteProgram>,
@@ -203,10 +203,10 @@ pub struct RemoteCpu<'a> {
     finalize: bool,
 
     do_nmi: bool,
-    intr: bool,
-    nmi: bool,
+    intr:   bool,
+    nmi:    bool,
 
-    halted: bool,
+    halted:  bool,
     halt_ct: u32,
 
     wait_state_opt: u32,
@@ -261,7 +261,8 @@ impl RemoteCpu<'_> {
             if !server_cpu_type.has_8080_emulation() {
                 log::error!("Emulation mode requested but detected CPU type does not support it.");
                 std::process::exit(1);
-            } else {
+            }
+            else {
                 match client.set_flags(ServerFlags::EMU_8080) {
                     Ok(_) => {
                         log::debug!("Emulation mode enabled for CPU type: {:?}", server_cpu_type);
@@ -280,9 +281,9 @@ impl RemoteCpu<'_> {
             if server_cpu_type.can_prefetch() {
                 log::trace!("Using prefetch program for {:?}", server_cpu_type);
                 preload_pgm = match server_cpu_type {
-                    ServerCpuType::Intel8088 | ServerCpuType::Intel8086 => Some(
-                        RemoteProgram::new(&INTEL808X_PRELOAD_PGM, OPCODE_NOP, width),
-                    ),
+                    ServerCpuType::Intel8088 | ServerCpuType::Intel8086 => {
+                        Some(RemoteProgram::new(&INTEL808X_PRELOAD_PGM, OPCODE_NOP, width))
+                    }
                     ServerCpuType::NecV20 | ServerCpuType::NecV30 => {
                         Some(RemoteProgram::new(&NECVX0_PRELOAD_PGM, OPCODE_NOP, width))
                     }
@@ -295,7 +296,8 @@ impl RemoteCpu<'_> {
                 if let Some(ref program) = preload_pgm {
                     log::trace!("Size of prefetch program: {}", program.len());
                 }
-            } else {
+            }
+            else {
                 log::error!("Prefetch option chosen but no prefetch program for specified CPU.");
                 std::process::exit(1);
             }
@@ -468,8 +470,7 @@ impl RemoteCpu<'_> {
             self.write_u16(table_offset + 2, ISR_SEGMENT);
 
             // Write ISR routine
-            let isr_address =
-                RemoteCpu::calc_linear_address(ISR_SEGMENT, (table_offset / 2) as u16);
+            let isr_address = RemoteCpu::calc_linear_address(ISR_SEGMENT, (table_offset / 2) as u16);
 
             self.memory[isr_address as usize] = OPCODE_IRET;
             self.memory[(isr_address + 1) as usize] = OPCODE_NOP;
@@ -497,7 +498,8 @@ impl RemoteCpu<'_> {
 
         if address >= isr_start && address < isr_end {
             true
-        } else {
+        }
+        else {
             false
         }
     }
@@ -534,8 +536,7 @@ impl RemoteCpu<'_> {
                     .load_registers_from_buf(RegisterSetType::Intel286, &reg_data)
                 {
                     Ok(_) => {
-                        let v2 = RemoteCpuRegistersV2::try_from(reg_data)
-                            .expect("Failed to parse V2 registers");
+                        let v2 = RemoteCpuRegistersV2::try_from(reg_data).expect("Failed to parse V2 registers");
                         self.regs = RemoteCpuRegisters::V2(v2);
                         true
                     }
@@ -568,7 +569,8 @@ impl RemoteCpu<'_> {
                             if regs.flags & CPU_FLAG_DIRECTION == 0 {
                                 // Direction forward. Decrement DI.
                                 regs.di = regs.di.wrapping_sub(4);
-                            } else {
+                            }
+                            else {
                                 // Direction backwards. Increment DI.
                                 regs.di = regs.di.wrapping_add(4);
                             }
@@ -636,10 +638,7 @@ impl RemoteCpu<'_> {
     }
 
     pub fn update_state(&mut self, cycle: bool) -> Result<(), String> {
-        let cycle_state = self
-            .client
-            .get_cycle_state(cycle)
-            .map_err(|e| e.to_string())?;
+        let cycle_state = self.client.get_cycle_state(cycle).map_err(|e| e.to_string())?;
 
         self.program_state = cycle_state.program_state;
         self.status = cycle_state.cpu_status_bits;
@@ -655,8 +654,8 @@ impl RemoteCpu<'_> {
         self.data_bus = cycle_state.data_bus;
 
         // Unpack T-cycle from cpu_state.
-        self.t_state = TState::try_from(cycle_state.cpu_state_bits & 0x0F)
-            .map_err(|e| format!("Invalid T-state: {}", e))?;
+        self.t_state =
+            TState::try_from(cycle_state.cpu_state_bits & 0x0F).map_err(|e| format!("Invalid T-state: {}", e))?;
 
         // BHE pin is packed into 8288 command status byte. Use it to set the
         // data bus width now.
@@ -686,8 +685,7 @@ impl RemoteCpu<'_> {
     /// Return true if the current address latch is within execution bounds.
     pub fn address_in_bounds(&self) -> bool {
         let addr = self.address_latch as usize;
-        self.is_isr_address(self.address_latch)
-            || ((addr >= self.start_addr) && (addr < self.end_addr))
+        self.is_isr_address(self.address_latch) || ((addr >= self.start_addr) && (addr < self.end_addr))
     }
 
     pub fn in_preload(&self) -> bool {
@@ -705,7 +703,8 @@ impl RemoteCpu<'_> {
                     // Replace high byte with NOP.
                     self.program_end_offset += 1;
                     (data & 0xFF) | ((self.nop() as u16) << 8)
-                } else {
+                }
+                else {
                     data
                 }
             }
@@ -718,7 +717,8 @@ impl RemoteCpu<'_> {
     pub fn nop(&self) -> u8 {
         if self.do_emu8080 {
             OPCODE_NOP80
-        } else {
+        }
+        else {
             OPCODE_NOP
         }
     }
@@ -828,11 +828,9 @@ impl RemoteCpu<'_> {
                                     QueueDataType::Preload,
                                     self.address_latch,
                                 );
-                            } else if self.address_in_bounds() {
-                                log::trace!(
-                                    "Preload: program pushed to queue: {}",
-                                    self.data_bus_str()
-                                );
+                            }
+                            else if self.address_in_bounds() {
+                                log::trace!("Preload: program pushed to queue: {}", self.data_bus_str());
                                 // We are in preloading state, but have exhausted preload program. Mark the next byte to be put
                                 // in queue to signal start of main program.
                                 self.queue.push(
@@ -841,10 +839,12 @@ impl RemoteCpu<'_> {
                                     QueueDataType::Program,
                                     self.address_latch,
                                 );
-                            } else {
+                            }
+                            else {
                                 log::trace!(
                                     "Preload: out of instruction bounds data pushed to queue: {} @ [{:05X}]",
-                                    self.data_bus_str(), self.address_latch
+                                    self.data_bus_str(),
+                                    self.address_latch
                                 );
                                 // We are in preloading state, but have exhausted preload program. Mark the next byte to be put
                                 // in queue to signal start of main program.
@@ -858,17 +858,16 @@ impl RemoteCpu<'_> {
                         }
                         _ if self.address_in_bounds() => {
                             // Normal fetch within program boundaries
-                            self.queue.push(
-                                self.data_bus,
-                                self.data_width,
-                                self.data_type,
-                                self.address_latch,
-                            );
+                            self.queue
+                                .push(self.data_bus, self.data_width, self.data_type, self.address_latch);
                         }
                         _ => {
                             // We have fetched past the end of the current program, so push a flagged NOP into the queue.
                             // When a byte flagged with Finalize is read we will enter the Finalize state.
-                            log::trace!("Fetch out of bounds: [{:05X}], in native mode. Tagging fetch as [Finalize].", self.address_latch);
+                            log::trace!(
+                                "Fetch out of bounds: [{:05X}], in native mode. Tagging fetch as [Finalize].",
+                                self.address_latch
+                            );
                             // If we did not enter emulation, then we can immediately move to finalize.
                             self.queue.push(
                                 self.data_bus,
@@ -892,17 +891,12 @@ impl RemoteCpu<'_> {
                 log::warn!("ALE on non-T1 cycle state! CPU desynchronized.");
             }
 
-            let addr = self
-                .client
-                .read_address()
-                .expect("Failed to get address bus!");
+            let addr = self.client.read_address().expect("Failed to get address bus!");
             self.address_bus = addr;
             self.address_latch = addr;
-        } else {
-            self.address_bus = self
-                .client
-                .read_address()
-                .expect("Failed to get address bus!");
+        }
+        else {
+            self.address_bus = self.client.read_address().expect("Failed to get address bus!");
         }
         //log::trace!("state: {:?}", self.program_state);
 
@@ -935,20 +929,14 @@ impl RemoteCpu<'_> {
                                 // Feed the CPU the preload program instead of memory.
                                 let program = self.preload_pgm.as_mut().unwrap();
 
-                                program.read_program(
-                                    a0,
-                                    &mut self.code_stream,
-                                    QueueDataType::Program,
-                                );
+                                program.read_program(a0, &mut self.code_stream, QueueDataType::Program);
                                 if !self.code_stream.is_empty() {
                                     let value = self.code_stream.pop_data_bus();
-                                    log::trace!(
-                                        "Writing [Preload] program: [{:0X}]",
-                                        value.bus_value()
-                                    );
+                                    log::trace!("Writing [Preload] program: [{:0X}]", value.bus_value());
                                     self.data_bus = value.bus_value();
                                     true
-                                } else {
+                                }
+                                else {
                                     false
                                 }
                             }
@@ -958,15 +946,15 @@ impl RemoteCpu<'_> {
                         if !bus_written {
                             if self.address_in_bounds() {
                                 // Within program range.
-                                let value = self
-                                    .fetch_from_memory(self.address_latch, self.end_addr as u32);
+                                let value = self.fetch_from_memory(self.address_latch, self.end_addr as u32);
                                 log::trace!(
                                     "Reading [User] program: [{:0X}] end_addr: [{:05X}]",
                                     value,
                                     self.end_addr
                                 );
                                 self.data_bus = value;
-                            } else {
+                            }
+                            else {
                                 log::trace!("Out of program bounds!");
                                 // Prefetching out of bounds. This terminates execution; so we should start
                                 // feeding the CPU server the store program.
@@ -980,16 +968,12 @@ impl RemoteCpu<'_> {
                             self.client
                                 .prefetch_store()
                                 .expect("Failed to execute CmdPrefetchStore");
-                        } else {
+                        }
+                        else {
                             if !self.address_in_bounds() {
-                                log::warn!(
-                                    "Writing user program out of bounds. CPU desynchronized."
-                                );
+                                log::warn!("Writing user program out of bounds. CPU desynchronized.");
                             }
-                            log::trace!(
-                                "Writing [User] program word to bus: [{:04X}]",
-                                self.data_bus
-                            );
+                            log::trace!("Writing [User] program word to bus: [{:04X}]", self.data_bus);
                             self.client
                                 .write_data_bus(self.data_bus)
                                 .expect("Failed to write data bus.");
@@ -1005,10 +989,7 @@ impl RemoteCpu<'_> {
             // MWTC status is active-low.
             if (self.command_status & COMMAND_MWTC_BIT) == 0 {
                 // CPU is writing to memory. Get data bus from CPU and write to host memory.
-                self.data_bus = self
-                    .client
-                    .read_data_bus()
-                    .expect("Failed to read data bus.");
+                self.data_bus = self.client.read_data_bus().expect("Failed to read data bus.");
 
                 self.write_memory(self.address_latch, self.data_bus);
             }
@@ -1017,10 +998,7 @@ impl RemoteCpu<'_> {
             if (self.command_status & COMMAND_IOWC_BIT) == 0 {
                 // CPU is writing to IO address.
 
-                self.data_bus = self
-                    .client
-                    .read_data_bus()
-                    .expect("Failed to read data bus.");
+                self.data_bus = self.client.read_data_bus().expect("Failed to read data bus.");
 
                 // Check if this is our special port address
                 if self.address_latch == 0x000FF {
@@ -1077,11 +1055,7 @@ impl RemoteCpu<'_> {
                             self.instruction_num += 1;
 
                             if self.instruction_num == self.intr_after {
-                                cycle_comment!(
-                                    self,
-                                    "Setting INTR high after instruction #{}",
-                                    self.intr_after
-                                );
+                                cycle_comment!(self, "Setting INTR high after instruction #{}", self.intr_after);
 
                                 // Set INTR line high
                                 self.client
@@ -1090,7 +1064,8 @@ impl RemoteCpu<'_> {
                                 self.intr = true;
                             }
                         }
-                    } else {
+                    }
+                    else {
                         // Subsequent byte of instruction fetched
                         self.queue_fetch_n += 1;
                     }
@@ -1124,11 +1099,7 @@ impl RemoteCpu<'_> {
 
         // Do cycle-based INTR trigger
         if self.cycle_num == self.intr_on_cycle {
-            cycle_comment!(
-                self,
-                "Setting INTR high after cycle #{}",
-                self.intr_on_cycle
-            );
+            cycle_comment!(self, "Setting INTR high after cycle #{}", self.intr_on_cycle);
 
             // Set INTR line high
             self.client
@@ -1155,10 +1126,7 @@ impl RemoteCpu<'_> {
                     log::trace!("Finalized execution!");
                 }
                 Err(_) => {
-                    log::trace!(
-                        "Failed to finalize: {}",
-                        self.client.get_last_error().unwrap()
-                    );
+                    log::trace!("Failed to finalize: {}", self.client.get_last_error().unwrap());
                 }
             }
         }
@@ -1169,10 +1137,7 @@ impl RemoteCpu<'_> {
         // Save the current queue length - we have to rewind the IP returned by store by this much.
         self.queue_len_at_finalize = self.queue.len() as u8;
         self.run_state = RunState::Finalize;
-        log::trace!(
-            "Finalizing execution with {} bytes in queue.",
-            self.queue.len()
-        );
+        log::trace!("Finalizing execution with {} bytes in queue.", self.queue.len());
         cycle_comment!(self, "Finalizing execution!");
         self.client.finalize().expect("Failed to finalize!");
     }
@@ -1269,7 +1234,8 @@ impl RemoteCpu<'_> {
         let intr_chr = if self.intr { 'R' } else { '.' };
         let inta_chr = if self.command_status & COMMAND_INTA_BIT == 0 {
             'A'
-        } else {
+        }
+        else {
             '.'
         };
 
@@ -1295,7 +1261,8 @@ impl RemoteCpu<'_> {
             let value = self.data_bus_str();
             if is_reading {
                 xfer_str = format!("r-> {}", value);
-            } else if is_writing {
+            }
+            else if is_writing {
                 xfer_str = format!("<-w {}", value);
             }
         }
@@ -1305,7 +1272,8 @@ impl RemoteCpu<'_> {
 
         let decode_arch = if self.cpu_type.is_intel() {
             DecodeArch::Intel8088
-        } else {
+        }
+        else {
             match self.run_state {
                 RunState::Program if self.do_emu8080 => DecodeArch::Intel8080,
                 _ => DecodeArch::Intel8088,
@@ -1325,7 +1293,8 @@ impl RemoteCpu<'_> {
                     self.queue_fetch_addr,
                     isr_number
                 );
-            } else {
+            }
+            else {
                 q_read_str = format!(
                     "q-> {:02X} | {} @ [{:05X}]",
                     self.queue_byte,
@@ -1333,7 +1302,8 @@ impl RemoteCpu<'_> {
                     self.queue_fetch_addr
                 );
             }
-        } else if q_op == QueueOp::Subsequent {
+        }
+        else if q_op == QueueOp::Subsequent {
             if is_group_op(self.opcode) && self.queue_fetch_n == 1 {
                 // Modrm was just fetched for a group opcode, so display the mnemonic now
                 q_read_str = format!(
@@ -1341,7 +1311,8 @@ impl RemoteCpu<'_> {
                     self.queue_byte,
                     opcodes::get_opcode_str(self.opcode, self.queue_byte, true, decode_arch)
                 );
-            } else {
+            }
+            else {
                 // Not modrm byte
                 q_read_str = format!("q-> {:02X} |", self.queue_byte);
             }
@@ -1349,7 +1320,8 @@ impl RemoteCpu<'_> {
 
         let c_comment = if let Some(comment) = self.cycle_comment.clone() {
             comment
-        } else {
+        }
+        else {
             "".to_string()
         };
 
@@ -1390,7 +1362,8 @@ impl RemoteCpu<'_> {
     pub fn have_preload_pgm(&self) -> bool {
         if let Some(program) = &self.preload_pgm {
             !program.is_finished()
-        } else {
+        }
+        else {
             false
         }
     }
@@ -1412,16 +1385,13 @@ impl RemoteCpu<'_> {
     }
 
     /// Run the CPU for the specified number of cycles.
-    pub fn run(
-        &mut self,
-        cycle_limit: Option<u32>,
-        print_opts: &PrintOptions,
-    ) -> Result<RemoteCpuRegisters, bool> {
+    pub fn run(&mut self, cycle_limit: Option<u32>, print_opts: &PrintOptions) -> Result<RemoteCpuRegisters, bool> {
         if let Some(preload_pgm) = &mut self.preload_pgm {
             preload_pgm.reset();
             log::trace!("Entering [Preload] run state");
             self.run_state = RunState::Preload;
-        } else {
+        }
+        else {
             log::trace!("Entering [Program] run state");
             self.run_state = RunState::Program;
         }
@@ -1431,7 +1401,8 @@ impl RemoteCpu<'_> {
         // ALE should be active at start of execution
         if !self.ale() {
             log::warn!("Execution is not starting on T1.");
-        } else {
+        }
+        else {
             self.address_latch = self.address_bus;
             self.mcycle_state = self.cpu_type.decode_status(self.status);
         }
@@ -1494,8 +1465,7 @@ impl RemoteCpu<'_> {
     }
 
     pub fn print_reg_buf(reg_buf: &[u8], cpu_type: ServerCpuType) {
-        let regs =
-            RemoteCpuRegisters::try_from(reg_buf).expect("Failed to convert register buffer");
+        let regs = RemoteCpuRegisters::try_from(reg_buf).expect("Failed to convert register buffer");
         Self::print_regs(&regs, cpu_type);
     }
 
@@ -1539,39 +1509,31 @@ impl RemoteCpu<'_> {
         let f = regs.flags;
         let c_chr = if CPU_FLAG_CARRY & f != 0 { 'C' } else { 'c' };
         let p_chr = if CPU_FLAG_PARITY & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 {
-            'A'
-        } else {
-            'a'
-        };
+        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 { 'A' } else { 'a' };
         let z_chr = if CPU_FLAG_ZERO & f != 0 { 'Z' } else { 'z' };
         let s_chr = if CPU_FLAG_SIGN & f != 0 { 'S' } else { 's' };
         let t_chr = if CPU_FLAG_TRAP & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 {
-            'I'
-        } else {
-            'i'
-        };
-        let d_chr = if CPU_FLAG_DIRECTION & f != 0 {
-            'D'
-        } else {
-            'd'
-        };
+        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 { 'I' } else { 'i' };
+        let d_chr = if CPU_FLAG_DIRECTION & f != 0 { 'D' } else { 'd' };
         let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
         let m_chr = if cpu_type.is_intel() {
             if matches!(cpu_type, ServerCpuType::Intel80286) {
                 if CPU_FLAG_F15 & f != 0 {
                     '1'
-                } else {
+                }
+                else {
                     '0'
                 }
-            } else {
+            }
+            else {
                 '1'
             }
-        } else {
+        }
+        else {
             if f & CPU_FLAG_MODE != 0 {
                 'M'
-            } else {
+            }
+            else {
                 'm'
             }
         };
@@ -1579,10 +1541,12 @@ impl RemoteCpu<'_> {
         let nt_chr = if matches!(cpu_type, ServerCpuType::Intel80286) {
             if f & CPU_FLAG_NT != 0 {
                 '1'
-            } else {
+            }
+            else {
                 '0'
             }
-        } else {
+        }
+        else {
             '1'
         };
 
@@ -1592,19 +1556,7 @@ impl RemoteCpu<'_> {
 
         println!(
             "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr,
-            nt_chr,
-            iopl1_chr,
-            iopl0_chr,
-            o_chr,
-            d_chr,
-            i_chr,
-            t_chr,
-            s_chr,
-            z_chr,
-            a_chr,
-            p_chr,
-            c_chr
+            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
         );
     }
 
@@ -1612,33 +1564,17 @@ impl RemoteCpu<'_> {
         println!(
             "X0: {:04X} X1: {:04X} X2: {:04X} X3: {:04X} X4: {:04X}\n\
              X5: {:04X} X6: {:04X} X7: {:04X} X8: {:04X} X9: {:04X}",
-            regs.x0,
-            regs.x1,
-            regs.x2,
-            regs.x3,
-            regs.x4,
-            regs.x5,
-            regs.x6,
-            regs.x7,
-            regs.x8,
-            regs.x9
+            regs.x0, regs.x1, regs.x2, regs.x3, regs.x4, regs.x5, regs.x6, regs.x7, regs.x8, regs.x9
         );
 
         let v1_regs = RemoteCpuRegistersV1::from(regs);
 
-        println!(
-            "MSW: {:04X} TR: {:04X} LDT: {:04X}",
-            regs.msw, regs.tr, regs.ldt
-        );
+        println!("MSW: {:04X} TR: {:04X} LDT: {:04X}", regs.msw, regs.tr, regs.ldt);
 
         Self::print_regs_v1(&v1_regs, cpu_type);
     }
 
-    pub fn print_regs_delta(
-        initial: &RemoteCpuRegisters,
-        regs: &RemoteCpuRegisters,
-        cpu_type: ServerCpuType,
-    ) {
+    pub fn print_regs_delta(initial: &RemoteCpuRegisters, regs: &RemoteCpuRegisters, cpu_type: ServerCpuType) {
         match (initial, regs) {
             (RemoteCpuRegisters::V1(initial_v1), RemoteCpuRegisters::V1(regs_v1)) => {
                 Self::print_regs_delta_v1(initial_v1, regs_v1, cpu_type);
@@ -1648,19 +1584,12 @@ impl RemoteCpu<'_> {
                 Self::print_regs_delta_v1(&initial_v1, final_v1, cpu_type);
             }
             _ => {
-                log::error!(
-                    "Unsupported register version for delta printing: {:?}",
-                    regs
-                );
+                log::error!("Unsupported register version for delta printing: {:?}", regs);
             }
         }
     }
 
-    pub fn print_regs_delta_v1(
-        initial: &RemoteCpuRegistersV1,
-        regs: &RemoteCpuRegistersV1,
-        cpu_type: ServerCpuType,
-    ) {
+    pub fn print_regs_delta_v1(initial: &RemoteCpuRegistersV1, regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
         let a_diff = initial.ax != regs.ax;
         let b_diff = initial.bx != regs.bx;
         let c_diff = initial.cx != regs.cx;
@@ -1717,39 +1646,31 @@ impl RemoteCpu<'_> {
         let f = regs.flags;
         let c_chr = if CPU_FLAG_CARRY & f != 0 { 'C' } else { 'c' };
         let p_chr = if CPU_FLAG_PARITY & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 {
-            'A'
-        } else {
-            'a'
-        };
+        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 { 'A' } else { 'a' };
         let z_chr = if CPU_FLAG_ZERO & f != 0 { 'Z' } else { 'z' };
         let s_chr = if CPU_FLAG_SIGN & f != 0 { 'S' } else { 's' };
         let t_chr = if CPU_FLAG_TRAP & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 {
-            'I'
-        } else {
-            'i'
-        };
-        let d_chr = if CPU_FLAG_DIRECTION & f != 0 {
-            'D'
-        } else {
-            'd'
-        };
+        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 { 'I' } else { 'i' };
+        let d_chr = if CPU_FLAG_DIRECTION & f != 0 { 'D' } else { 'd' };
         let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
         let m_chr = if cpu_type.is_intel() {
             if matches!(cpu_type, ServerCpuType::Intel80286) {
                 if CPU_FLAG_F15 & f != 0 {
                     '1'
-                } else {
+                }
+                else {
                     '0'
                 }
-            } else {
+            }
+            else {
                 '1'
             }
-        } else {
+        }
+        else {
             if f & CPU_FLAG_MODE != 0 {
                 'M'
-            } else {
+            }
+            else {
                 'm'
             }
         };
@@ -1760,19 +1681,7 @@ impl RemoteCpu<'_> {
 
         println!(
             "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr,
-            nt_chr,
-            iopl1_chr,
-            iopl0_chr,
-            o_chr,
-            d_chr,
-            i_chr,
-            t_chr,
-            s_chr,
-            z_chr,
-            a_chr,
-            p_chr,
-            c_chr
+            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
         );
     }
 }
