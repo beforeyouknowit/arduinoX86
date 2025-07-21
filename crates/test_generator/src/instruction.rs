@@ -116,16 +116,28 @@ impl TestInstruction {
         instruction_bytes.push_back(opcode);
 
         // Generate a random modrm.
-        let modrm = rng.random();
-
+        let mut modrm = rng.random();
         // If the opcode has an extension, set it in the modrm reg field.
-        let modrm = if let Some(ext) = opcode_ext {
+        modrm = if let Some(ext) = opcode_ext {
             // Set the reg field of the modrm to the extension value.
             (modrm & 0b1100_0111) | ((ext & 0x07) << 3)
         }
         else {
             modrm
         };
+
+        // Check for modrm overrides.
+        for mod_override in &config.modrm_overrides {
+            if mod_override.opcode == opcode {
+                // Apply the specified modrm mask unless 'invalid_chance' is rolled.
+                let valid_chance: f32 = rng.random();
+                if valid_chance > mod_override.invalid_chance {
+                    // Apply the modrm mask.
+                    trace_log!(context, "Applying modrm override for opcode {:02X}", opcode);
+                    modrm &= mod_override.mask;
+                }
+            }
+        }
 
         // We can do specific filters on modrm values here if needed.
         match config.cpu_type {

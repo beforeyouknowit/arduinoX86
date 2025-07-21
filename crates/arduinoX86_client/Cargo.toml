@@ -18,3 +18,7 @@ modular-bitfield.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 thiserror.workspace = true
+moo-rs = { workspace = true, optional = true }
+
+[features]
+use_moo = ["dep:moo-rs"]

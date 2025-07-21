@@ -19,7 +19,7 @@ ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
 
 extended_opcode = false # Use extended opcodes (0x0F)
-opcode_range = [0xC0, 0xC7]
+opcode_range = [0x00, 0xFF]
 group_extension_range = [0, 7] # Range for group extensions
 
 group_extension_overrides = [
@@ -56,11 +56,12 @@ imm_ones_chance = 0.05 # Chance of an all-bit-set immediate value
 imm8s_zero_chance = 0.05 # Chance of zeroed 8-bit immediate value
 imm8s_min_chance = 0.05 # Chance of minimum 8-bit signed immediate value
 imm8s_max_chance = 0.05 # Chance of maximum 8-bit signed immediate value
-near_branch_ban = 0x08 # Ban certain near branch immediate values
 
 sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
-sp_max_value = 0xFFFC # Maximum value for SP
+sp_max_value = 0xFFFF # Maximum value for SP
+
+near_branch_ban = 0x08 # Ban certain near branch immediate values
 
 # Memory strategies
 mem_zero_chance = 0.05 # Chance of zeroed memory
@@ -188,17 +189,30 @@ disable_lock_prefix = [
 # Memory is always randomized at the start of a test run.
 randomize_mem_interval = 1000
 
+sp_overrides = [
+    { opcode = 0xCF, min = 0x0006, max = 0xFFFC }, # IRET - avoid int 13
+]
+
+modrm_overrides = [
+    { opcode = 0x8F, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC6, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC7, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0x8C, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x8E, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+]
+
 count_overrides = [
     { count = 1000, opcode_range = [0x40, 0x4F] }, # INC and DEC are trivial
     { count = 1000, opcode_range = [0x90, 0x99] }, # XCHG instructions are trivial, as are CBW and CWD
     { count = 1000, opcode_range = [0xF5, 0xF5] }, # CMC
     { count = 1000, opcode_range = [0xF8, 0xFD] }, # CLC, STC, CLI, STI, CLD, STD
-    { count = 2000, opcode_range = [0x6C, 0x6F] }, # INS and OUTS instructions
-    { count = 2000, opcode_range = [0xA4, 0xA7] }, # MOVS, CMPS
-    { count = 2000, opcode_range = [0xAA, 0xAF] }, # STOS, LODS, SCAS
     { count = 1000, opcode_range = [0xD6, 0xD6] }, # SALC
     { count = 1000, opcode_range = [0xF4, 0xF4] }, # HALT
 ]
+
+#{ count = 2000, opcode_range = [0x6C, 0x6F] }, # INS and OUTS instructions
+#{ count = 2000, opcode_range = [0xA4, 0xA7] }, # MOVS, CMPS
+#{ count = 2000, opcode_range = [0xAA, 0xAF] }, # STOS, LODS, SCAS
 
 # Arduino control stuff
 [test_exec]
@@ -666,6 +680,7 @@ arch = "186"
 
 [metadata.opcodes.63]
 status = "normal"
+mode = "protected"
 arch = "286"
 
 [metadata.opcodes.64]
@@ -1240,129 +1255,94 @@ arch = "86"
 status = "normal"
 arch = "86"
 
-[metadata.opcodes.0F10]
+[metadata.opcodes.0F00.reg.0]
 status = "normal"
-arch = "v30"
-flags = "...szap."
-flags-mask = 65387
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F11]
+[metadata.opcodes.0F00.reg.1]
 status = "normal"
-arch = "v30"
-flags = "...szap."
-flags-mask = 65387
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F12]
+[metadata.opcodes.0F00.reg.2]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F13]
+[metadata.opcodes.0F00.reg.3]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F14]
+[metadata.opcodes.0F00.reg.4]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F15]
+[metadata.opcodes.0F00.reg.5]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F16]
+[metadata.opcodes.0F01.reg.0]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F17]
+[metadata.opcodes.0F01.reg.1]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F18]
+[metadata.opcodes.0F01.reg.2]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F19]
+[metadata.opcodes.0F01reg.3]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F1A]
+[metadata.opcodes.0F01.reg.4]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F1B]
+[metadata.opcodes.0F01.reg.6]
 status = "normal"
-arch = "v30"
+mode = "protected"
+arch = "286"
 
-[metadata.opcodes.0F1C]
+[metadata.opcodes.0F02]
 status = "normal"
-arch = "v30"
-
-[metadata.opcodes.0F1D]
-status = "normal"
-arch = "v30"
-
-[metadata.opcodes.0F1E]
-status = "normal"
-arch = "v30"
-
-[metadata.opcodes.0F1F]
-status = "normal"
+mode = "protected"
 arch = "v30"
 
-[metadata.opcodes.0F20]
+[metadata.opcodes.0F03]
 status = "normal"
-arch = "v30"
-flags = "o..s.ap."
-flags-mask = 63339
-
-[metadata.opcodes.0F22]
-status = "normal"
-arch = "v30"
-flags = "o..s.ap."
-flags-mask = 63339
-
-[metadata.opcodes.0F26]
-status = "normal"
-arch = "v30"
-flags = "o..s.ap."
-flags-mask = 63339
-
-[metadata.opcodes.0F28]
-status = "normal"
+mode = "protected"
 arch = "v30"
 
-[metadata.opcodes.0F2A]
+[metadata.opcodes.0F04]
 status = "normal"
+mode = "protected"
 arch = "v30"
 
-[metadata.opcodes.0F31]
+[metadata.opcodes.0F05]
 status = "normal"
+mode = "protected"
 arch = "v30"
-flags-mask = 63274
-flags = "o..szapc"
 
-[metadata.opcodes.0F33]
+[metadata.opcodes.0F06]
 status = "normal"
+mode = "protected"
 arch = "v30"
-flags = "o..szapc"
-flags-mask = 63274
 
-[metadata.opcodes.0F39]
-status = "normal"
+[metadata.opcodes.0F0B]
+status = "undefined"
 arch = "v30"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.0F3B]
-status = "normal"
-arch = "v30"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.0FFF]
-status = "normal"
-arch = "v30"
-flags = "o..szapc"
-flags-mask = 63274
 
 [metadata.opcodes.80]
 status = "normal"

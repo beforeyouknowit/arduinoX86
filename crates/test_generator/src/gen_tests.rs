@@ -268,7 +268,7 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                             test_num,
                             gen_num,
                         )?;
-                        test_registers = TestRegisters::new(context, &config, test_num, gen_num);
+                        test_registers = TestRegisters::new(context, &config, opcode, test_num, gen_num);
                     }
 
                     test_result = generate_test(
@@ -654,7 +654,7 @@ fn generate_consistent_test(
     // ArduinoX86 has crashed, the opcode is invalid, or we hit a major bug.
     while gen_num < config.test_exec.max_gen as usize {
         // Generate a fresh Register & Instruction pair.
-        let mut test_registers = TestRegisters::new(context, config, test_num, gen_num);
+        let mut test_registers = TestRegisters::new(context, config, opcode, test_num, gen_num);
         let test_instruction = TestInstruction::new(
             context,
             &config.test_gen,
@@ -967,8 +967,7 @@ pub fn generate_test(
 
     // Set memory seed.
     // ---------------------------------------------------------------------------------------------
-    let memory_seed = test_seed as u32;
-    context.client.randomize_memory(memory_seed)?;
+    context.client.randomize_memory(test_seed as u32)?;
 
     // Determine the memory strategy based on the zero and ff chances.
     // ---------------------------------------------------------------------------------------------
@@ -1001,6 +1000,9 @@ pub fn generate_test(
     context
         .client
         .set_memory(test_registers.instruction_address, test_instruction.sequence_bytes())?;
+
+    // Fix up memory if necessary.
+    adjust_memory(context, test_seed, test_instruction, test_registers)?;
 
     // Load the registers onto the Arduino.
     // ---------------------------------------------------------------------------------------------
@@ -1170,7 +1172,7 @@ pub fn generate_test(
 
     // Detect any exceptions from bus operations.
     // ---------------------------------------------------------------------------------------------
-    let exception = bus_ops.detect_exception(context.server_cpu);
+    let exception = bus_ops.detect_exception(context.server_cpu.into());
 
     if let Some(exception) = &exception {
         log::trace!("Detected exception: {}", exception.exception_num);
@@ -1219,6 +1221,41 @@ pub fn generate_test(
     );
 
     Ok(test)
+}
+
+pub fn adjust_memory(
+    context: &mut TestContext,
+    test_seed: u64,
+    test_instruction: &TestInstruction,
+    test_registers: &mut TestRegisters,
+) -> anyhow::Result<()> {
+    // If the instruction is POPF, we need to generate a flag value without the trap flag.
+    match test_instruction.iced_instruction().mnemonic() {
+        Mnemonic::Popf => {
+            // Generate a random flag value without the trap flag.
+            let mut rng = rand::rngs::StdRng::seed_from_u64(test_seed);
+            let mut flags = rng.random::<u16>() & !0x0100; // Clear the trap flag (bit 8)
+
+            // Calculate the stack address.
+            let stack_address = test_registers.regs.stack_address();
+            // Write the flags to the stack.
+            context.client.set_memory(stack_address, &flags.to_le_bytes())?;
+        }
+        Mnemonic::Iret => {
+            // Generate a random flag value without the trap flag.
+            let mut rng = rand::rngs::StdRng::seed_from_u64(test_seed);
+            let mut flags = rng.random::<u16>() & !0x0100; // Clear the trap flag (bit 8)
+
+            // Calculate the stack address. It's +4 because we need to write the flags, CS, and IP.
+            let mut stack_address = test_registers.regs.ss_base();
+            stack_address += test_registers.regs.sp().wrapping_add(4) as u32;
+
+            // Write the flags to the stack.
+            context.client.set_memory(stack_address, &flags.to_le_bytes())?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub fn log_bus_ops(context: &mut TestContext, bus_ops: &[BusOp]) {

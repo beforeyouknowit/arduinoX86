@@ -121,6 +121,7 @@ impl TryFrom<&MyServerCycleState> for BusOp {
                 //log::trace!("Bus status byte: {:?}", status_byte);
                 if let Ok(op_type) = BusOpType::try_from(status_byte) {
                     let bus_op = BusOp {
+                        idx: 0,
                         op_type,
                         addr: state.address_bus,
                         bhe: state.bus_command_bits & 0x80 == 0,

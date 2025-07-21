@@ -165,6 +165,7 @@ pub enum BusOpType {
 
 #[derive(Copy, Clone, Debug)]
 pub struct BusOp {
+    pub idx: usize,
     pub op_type: BusOpType,
     pub addr: u32,
     pub bhe: bool,

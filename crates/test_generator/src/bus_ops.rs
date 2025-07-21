@@ -30,7 +30,7 @@ use crate::{
 };
 use arduinox86_client::ServerCpuType;
 use iced_x86::{Mnemonic, OpKind};
-use moo::types::{MooCpuType, MooException};
+use moo::types::{MooCpuType, MooException, MooIvtOrder};
 
 pub struct BusOps {
     ops: Vec<BusOp>,
@@ -49,6 +49,7 @@ impl From<&[MyServerCycleState]> for BusOps {
             else {
                 if let Some(mut latched_bus_op_inner) = latched_bus_op {
                     latched_bus_op_inner.data = cycle_state.data_bus();
+                    latched_bus_op_inner.idx = bus_ops.len();
                     bus_ops.push(BusOp::from(latched_bus_op_inner));
                     latched_bus_op = None; // Reset the latched bus operation.
                 }
@@ -207,11 +208,14 @@ impl BusOps {
         Ok(())
     }
 
-    pub fn detect_exception(&self, _cpu_type: ServerCpuType) -> Option<MooException> {
+    pub fn detect_exception(&self, cpu_type: ServerCpuType) -> Option<MooException> {
         // Check for an exception in the bus operations.
 
         let mut have_stack_frame = false;
         let mut flag_address = 0;
+        let mut stack_frame_idx = 0;
+        let mut ivt_read_idx = 0;
+
         let last_write = self
             .ops
             .iter()
@@ -228,6 +232,7 @@ impl BusOps {
 
                     if all_writes {
                         flag_address = window[0].addr;
+                        stack_frame_idx = window[0].idx;
                     }
 
                     all_writes
@@ -240,6 +245,7 @@ impl BusOps {
 
                     if all_writes {
                         flag_address = window[0].addr;
+                        stack_frame_idx = window[0].idx;
                     }
 
                     all_writes
@@ -248,24 +254,46 @@ impl BusOps {
         }
 
         let mut exception_num = 0;
-        let have_two_consecutive_ivr_reads = self.ops.windows(2).any(|window| {
+        let have_two_consecutive_ivr_reads = self.ops.windows(2).rev().any(|window| {
             let have_exception = window[0].op_type == BusOpType::MemRead
                 && window[1].op_type == BusOpType::MemRead
                 && window[0].addr < 0x1024
+                && window[0].addr % 4 == 0
                 && window[1].addr < 0x1024;
             if have_exception {
                 exception_num = window[0].addr / 4;
+                ivt_read_idx = window[0].idx;
             }
             have_exception
         });
 
+        let mut have_exception = false;
         if have_stack_frame && have_two_consecutive_ivr_reads {
-            return Some(MooException {
-                exception_num: exception_num as u8,
-                flag_address,
-            });
-        }
+            println!(
+                "Have stack frame at bus op idx {} and IVR reads at bus op idx {}, exception num {}",
+                stack_frame_idx, ivt_read_idx, exception_num
+            );
+            let ivt_order = MooIvtOrder::from(cpu_type);
+            match ivt_order {
+                MooIvtOrder::ReadFirst => {
+                    if ivt_read_idx < stack_frame_idx {
+                        have_exception = true;
+                    }
+                }
+                MooIvtOrder::PushFirst => {
+                    if stack_frame_idx < ivt_read_idx {
+                        have_exception = true;
+                    }
+                }
+            }
 
+            if have_exception {
+                return Some(MooException {
+                    exception_num: exception_num as u8,
+                    flag_address,
+                });
+            }
+        }
         None
     }
 }

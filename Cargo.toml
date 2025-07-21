@@ -29,6 +29,8 @@ thiserror = "2.0"
 rand = "0.9"
 rand_distr = "0.5"
 indexmap = "2.2"
+moo-rs = { git = "https://github.com/dbalsom/moo", default-features = false, features = ["serde"] }
+
 [workspace.dependencies.iced-x86]
 version = "1.21"
 default-features = false

@@ -24,8 +24,12 @@
 use std::io::Write;
 
 use binrw::BinReaderExt;
-use modular_bitfield::bitfield;
-use modular_bitfield::prelude::*;
+use modular_bitfield::{bitfield, prelude::*};
+#[cfg(feature = "use_moo")]
+use moo::prelude::MooRegisters1Init;
+#[cfg(feature = "use_moo")]
+use moo::types::MooRegisters1;
+
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
@@ -41,13 +45,12 @@ impl TryFrom<&[u8]> for RemoteCpuRegisters {
     fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
         if buf.len() == 28 {
             Ok(RemoteCpuRegisters::V1(RemoteCpuRegistersV1::from(buf)))
-        } else if buf.len() == 102 {
+        }
+        else if buf.len() == 102 {
             Ok(RemoteCpuRegisters::V2(RemoteCpuRegistersV2::try_from(buf)?))
-        } else {
-            log::error!(
-                "Invalid buffer length for RemoteCpuRegisters: {}",
-                buf.len()
-            );
+        }
+        else {
+            log::error!("Invalid buffer length for RemoteCpuRegisters: {}", buf.len());
             Err("Invalid buffer length for RemoteCpuRegisters!")
         }
     }
@@ -98,19 +101,19 @@ impl RemoteCpuRegisters {
 
 #[derive(Default, Debug)]
 pub struct RemoteCpuRegistersV1 {
-    pub ax: u16,
-    pub bx: u16,
-    pub cx: u16,
-    pub dx: u16,
-    pub ss: u16,
-    pub ds: u16,
-    pub es: u16,
-    pub sp: u16,
-    pub bp: u16,
-    pub si: u16,
-    pub di: u16,
-    pub cs: u16,
-    pub ip: u16,
+    pub ax:    u16,
+    pub bx:    u16,
+    pub cx:    u16,
+    pub dx:    u16,
+    pub ss:    u16,
+    pub ds:    u16,
+    pub es:    u16,
+    pub sp:    u16,
+    pub bp:    u16,
+    pub si:    u16,
+    pub di:    u16,
+    pub cs:    u16,
+    pub ip:    u16,
     pub flags: u16,
 }
 
@@ -173,19 +176,19 @@ impl RemoteCpuRegistersV1 {
 impl From<&RemoteCpuRegistersV2> for RemoteCpuRegistersV1 {
     fn from(regs: &RemoteCpuRegistersV2) -> Self {
         RemoteCpuRegistersV1 {
-            ax: regs.ax,
-            bx: regs.bx,
-            cx: regs.cx,
-            dx: regs.dx,
-            ss: regs.ss,
-            ds: regs.ds,
-            es: regs.es,
-            sp: regs.sp,
-            bp: regs.bp,
-            si: regs.si,
-            di: regs.di,
-            cs: regs.cs,
-            ip: regs.ip,
+            ax:    regs.ax,
+            bx:    regs.bx,
+            cx:    regs.cx,
+            dx:    regs.dx,
+            ss:    regs.ss,
+            ds:    regs.ds,
+            es:    regs.es,
+            sp:    regs.sp,
+            bp:    regs.bp,
+            si:    regs.si,
+            di:    regs.di,
+            cs:    regs.cs,
+            ip:    regs.ip,
             flags: regs.flags,
         }
     }
@@ -194,40 +197,40 @@ impl From<&RemoteCpuRegistersV2> for RemoteCpuRegistersV1 {
 impl From<&[u8; 28]> for RemoteCpuRegistersV1 {
     fn from(buf: &[u8; 28]) -> Self {
         RemoteCpuRegistersV1 {
-            ax: buf[0] as u16 | ((buf[1] as u16) << 8),
-            bx: buf[2] as u16 | ((buf[3] as u16) << 8),
-            cx: buf[4] as u16 | ((buf[5] as u16) << 8),
-            dx: buf[6] as u16 | ((buf[7] as u16) << 8),
-            ip: buf[8] as u16 | ((buf[9] as u16) << 8),
-            cs: buf[10] as u16 | ((buf[11] as u16) << 8),
+            ax:    buf[0] as u16 | ((buf[1] as u16) << 8),
+            bx:    buf[2] as u16 | ((buf[3] as u16) << 8),
+            cx:    buf[4] as u16 | ((buf[5] as u16) << 8),
+            dx:    buf[6] as u16 | ((buf[7] as u16) << 8),
+            ip:    buf[8] as u16 | ((buf[9] as u16) << 8),
+            cs:    buf[10] as u16 | ((buf[11] as u16) << 8),
             flags: buf[12] as u16 | ((buf[13] as u16) << 8),
-            ss: buf[14] as u16 | ((buf[15] as u16) << 8),
-            sp: buf[16] as u16 | ((buf[17] as u16) << 8),
-            ds: buf[18] as u16 | ((buf[19] as u16) << 8),
-            es: buf[20] as u16 | ((buf[21] as u16) << 8),
-            bp: buf[22] as u16 | ((buf[23] as u16) << 8),
-            si: buf[24] as u16 | ((buf[25] as u16) << 8),
-            di: buf[26] as u16 | ((buf[27] as u16) << 8),
+            ss:    buf[14] as u16 | ((buf[15] as u16) << 8),
+            sp:    buf[16] as u16 | ((buf[17] as u16) << 8),
+            ds:    buf[18] as u16 | ((buf[19] as u16) << 8),
+            es:    buf[20] as u16 | ((buf[21] as u16) << 8),
+            bp:    buf[22] as u16 | ((buf[23] as u16) << 8),
+            si:    buf[24] as u16 | ((buf[25] as u16) << 8),
+            di:    buf[26] as u16 | ((buf[27] as u16) << 8),
         }
     }
 }
 impl From<&[u8]> for RemoteCpuRegistersV1 {
     fn from(buf: &[u8]) -> Self {
         RemoteCpuRegistersV1 {
-            ax: buf[0] as u16 | ((buf[1] as u16) << 8),
-            bx: buf[2] as u16 | ((buf[3] as u16) << 8),
-            cx: buf[4] as u16 | ((buf[5] as u16) << 8),
-            dx: buf[6] as u16 | ((buf[7] as u16) << 8),
-            ip: buf[8] as u16 | ((buf[9] as u16) << 8),
-            cs: buf[10] as u16 | ((buf[11] as u16) << 8),
+            ax:    buf[0] as u16 | ((buf[1] as u16) << 8),
+            bx:    buf[2] as u16 | ((buf[3] as u16) << 8),
+            cx:    buf[4] as u16 | ((buf[5] as u16) << 8),
+            dx:    buf[6] as u16 | ((buf[7] as u16) << 8),
+            ip:    buf[8] as u16 | ((buf[9] as u16) << 8),
+            cs:    buf[10] as u16 | ((buf[11] as u16) << 8),
             flags: buf[12] as u16 | ((buf[13] as u16) << 8),
-            ss: buf[14] as u16 | ((buf[15] as u16) << 8),
-            sp: buf[16] as u16 | ((buf[17] as u16) << 8),
-            ds: buf[18] as u16 | ((buf[19] as u16) << 8),
-            es: buf[20] as u16 | ((buf[21] as u16) << 8),
-            bp: buf[22] as u16 | ((buf[23] as u16) << 8),
-            si: buf[24] as u16 | ((buf[25] as u16) << 8),
-            di: buf[26] as u16 | ((buf[27] as u16) << 8),
+            ss:    buf[14] as u16 | ((buf[15] as u16) << 8),
+            sp:    buf[16] as u16 | ((buf[17] as u16) << 8),
+            ds:    buf[18] as u16 | ((buf[19] as u16) << 8),
+            es:    buf[20] as u16 | ((buf[21] as u16) << 8),
+            bp:    buf[22] as u16 | ((buf[23] as u16) << 8),
+            si:    buf[24] as u16 | ((buf[25] as u16) << 8),
+            di:    buf[26] as u16 | ((buf[27] as u16) << 8),
         }
     }
 }
@@ -441,6 +444,7 @@ pub struct RandomizeOpts {
     pub weight_ones: f32,
     pub weight_sp_odd: f32,
     pub sp_min_value: u16,
+    pub sp_max_value: u16,
     pub randomize_flags: bool,
     pub clear_trap_flag: bool,
     pub clear_interrupt_flag: bool,
@@ -489,30 +493,14 @@ impl RemoteCpuRegistersV2 {
         buffer.write_all(&self.ax.to_le_bytes()).unwrap();
 
         // Write segment descriptors
-        self.es_desc
-            .to_buffer(buffer)
-            .expect("Failed to write es_desc");
-        self.cs_desc
-            .to_buffer(buffer)
-            .expect("Failed to write cs_desc");
-        self.ss_desc
-            .to_buffer(buffer)
-            .expect("Failed to write ss_desc");
-        self.ds_desc
-            .to_buffer(buffer)
-            .expect("Failed to write ds_desc");
-        self.gdt_desc
-            .to_buffer(buffer)
-            .expect("Failed to write gdt_desc");
-        self.ldt_desc
-            .to_buffer(buffer)
-            .expect("Failed to write ldt_desc");
-        self.idt_desc
-            .to_buffer(buffer)
-            .expect("Failed to write idt_desc");
-        self.tss_desc
-            .to_buffer(buffer)
-            .expect("Failed to write tss_desc");
+        self.es_desc.to_buffer(buffer).expect("Failed to write es_desc");
+        self.cs_desc.to_buffer(buffer).expect("Failed to write cs_desc");
+        self.ss_desc.to_buffer(buffer).expect("Failed to write ss_desc");
+        self.ds_desc.to_buffer(buffer).expect("Failed to write ds_desc");
+        self.gdt_desc.to_buffer(buffer).expect("Failed to write gdt_desc");
+        self.ldt_desc.to_buffer(buffer).expect("Failed to write ldt_desc");
+        self.idt_desc.to_buffer(buffer).expect("Failed to write idt_desc");
+        self.tss_desc.to_buffer(buffer).expect("Failed to write tss_desc");
     }
 
     pub fn rewind_ip(&mut self, adjust: u16) {
@@ -563,9 +551,11 @@ impl RemoteCpuRegistersV2 {
         let random_value: f32 = rand.random();
         if random_value < weight_zero {
             0
-        } else if random_value < weight_zero + weight_ones {
+        }
+        else if random_value < weight_zero + weight_ones {
             0xFFFF // All bits set to 1
-        } else {
+        }
+        else {
             let value: u16 = (register_beta.sample(rand) * u16::MAX as f64) as u16;
             value
         }
@@ -617,6 +607,11 @@ impl RemoteCpuRegistersV2 {
             self.sp = opts.sp_min_value;
         }
 
+        // Set sp to maximum value if above.
+        if self.sp > opts.sp_max_value {
+            self.sp = opts.sp_max_value;
+        }
+
         if opts.randomize_x {
             self.x0 = rand.random();
             self.x1 = rand.random();
@@ -665,5 +660,28 @@ impl RemoteCpuRegistersV2 {
     pub fn calculate_code_address(&self) -> u32 {
         // Calculate the code address based on CS descriptor base and IP
         self.cs_desc.base_address() + (self.ip as u32)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<RemoteCpuRegistersV1> for MooRegisters1 {
+    fn from(remote: RemoteCpuRegistersV1) -> Self {
+        (&MooRegisters1Init {
+            ax:    remote.ax,
+            bx:    remote.bx,
+            cx:    remote.cx,
+            dx:    remote.dx,
+            cs:    remote.cs,
+            ss:    remote.ss,
+            ds:    remote.ds,
+            es:    remote.es,
+            sp:    remote.sp,
+            bp:    remote.bp,
+            si:    remote.si,
+            di:    remote.di,
+            ip:    remote.ip,
+            flags: remote.flags,
+        })
+            .into()
     }
 }

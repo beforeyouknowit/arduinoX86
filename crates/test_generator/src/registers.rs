@@ -168,8 +168,20 @@ impl Registers {
     }
     pub fn cs_base(&self) -> u32 {
         match self {
-            Registers::V1(regs) => regs.cs as u32,
+            Registers::V1(regs) => (regs.cs as u32) << 4,
             Registers::V2(regs) => regs.cs_desc.base_address(),
+        }
+    }
+    pub fn ss(&self) -> u16 {
+        match self {
+            Registers::V1(regs) => regs.ss,
+            Registers::V2(regs) => regs.ss,
+        }
+    }
+    pub fn ss_base(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => (regs.ss as u32) << 4,
+            Registers::V2(regs) => regs.ss_desc.base_address(),
         }
     }
     pub fn cx(&self) -> u16 {
@@ -182,6 +194,18 @@ impl Registers {
         match self {
             Registers::V1(regs) => regs.cx = value,
             Registers::V2(regs) => regs.cx = value,
+        }
+    }
+    pub fn sp(&self) -> u16 {
+        match self {
+            Registers::V1(regs) => regs.sp,
+            Registers::V2(regs) => regs.sp,
+        }
+    }
+    pub fn stack_address(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => ((regs.ss as u32) << 4) + regs.sp as u32,
+            Registers::V2(regs) => regs.ss_desc.base_address() + regs.sp as u32,
         }
     }
 }

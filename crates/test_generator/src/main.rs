@@ -96,6 +96,20 @@ pub struct GroupExtensionOverride {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct StackPointerOverride {
+    opcode: u8,
+    min:    u16,
+    max:    u16,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ModRmOverride {
+    opcode: u8,
+    mask: u8,
+    invalid_chance: f32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     test_gen:  TestGen,
     test_exec: TestExec,
@@ -188,6 +202,8 @@ pub struct TestGen {
     disable_seg_overrides: Vec<u8>,
     disable_lock_prefix:   Vec<u8>,
 
+    sp_overrides:    Vec<StackPointerOverride>,
+    modrm_overrides: Vec<ModRmOverride>,
     count_overrides: Vec<CountOverride>,
 
     randomize_mem_interval: usize,

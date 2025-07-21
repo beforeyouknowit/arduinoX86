@@ -17,5 +17,5 @@ rand.workspace = true
 rand_distr.workspace = true
 iced-x86.workspace = true
 indexmap.workspace = true
-arduinox86_client = { path = "../arduinox86_client" }
-moo-rs = { git = "https://github.com/dbalsom/moo", features = ["use_client"] }
+arduinox86_client = { path = "../arduinox86_client", features = ["use_moo"] }
+moo-rs.workspace = true

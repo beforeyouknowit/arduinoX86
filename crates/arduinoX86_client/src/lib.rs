@@ -2,10 +2,18 @@
 
 mod registers;
 
-use std::io::{Read, Write};
-use std::{cell::RefCell, rc::Rc, str};
+use std::{
+    cell::RefCell,
+    io::{Read, Write},
+    rc::Rc,
+    str,
+};
 
 use log;
+use moo::prelude::MooIvtOrder;
+#[cfg(feature = "use_moo")]
+use moo::types::MooCpuType;
+
 use serialport::{ClearBuffer, SerialPort};
 use thiserror::Error;
 
@@ -111,6 +119,38 @@ pub enum ServerCpuType {
     Intel80286,
 }
 
+#[cfg(feature = "use_moo")]
+impl From<ServerCpuType> for MooIvtOrder {
+    fn from(cpu_type: ServerCpuType) -> Self {
+        match cpu_type {
+            ServerCpuType::Intel80286 => MooIvtOrder::PushFirst,
+            _ => MooIvtOrder::ReadFirst,
+        }
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<MooCpuType> for ServerCpuType {
+    fn from(cpu_type: MooCpuType) -> Self {
+        ServerCpuType::from(&cpu_type)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&MooCpuType> for ServerCpuType {
+    fn from(cpu_type: &MooCpuType) -> Self {
+        match cpu_type {
+            MooCpuType::Intel8088 => ServerCpuType::Intel8088,
+            MooCpuType::Intel8086 => ServerCpuType::Intel8086,
+            MooCpuType::NecV20 => ServerCpuType::NecV20,
+            MooCpuType::NecV30 => ServerCpuType::NecV30,
+            MooCpuType::Intel80188 => ServerCpuType::Intel80188(false),
+            MooCpuType::Intel80186 => ServerCpuType::Intel80186(false),
+            MooCpuType::Intel80286 => ServerCpuType::Intel80286,
+        }
+    }
+}
+
 impl ServerCpuType {
     /// Returns whether the CPU type is an Intel CPU.
     pub fn is_intel(&self) -> bool {
@@ -214,9 +254,7 @@ impl ServerCpuType {
 impl From<ServerCpuType> for CpuWidth {
     fn from(cpu_type: ServerCpuType) -> Self {
         match cpu_type {
-            ServerCpuType::NecV20 | ServerCpuType::Intel8088 | ServerCpuType::Intel80188(_) => {
-                CpuWidth::Eight
-            }
+            ServerCpuType::NecV20 | ServerCpuType::Intel8088 | ServerCpuType::Intel80188(_) => CpuWidth::Eight,
             _ => CpuWidth::Sixteen,
         }
     }
@@ -543,10 +581,7 @@ pub struct CpuClient {
 }
 
 impl CpuClient {
-    pub fn init(
-        com_port: Option<String>,
-        timeout: Option<u64>,
-    ) -> Result<CpuClient, CpuClientError> {
+    pub fn init(com_port: Option<String>, timeout: Option<u64>) -> Result<CpuClient, CpuClientError> {
         let mut matched_port = false;
         match serialport::available_ports() {
             Ok(ports) => {
@@ -569,7 +604,8 @@ impl CpuClient {
                     return if !matched_port {
                         log::warn!("Did not find specified port: {}", p);
                         Err(CpuClientError::DiscoveryError)
-                    } else {
+                    }
+                    else {
                         log::warn!("Did not find Arduino808X server at specified port: {}", p);
                         Err(CpuClientError::DiscoveryError)
                     };
@@ -584,10 +620,7 @@ impl CpuClient {
     }
 
     /// Try to open the specified serial port and query it for an Arduino808X server.
-    pub fn try_port(
-        port_info: serialport::SerialPortInfo,
-        timeout: u64,
-    ) -> Option<Box<dyn SerialPort>> {
+    pub fn try_port(port_info: serialport::SerialPortInfo, timeout: u64) -> Option<Box<dyn SerialPort>> {
         let port_result = serialport::new(port_info.port_name.clone(), 0)
             .baud_rate(0)
             .timeout(std::time::Duration::from_millis(timeout))
@@ -624,11 +657,7 @@ impl CpuClient {
                         log::trace!("Flushed output to {}...", port_info.port_name);
                     }
                     Err(e) => {
-                        log::error!(
-                            "try_port: flush error from {}: {:?}",
-                            port_info.port_name,
-                            e
-                        );
+                        log::error!("try_port: flush error from {}: {:?}", port_info.port_name, e);
                         return None;
                     }
                 }
@@ -659,11 +688,7 @@ impl CpuClient {
                 Some(new_port)
             }
             Err(e) => {
-                log::error!(
-                    "try_port: Error opening host port {}: {}",
-                    port_info.port_name,
-                    e
-                );
+                log::error!("try_port: Error opening host port {}: {}", port_info.port_name, e);
                 None
             }
         }
@@ -692,7 +717,8 @@ impl CpuClient {
                 if (buf[0] & 0x01) != 0 {
                     // LSB set in return code == success
                     Ok(true)
-                } else {
+                }
+                else {
                     log::error!("read_result_code: command returned failure: {:02X}", buf[0]);
                     Err(CpuClientError::CommandFailed(cmd))
                 }
@@ -709,7 +735,8 @@ impl CpuClient {
             Ok(bytes) => {
                 if bytes != buf.len() {
                     Err(CpuClientError::WriteFailure)
-                } else {
+                }
+                else {
                     Ok(true)
                 }
             }
@@ -725,7 +752,8 @@ impl CpuClient {
             .and_then(|_| {
                 if buf.len() == 0 {
                     Err(CpuClientError::ReadFailure)
-                } else {
+                }
+                else {
                     Ok(true)
                 }
             })
@@ -1006,9 +1034,7 @@ impl CpuClient {
         let mut buf: [u8; 4] = address.to_le_bytes();
         let data_buf_len = data_buf.len() as u32;
         if data_buf_len == 0 {
-            return Err(CpuClientError::BadParameter(
-                "Data buffer cannot be empty".to_string(),
-            ));
+            return Err(CpuClientError::BadParameter("Data buffer cannot be empty".to_string()));
         }
         self.send_command_byte(ServerCommand::CmdSetMemory)?;
         // Send address
@@ -1027,10 +1053,8 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdGetCycleStates)?;
         // We are guaranteed to have at least 8 bytes in the buffer, a count and a size
         self.recv_buf(&mut param_buf)?;
-        let cycle_count =
-            u32::from_le_bytes([param_buf[0], param_buf[1], param_buf[2], param_buf[3]]);
-        let data_size =
-            u32::from_le_bytes([param_buf[4], param_buf[5], param_buf[6], param_buf[7]]);
+        let cycle_count = u32::from_le_bytes([param_buf[0], param_buf[1], param_buf[2], param_buf[3]]);
+        let data_size = u32::from_le_bytes([param_buf[4], param_buf[5], param_buf[6], param_buf[7]]);
 
         let struct_size = data_size / cycle_count;
         let mut receive_buf = vec![0; data_size as usize];
@@ -1049,12 +1073,7 @@ impl CpuClient {
             }
             let cycle_state = ServerCycleState {
                 program_state: ProgramState::Execute,
-                address_bus: u32::from_le_bytes([
-                    cycle_data[0],
-                    cycle_data[1],
-                    cycle_data[2],
-                    cycle_data[3],
-                ]),
+                address_bus: u32::from_le_bytes([cycle_data[0], cycle_data[1], cycle_data[2], cycle_data[3]]),
                 data_bus: u16::from_le_bytes([cycle_data[4], cycle_data[5]]),
                 cpu_state_bits: cycle_data[6],
                 cpu_status_bits: cycle_data[7],
