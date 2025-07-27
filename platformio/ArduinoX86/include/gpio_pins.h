@@ -258,6 +258,11 @@
     #define READ_PIN_D53            ((GPIOG->IDR & BIT07) != 0)
     #define WRITE_PIN_D53(x)  ((x) ? (GPIOG->ODR |= BIT07) : (GPIOG->ODR &= ~BIT07))
 
+    #define READ_PIN_D84            ((GPIOA->IDR & BIT04) != 0)
+    #define WRITE_PIN_D84(x)  ((x) ? (GPIOA->ODR |= BIT04) : (GPIOA->ODR &= ~BIT04))
+    #define READ_PIN_D85            ((GPIOA->IDR & BIT05) != 0)
+    #define WRITE_PIN_D85(x)  ((x) ? (GPIOA->ODR |= BIT05) : (GPIOA->ODR &= ~BIT05))
+
     // Analog pins A0-A7 (3.3v tolerant)
     #define READ_PIN_A0             ((GPIOC->IDR & BIT04) != 0)
     #define WRITE_PIN_A0(x)   ((x) ? (GPIOC->ODR |= BIT04) : (GPIOC->ODR &= ~BIT04))
@@ -275,6 +280,9 @@
     #define WRITE_PIN_A6(x)   ((x) ? (GPIOC->ODR |= BIT00) : (GPIOC->ODR &= ~BIT00))  
     #define READ_PIN_A7             ((GPIOA->IDR & BIT00) != 0)
     #define WRITE_PIN_A7(x)   ((x) ? (GPIOA->ODR |= BIT00) : (GPIOA->ODR &= ~BIT00))  
+
+    // #define READ_PIN_A11             ((GPIOA->IDR & BIT00) != 0)
+    // #define WRITE_PIN_A11(x)   ((x) ? (GPIOA->ODR |= BIT00) : (GPIOA->ODR &= ~BIT00))
 
     #define READ_PIN_D76 READ_PIN_A0
     #define READ_PIN_D77 READ_PIN_A1

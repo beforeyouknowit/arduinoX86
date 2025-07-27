@@ -152,6 +152,10 @@ public:
   explicit BusEmulator(IBusBackend* backend)
     : backend_(backend) {}
 
+  void set_cpu_type(CpuType cpu_type) {
+    cpu_type_ = cpu_type;
+  }
+
   // Memory reads: isFetch==true logs as CodeFetch
   uint8_t mem_read_u8(uint32_t address, bool isFetch) {
     uint8_t val = backend_->read_u8(address);
@@ -218,6 +222,22 @@ public:
     backend_->io_write_u16(port, value);
     //logger_.log({BusOperationType::IoWrite16, port, value});
   }
+  void io_write_bus(uint16_t port, uint16_t value, bool bhe) {
+    backend_->io_write_bus(port, value, bhe);
+    logger_.log({BusOperationType::IoWrite16, bus_width(port, bhe), port, value});
+  
+    // Write to Loadall386 registers if port matches
+    if (cpu_type_ == CpuType::i80386 && 
+        (port >= STORE_IO_BASE) && (port < (STORE_IO_BASE + sizeof(Loadall386) - 1))) 
+    {
+      size_t offset = port - STORE_IO_BASE;
+      if (offset < sizeof(Loadall386)) {
+        uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&loadall386_regs_) + (offset / 2);
+        *reg_ptr = value;
+      }
+    }
+
+  }
 
   void halt(uint32_t address) {
     if ((address & 0x2) != 0) {
@@ -269,6 +289,10 @@ public:
     return loadall286_regs_;
   }
 
+  Loadall386& loadall386_regs() {
+    return loadall386_regs_;
+  }
+
   ~BusEmulator() {
       delete backend_;
   }
@@ -276,9 +300,11 @@ public:
 private:
   IBusBackend* backend_;
   BusLogger   logger_;
+  CpuType cpu_type_ = CpuType::Undetected; // Default CPU type
 
-  // Keep a shadow of Loadall286 registers.
+  // Keep a shadow of Loadall registers.
   Loadall286 loadall286_regs_;
+  Loadall386 loadall386_regs_;
 
   /// @brief Determine bus width based on address and BHE
   ActiveBusWidth bus_width(uint32_t address, bool bhe) const {

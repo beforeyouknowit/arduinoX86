@@ -75,7 +75,7 @@ enum class ActiveBusWidth : uint8_t {
 
 // Bus transfer states, as determined by status lines S0-S2.
 enum BusStatus {
-  IRQA = 0,   // IRQ Acknowledge
+  INTA = 0,   // IRQ Acknowledge
   IOR  = 1,   // IO Read
   IOW  = 2,   // IO Write
   HALT = 3,   // Halt
@@ -95,9 +95,16 @@ enum TCycle {
   TW = 5,
 };
 
-/// @brief Structure representing a stack frame in the CPU.
+/// @brief Structure representing a call stack frame.
 struct CallStackFrame {
   uint16_t flags; // Flags register
   uint16_t cs;   // Code Segment
   uint16_t ip;   // Instruction Pointer
+};
+
+/// @brief Structure representing a 32-bit call stack frame.
+struct CallStackFrame32 {
+  uint32_t eflags;  // Flags register
+  uint16_t cs;      // Code Segment
+  uint32_t eip;     // Instruction Pointer
 };

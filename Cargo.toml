@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/arduinox86_client",
-    "crates/ard808x_cpu",
+    "crates/arduinox86_cpu",
     "crates/exec_program",
     "crates/test_generator",
 ]
@@ -13,7 +13,7 @@ version = "0.3.0"
 edition = "2021"
 authors = ["Daniel Balsom", "Andreas Jonsson"]
 license = "MIT"
-repository = "https://github.com/dbalsom/arduino_808x"
+repository = "https://github.com/dbalsom/arduinoX86"
 
 [workspace.dependencies]
 clap = { version = "4.0", features = ["derive"] }

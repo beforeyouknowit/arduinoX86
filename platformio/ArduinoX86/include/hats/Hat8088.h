@@ -34,6 +34,13 @@ void cycle();
 #include <hats/Pins.h>
 #include <DebugFilter.h>
 
+#define CPU_8088
+#define USE_SETUP_PROGRAM 0
+#define SETUP_PROGRAM SETUP_PROGRAM_86
+#define SETUP_PROGRAM_PATCH_OFFSET 0
+
+#define STORE_IO_BASE 0x0000
+
 #define ADDRESS_SPACE_MASK 0xFFFFF // 20-bit address space for 8088
 #define WRITE_CYCLE T3
 

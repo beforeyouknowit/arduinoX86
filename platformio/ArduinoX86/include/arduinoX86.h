@@ -60,6 +60,7 @@ enum class CpuType : uint8_t {
   i80188,
   i80186,
   i80286,
+  i80386,
 };
 
 typedef enum {
@@ -104,11 +105,17 @@ typedef struct __attribute__((packed)) registers2 {
 } registers2_t;
 
 
-struct __attribute__((packed)) SegmentDescriptor {
+struct __attribute__((packed)) SegmentDescriptor286 {
   uint16_t addr_lo;
   uint8_t addr_hi;
   uint8_t access;
   uint16_t limit;
+};
+
+struct __attribute__((packed)) SegmentDescriptor386 {
+  uint32_t access;
+  uint32_t address;
+  uint32_t limit;
 };
 
 // CPU Registers - for 286 LOADALL command
@@ -140,14 +147,14 @@ struct __attribute__((packed)) Loadall286 {
   uint16_t dx;
   uint16_t cx;
   uint16_t ax;
-  SegmentDescriptor es_desc;
-  SegmentDescriptor cs_desc;
-  SegmentDescriptor ss_desc;
-  SegmentDescriptor ds_desc;
-  SegmentDescriptor gdt_desc;
-  SegmentDescriptor ldt_desc;
-  SegmentDescriptor idt_desc;
-  SegmentDescriptor tss_desc;
+  SegmentDescriptor286 es_desc;
+  SegmentDescriptor286 cs_desc;
+  SegmentDescriptor286 ss_desc;
+  SegmentDescriptor286 ds_desc;
+  SegmentDescriptor286 gdt_desc;
+  SegmentDescriptor286 ldt_desc;
+  SegmentDescriptor286 idt_desc;
+  SegmentDescriptor286 tss_desc;
 
   /// @brief Patch the Loadall286 registers from a CallStackFrame.
   void patch_stack_frame(const CallStackFrame& frame) {
@@ -163,6 +170,88 @@ struct __attribute__((packed)) Loadall286 {
 };
 
 #define LOADALL286_ADDRESS 0x800
+
+struct __attribute__((packed)) Store386 {
+  uint32_t eax;
+  uint32_t ebx;
+  uint32_t ecx;
+  uint32_t edx; 
+  uint32_t eip;
+  uint16_t cs;
+  uint16_t cs_pad;
+  uint32_t eflags;
+  uint16_t ss;
+  uint16_t ss_pad;
+  uint32_t esp;
+  uint16_t ds;
+  uint16_t ds_pad;
+  uint16_t es;
+  uint16_t es_pad;
+  uint16_t fs;
+  uint16_t fs_pad;
+  uint16_t gs;
+  uint16_t gs_pad;
+  uint32_t ebp;
+  uint32_t esi;
+  uint32_t edi;
+};
+
+struct __attribute__((packed)) Loadall386 {
+  uint32_t cr0;
+  uint32_t eflags;
+  uint32_t eip;
+  uint32_t edi;
+  uint32_t esi;
+  uint32_t ebp;
+  uint32_t esp;
+  uint32_t ebx;
+  uint32_t edx;
+  uint32_t ecx;
+  uint32_t eax;
+  uint32_t dr6;
+  uint32_t dr7;
+  uint16_t tr;
+  uint16_t tr_pad;
+  uint16_t ldt;
+  uint16_t ldt_pad;
+  uint16_t gs;
+  uint16_t gs_pad;
+  uint16_t fs;
+  uint16_t fs_pad;
+  uint16_t ds;
+  uint16_t ds_pad;
+  uint16_t ss;
+  uint16_t ss_pad;
+  uint16_t cs;
+  uint16_t cs_pad;
+  uint16_t es;
+  uint16_t es_pad;
+  SegmentDescriptor386 tss_desc;
+  SegmentDescriptor386 idt_desc;
+  SegmentDescriptor386 gdt_desc;
+  SegmentDescriptor386 ldt_desc;
+  SegmentDescriptor386 gs_desc;
+  SegmentDescriptor386 fs_desc;
+  SegmentDescriptor386 ds_desc;
+  SegmentDescriptor386 ss_desc;
+  SegmentDescriptor386 cs_desc;
+  SegmentDescriptor386 es_desc;
+
+
+    /// @brief Patch the Loadall386 registers from a CallStackFrame386.
+  void patch_stack_frame(const CallStackFrame386& frame) {
+    eflags = frame.eflags;
+    cs     = frame.cs;
+    eip    = frame.eip;
+    esp   += 6; // Adjust ESP to account for the pushed eflags, CS, and EIP
+  }
+
+  void rewind_ip(uint32_t offset) {
+    eip -= offset;
+  }
+};
+
+#define LOADALL386_ADDRESS 0x800
 
 // Processor instruction queue
 typedef struct queue {
@@ -234,7 +323,8 @@ typedef struct cpu {
   uint16_t pre_emu_flags; // Flags pushed to stack by BRKEM
   uint8_t emu_flags; // Flags pushed to stack by PUSH PSW during EmuExit program
   volatile registers1_t load_regs; // Register state set by Load command
-  volatile Loadall286 loadall_regs; // Register state set by Loadall command
+  volatile Loadall286 loadall_regs_286; // Register state set by Loadall command on 286
+  volatile Loadall386 loadall_regs_386; // Register state set by Loadall command on 386
   volatile registers1_t post_regs; // Register state retrieved from Store program
   uint8_t *readback_p;
   bool have_queue_status; // Whether we have access to the queue status lines. Can be detected during RESET.
@@ -290,7 +380,10 @@ const uint16_t CPU_FLAG_OVERFLOW   = 0b0000100000000000;
 
 #define CPU_FLAG_DEFAULT_SET_8086 0xF002
 #define CPU_FLAG_DEFAULT_SET_286 0x0002
-#define CPU_FLAG_DEFAULT_CLEAR 0xFFD7
+#define CPU_FLAG_DEFAULT_SET_386 0x0002
+#define CPU_FLAG_DEFAULT_CLEAR_8086 0xFFD7
+#define CPU_FLAG_DEFAULT_CLEAR_286 0xFFD7
+#define CPU_FLAG_DEFAULT_CLEAR_386 0xFFFFFFD7;
 // ----------------------------- GPIO PINS ----------------------------------//
 
 #define SPIN_DELAY(count) do { \
@@ -357,10 +450,13 @@ void handle_cpuid_state(uint8_t q);
 void handle_cpu_setup_state();
 void handle_jump_vector_state(uint8_t q);
 void handle_loadall_286();
+void handle_loadall_386();
 void handle_load_state(uint8_t q);
 void handle_load_done_state();
 void handle_emu_enter_state(uint8_t q);
 void handle_storeall_286();
+void handle_storeall_386();
+void handle_store_state();
 void handle_execute_state();
 void handle_execute_automatic();
 void handle_execute_finalize_state();

@@ -134,7 +134,7 @@ class HatBase {
 
     static BusStatus decodeBusStatus(uint8_t status_byte ) {
       switch (status_byte & 0x07) {
-        case 0: return BusStatus::IRQA;
+        case 0: return BusStatus::INTA;
         case 1: return BusStatus::IOR;
         case 2: return BusStatus::IOW;
         case 3: return BusStatus::HALT;
@@ -148,7 +148,7 @@ class HatBase {
 
     static const char *getBusStatusString(BusStatus status) {
       switch (status) {
-        case BusStatus::IRQA: return "IRQA";
+        case BusStatus::INTA: return "INTA";
         case BusStatus::IOR:  return "IOR ";
         case BusStatus::IOW:  return "IOW ";
         case BusStatus::HALT: return "HALT";
@@ -162,7 +162,7 @@ class HatBase {
 
     static const char *getBusStatusColor(BusStatus status) {
       switch (status) {
-        case BusStatus::IRQA: return ansi::bright_red;
+        case BusStatus::INTA: return ansi::red;
         case BusStatus::IOR:  return ansi::yellow;
         case BusStatus::IOW:  return ansi::bright_yellow;
         case BusStatus::HALT: return ansi::bright_magenta;

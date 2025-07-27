@@ -28,15 +28,19 @@
 
 extern InlineProgram SETUP_PROGRAM_86;
 extern InlineProgram SETUP_PROGRAM_186;
+extern InlineProgram SETUP_PROGRAM_386EX;
 extern InlineProgram LOAD_PROGRAM;
 extern InlineProgram LOAD_PROGRAM_286;
+extern InlineProgram LOAD_PROGRAM_386;
 extern InlineProgram CPUID_PROGRAM;
 extern InlineProgram EMU_ENTER_PROGRAM;
 extern InlineProgram EMU_EXIT_PROGRAM;
 extern InlineProgram JUMP_VECTOR;
 extern InlineProgram NMI_VECTOR;
 extern InlineProgram STOREALL_PROGRAM;
+extern InlineProgram STOREALL_PROGRAM_386;
 extern InlineProgram STORE_PROGRAM_NMI;
+extern InlineProgram STORE_PROGRAM_NMI_386;
 extern InlineProgram STORE_PROGRAM_INLINE;
 extern InlineProgram NEC_PREFETCH_PROGRAM;
 

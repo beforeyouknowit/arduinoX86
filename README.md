@@ -135,14 +135,14 @@ before program execution.
 
 A library crate that implements a client for the Arduino808X's serial protocol.
 
-## /crates/ard808x_cpu
+## /crates/arduinox86_cpu
 
 A library crate built on top of the `arduinox86_client` crate, this provides a `RemoteCpu` struct that models CPU state
 and can execute programs.
 
 ## /crates/exec_program
 
-A binary implementing an interface for the `ard808x_cpu` crate that will load a provided register state binary and
+A binary implementing an interface for the `arduinox86_cpu` crate that will load a provided register state binary and
 execute the specified program binary.
 
 ## /pcb

@@ -1,5 +1,5 @@
-use ard808x_cpu::*;
 use arduinox86_client::*;
+use arduinox86_cpu::*;
 
 #[test]
 fn test_flag_init() {

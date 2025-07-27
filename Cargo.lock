@@ -68,15 +68,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
-name = "ard808x_cpu"
-version = "0.3.0"
-dependencies = [
- "arduinox86_client",
- "env_logger",
- "log",
-]
-
-[[package]]
 name = "arduinox86_client"
 version = "0.3.0"
 dependencies = [
@@ -88,6 +79,15 @@ dependencies = [
  "rand_distr",
  "serialport",
  "thiserror",
+]
+
+[[package]]
+name = "arduinox86_cpu"
+version = "0.3.0"
+dependencies = [
+ "arduinox86_client",
+ "env_logger",
+ "log",
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 name = "exec_program"
 version = "0.3.0"
 dependencies = [
- "ard808x_cpu",
+ "arduinox86_cpu",
  "clap",
  "env_logger",
  "log",
@@ -477,7 +477,7 @@ dependencies = [
 [[package]]
 name = "moo-rs"
 version = "0.3.0"
-source = "git+https://github.com/dbalsom/moo#03c26f5f945fff16a293acbea1e010ee81546eb3"
+source = "git+https://github.com/dbalsom/moo#01bc83b7f10fcd58232c32f2726313cbdfb4dbcf"
 dependencies = [
  "binrw",
  "log",
@@ -575,9 +575,9 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rand"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fbfd9d094a40bf3ae768db9361049ace4c0e04a4fd6b359518bd7b73a73dd97"
+checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha",
  "rand_core",

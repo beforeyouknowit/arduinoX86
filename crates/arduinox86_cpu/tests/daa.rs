@@ -1,27 +1,59 @@
-use ard808x_cpu::*;
 use arduinox86_client::*;
+use arduinox86_cpu::*;
 
 #[derive(Copy, Clone)]
-pub struct AaaResult {
+pub struct DaaResult {
     ax:    u16,
     flags: u16,
+    af:    bool,
+    cf:    bool,
     of:    bool,
-    sf:    bool,
-    zf:    bool,
-    pf:    bool,
+}
+
+pub fn daa(mut al: u8, mut af: bool, mut cf: bool) -> (u8, bool, bool) {
+    let old_al = al;
+    //let mut temp16 = al as u16;
+    let old_cf = cf;
+
+    if (al & 0x0F) > 9 || af {
+        //temp16 = (self.al as u16).wrapping_add(6);
+        // self.set_register8(Register8::AL, (temp16 & 0xFF) as u8);
+        al = al.wrapping_add(6);
+
+        // Set carry flag on overflow from AL + 6
+        //self.set_flag_state(Flag::Carry, old_cf || temp16 & 0xFF00 != 0);
+        af = true;
+    }
+    else {
+        af = false;
+    }
+
+    // Different sources show this value 0x99 or 0x9F, does it matter?
+    // Current intel documents show 0x99
+    if (old_al > 0x99) || old_cf {
+        //self.set_register8(Register8::AL, temp16.wrapping_add(0x60) as u8);
+        al = al.wrapping_add(0x60);
+        cf = true;
+    }
+    else {
+        cf = false;
+    }
+
+    //self.set_szp_flags_from_result_u8(self.al);
+
+    (al, af, cf)
 }
 
 #[test]
-fn test_aaa() {
+fn test_daa() {
     // Create a cpu_client connection to cpu_server.
 
-    let mut results = [AaaResult {
+    let mut results = [DaaResult {
         ax:    0,
         flags: 0,
+        af:    false,
+        cf:    false,
         of:    false,
-        sf:    false,
-        zf:    false,
-        pf:    false,
     }; 512];
 
     let cpu_client = match CpuClient::init(None, None) {
@@ -77,7 +109,7 @@ fn test_aaa() {
 
                 // Load opcode into memory at cs:ip
                 let pc = (regs.cs as usize) << 4 + regs.ip as usize;
-                cpu.write_u8(pc, 0x37); // AAA
+                cpu.write_u8(pc, 0x27); // DAA
                 cpu.set_program_bounds(pc, pc + 1);
 
                 cpu.test();
@@ -87,10 +119,9 @@ fn test_aaa() {
                         println!("idx: {}", idx);
                         results[idx].ax = regs.ax();
                         results[idx].flags = regs.flags();
+                        results[idx].af = regs.flags() & CPU_FLAG_AUX_CARRY != 0;
+                        results[idx].cf = regs.flags() & CPU_FLAG_CARRY != 0;
                         results[idx].of = regs.flags() & CPU_FLAG_OVERFLOW != 0;
-                        results[idx].sf = regs.flags() & CPU_FLAG_SIGN != 0;
-                        results[idx].zf = regs.flags() & CPU_FLAG_ZERO != 0;
-                        results[idx].pf = regs.flags() & CPU_FLAG_PARITY != 0;
                         //RemoteCpu::print_regs(&regs);
                     }
                     Err(_) => {
@@ -105,27 +136,35 @@ fn test_aaa() {
     }
 
     for i in 0..256 {
+        let (d_al, d_cf, d_af) = daa((i & 0xFF) as u8, false, cf);
         println!(
-            "{:04X} (af==0): ax: {:04X} flags: {:04X} of: {} sf: {} zf: {} pf: {}",
+            "{:04X} (af==0): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
             i & 0xFF,
             results[i].ax,
             results[i].flags,
+            results[i].af,
+            results[i].cf,
             results[i].of,
-            results[i].sf,
-            results[i].zf,
-            results[i].pf
+            d_al as u16,
+            d_af,
+            d_cf,
+            false
         );
     }
     for i in 256..512 {
+        let (d_al, d_cf, d_af) = daa((i & 0xFF) as u8, true, cf);
         println!(
-            "{:04X} (af==1): ax: {:04X} flags: {:04X} of: {} sf: {} zf: {} pf: {}",
+            "{:04X} (af==1): ax: {:04X} flags: {:04X} af: {} cf: {} of: {}  | daa(): ax: {:04x} af: {} cf:{} of: {}",
             i & 0xFF,
             results[i].ax,
             results[i].flags,
+            results[i].af,
+            results[i].cf,
             results[i].of,
-            results[i].sf,
-            results[i].zf,
-            results[i].pf
+            d_al as u16,
+            d_af,
+            d_cf,
+            false
         );
     }
 }

@@ -35,11 +35,15 @@
     %endmacro
 %elifdef CPU_80186
     %macro END 0
-        hlt             ; HALT instruction for 8086
+        hlt             ; HALT instruction for 80186
     %endmacro
 %elifdef CPU_286
     %macro END 0
-        db 0xF1, 0x0F, 0x05   ; STOREALL for 80286
+        hlt             ; HALT instruction for 286
+    %endmacro
+%elifdef CPU_386
+    %macro END 0
+        hlt             ; HALT instruction for 386
     %endmacro
 %else
     %error "END macro: define one of CPU_8086, CPU_80186, or CPU_286 before including"
@@ -70,5 +74,41 @@ endstruc
       at desc_cache286.addr_23_16, db   (%1 >> 16) & 0xFF
       at desc_cache286.access,     db   %3
       at desc_cache286.limit,      dw   %2 & 0xFFFF
+    iend
+%endmacro
+
+; -----------------------------------------------------------------------------
+;  4-byte 386 LOADALL segment structure
+; -----------------------------------------------------------------------------
+struc segment386
+    .seg resw 1 ; Segment value
+    .pad resw 1 ; Padding to doubleword bytes
+endstruc
+
+%macro SEGMENT386 1
+    istruc segment386
+      at segment386.seg, dw   %1
+      at segment386.pad, dw   0
+    iend
+%endmacro
+
+; -----------------------------------------------------------------------------
+;  6-byte 386 descriptor cache entry
+; -----------------------------------------------------------------------------
+struc desc_cache386
+    .access     resd 1 ; 0|P|DPL|S|Type|A|0|D|0
+    .address    resd 1 ; 32-bit address
+    .limit      resd 1 ; 32-bit limit
+endstruc
+
+;-------------------------------------------------------------------------------
+; DESC_CACHE386 access_dword, address, limit
+; Creates a 386 descriptor cache entry for use with LOADALL.
+;-------------------------------------------------------------------------------
+%macro DESC_CACHE386 3
+    istruc desc_cache386
+      at desc_cache386.access,    dd    %1
+      at desc_cache386.address,   dd    %2
+      at desc_cache386.limit,     dd    %3
     iend
 %endmacro

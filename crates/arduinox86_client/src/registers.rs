@@ -33,10 +33,10 @@ use moo::types::MooRegisters1;
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
-#[derive(Debug)]
 pub enum RemoteCpuRegisters {
     V1(RemoteCpuRegistersV1),
     V2(RemoteCpuRegistersV2),
+    V3(RemoteCpuRegistersV3),
 }
 
 impl TryFrom<&[u8]> for RemoteCpuRegisters {
@@ -48,6 +48,9 @@ impl TryFrom<&[u8]> for RemoteCpuRegisters {
         }
         else if buf.len() == 102 {
             Ok(RemoteCpuRegisters::V2(RemoteCpuRegistersV2::try_from(buf)?))
+        }
+        else if buf.len() == 204 {
+            Ok(RemoteCpuRegisters::V3(RemoteCpuRegistersV3::try_from(buf)?))
         }
         else {
             log::error!("Invalid buffer length for RemoteCpuRegisters: {}", buf.len());
@@ -67,6 +70,7 @@ impl RemoteCpuRegisters {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.cs = cs,
             RemoteCpuRegisters::V2(regs) => regs.cs = cs,
+            RemoteCpuRegisters::V3(regs) => regs.cs = cs,
         }
     }
 
@@ -74,6 +78,7 @@ impl RemoteCpuRegisters {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.ip = ip,
             RemoteCpuRegisters::V2(regs) => regs.ip = ip,
+            RemoteCpuRegisters::V3(_) => {}
         }
     }
 
@@ -81,6 +86,7 @@ impl RemoteCpuRegisters {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.rewind_ip(adjust),
             RemoteCpuRegisters::V2(regs) => regs.rewind_ip(adjust),
+            RemoteCpuRegisters::V3(_) => {}
         }
     }
 
@@ -88,6 +94,7 @@ impl RemoteCpuRegisters {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.ax,
             RemoteCpuRegisters::V2(regs) => regs.ax,
+            RemoteCpuRegisters::V3(regs) => 0,
         }
     }
 
@@ -95,6 +102,7 @@ impl RemoteCpuRegisters {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.flags,
             RemoteCpuRegisters::V2(regs) => regs.flags,
+            RemoteCpuRegisters::V3(_) => 0,
         }
     }
 }
@@ -396,6 +404,20 @@ fn read_descriptor(slice: &[u8], index: usize) -> SegmentDescriptorV1 {
     SegmentDescriptorV1::from_bytes(bytes)
 }
 
+fn read_descriptor_v2(slice: &[u8], index: usize) -> SegmentDescriptorV2 {
+    // Each descriptor is 12 bytes
+    let start = index * 12;
+    let end = start + 12;
+    let bytes: [u8; 12] = slice[start..end]
+        .try_into()
+        .expect("desc_slice must be at least 10*12=120 bytes");
+    SegmentDescriptorV2 {
+        access:  u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        address: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        limit:   u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
+    }
+}
+
 impl Default for RemoteCpuRegistersV2 {
     fn default() -> Self {
         RemoteCpuRegistersV2 {
@@ -436,6 +458,129 @@ impl Default for RemoteCpuRegistersV2 {
             tss_desc: SegmentDescriptorV1::default(),
         }
     }
+}
+
+#[derive(Clone, Default)]
+pub struct SegmentDescriptorV2 {
+    pub access:  u32,
+    pub address: u32,
+    pub limit:   u32,
+}
+
+/// [RemoteCpuRegistersV2] is the full set of registers for the Intel 80286.
+/// This structure is loaded via the LOADALL instruction, 0F 05.
+#[derive(Default)]
+pub struct RemoteCpuRegistersV3 {
+    pub cr0: u32,    // +00
+    pub eflags: u32, // +04
+    pub eip: u32,    // +08
+    pub edi: u32,    // +0C
+    pub esi: u32,    // +10
+    pub ebp: u32,    // +14
+    pub esp: u32,    // +18
+    pub ebx: u32,    // +1C
+    pub edx: u32,    // +20
+    pub ecx: u32,    // +24
+    pub eax: u32,    // +28
+    pub dr6: u32,    // +2C
+    pub dr7: u32,    // +30
+    pub tr: u16,     // +34
+    pub tr_pad: u16,
+    pub ldt: u16, // +38
+    pub ldt_pad: u16,
+    pub gs: u16, // +3C
+    pub gs_pad: u16,
+    pub fs: u16, // +40
+    pub fs_pad: u16,
+    pub ds: u16, // +44
+    pub ds_pad: u16,
+    pub ss: u16, // +48
+    pub ss_pad: u16,
+    pub cs: u16, // +4C
+    pub cs_pad: u16,
+    pub es: u16, // +50
+    pub es_pad: u16,
+    pub tss_desc: SegmentDescriptorV2,
+    pub idt_desc: SegmentDescriptorV2,
+    pub gdt_desc: SegmentDescriptorV2,
+    pub ldt_desc: SegmentDescriptorV2,
+    pub gs_desc: SegmentDescriptorV2,
+    pub fs_desc: SegmentDescriptorV2,
+    pub es_desc: SegmentDescriptorV2,
+    pub cs_desc: SegmentDescriptorV2,
+    pub ss_desc: SegmentDescriptorV2,
+    pub ds_desc: SegmentDescriptorV2,
+}
+
+impl TryFrom<&[u8]> for RemoteCpuRegistersV3 {
+    type Error = &'static str;
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
+        parse_v3(&buf)
+    }
+}
+
+impl From<[u8; 204]> for RemoteCpuRegistersV3 {
+    fn from(buf: [u8; 204]) -> RemoteCpuRegistersV3 {
+        parse_v3(&buf).unwrap()
+    }
+}
+
+#[rustfmt::skip]
+fn parse_v3(buf: &[u8]) -> Result<RemoteCpuRegistersV3, &'static str> {
+    if buf.len() < 204 {
+        return Err("Buffer too small for RemoteCpuRegistersV3");
+    }
+
+    let mut new_regs = RemoteCpuRegistersV3::default();
+    let mut cursor = std::io::Cursor::new(buf);
+
+    new_regs.cr0 = cursor.read_le().unwrap();       // +00
+    new_regs.eflags = cursor.read_le().unwrap();    // +04
+    new_regs.eip = cursor.read_le().unwrap();       // +08
+    new_regs.edi = cursor.read_le().unwrap();       // +0C
+    new_regs.esi = cursor.read_le().unwrap();       // +10
+    new_regs.ebp = cursor.read_le().unwrap();       // +14
+    new_regs.esp = cursor.read_le().unwrap();       // +18
+    new_regs.ebx = cursor.read_le().unwrap();       // +1C
+    new_regs.edx = cursor.read_le().unwrap();       // +20
+    new_regs.ecx = cursor.read_le().unwrap();       // +24
+    new_regs.eax = cursor.read_le().unwrap();       // +28
+
+    new_regs.dr6 = cursor.read_le().unwrap();       // +2C
+    new_regs.dr7 = cursor.read_le().unwrap();       // +30
+
+    new_regs.tr         = cursor.read_le().unwrap();
+    new_regs.tr_pad     = cursor.read_le().unwrap();
+    new_regs.ldt        = cursor.read_le().unwrap();
+    new_regs.ldt_pad    = cursor.read_le().unwrap();
+    new_regs.gs         = cursor.read_le().unwrap();
+    new_regs.gs_pad     = cursor.read_le().unwrap();
+    new_regs.fs         = cursor.read_le().unwrap();
+    new_regs.fs_pad     = cursor.read_le().unwrap();
+    new_regs.ds         = cursor.read_le().unwrap();
+    new_regs.ds_pad     = cursor.read_le().unwrap();
+    new_regs.ss         = cursor.read_le().unwrap();
+    new_regs.ss_pad     = cursor.read_le().unwrap();
+    new_regs.cs         = cursor.read_le().unwrap();
+    new_regs.cs_pad     = cursor.read_le().unwrap();
+    new_regs.es         = cursor.read_le().unwrap();
+    new_regs.es_pad     = cursor.read_le().unwrap();
+
+    let idx = cursor.position();
+    let desc_slice = &cursor.into_inner()[idx as usize..idx as usize + 120];
+
+    new_regs.tss_desc = read_descriptor_v2(desc_slice, 0);
+    new_regs.idt_desc = read_descriptor_v2(desc_slice, 1);
+    new_regs.gdt_desc = read_descriptor_v2(desc_slice, 2);
+    new_regs.ldt_desc = read_descriptor_v2(desc_slice, 3);
+    new_regs.gs_desc = read_descriptor_v2(desc_slice, 4);
+    new_regs.fs_desc = read_descriptor_v2(desc_slice, 5);
+    new_regs.es_desc = read_descriptor_v2(desc_slice, 6);
+    new_regs.cs_desc = read_descriptor_v2(desc_slice, 7);
+    new_regs.ss_desc = read_descriptor_v2(desc_slice, 8);
+    new_regs.ds_desc = read_descriptor_v2(desc_slice, 9);
+
+    Ok(new_regs)
 }
 
 #[derive(Copy, Clone, Default)]

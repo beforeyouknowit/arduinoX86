@@ -34,8 +34,22 @@ void cycle();
 #include <hats/Pins.h>
 #include <DebugFilter.h>
 
+#define CPU_386
+
+#define USE_SETUP_PROGRAM 1
+#define SETUP_PROGRAM SETUP_PROGRAM_386EX
+#define SETUP_PROGRAM_PATCH_OFFSET 0
+
+#define STORE_IO_BASE 0x0080
+
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
+
+
+#define ADDRESS_SPACE_MASK 0x3FFFFF // 4MB address space for 80286
+#define WRITE_CYCLE T2
+#define STORE_TIMEOUT 3000
+#define LOAD_TIMEOUT 3000
 
 // ------------------------- CPU Control pins ---------------------------------
 #define CLK_PIN 4
@@ -46,31 +60,36 @@ void cycle();
 #define BHE_PIN 13
 #define HOLD_PIN 76 // A0
 #define READY_PIN 77 // A1
-#define NMI_PIN 78 // A2
-#define INTR_PIN 79 // A3
+#define NMI_PIN 84 // A2
+#define BS8_PIN 79 // A3
+#define RW_PIN 82 // A6
+#define INTR_PIN 83 // A7
 #define READ_BHE_PIN READ_PIN_D13
 #define READ_READY_PIN READ_PIN_D77
 #define READ_RESET_PIN READ_PIN_D05
-#define READ_NMI_PIN READ_PIN_D78
+#define READ_NMI_PIN READ_PIN_D84
 #define READ_INTR_PIN READ_PIN_D79
+#define READ_RW_PIN READ_PIN_D82
+#define READ_DC_PIN READ_PIN_D08
 
-#define READ_TEST_PIN READ_PIN_A7
-#define WRITE_TEST_PIN(x) WRITE_PIN_A7(x) 
-#define READ_LOCK_PIN (0) // Currently not connected
+#define READ_TEST_PIN READ_PIN_D06
+#define WRITE_TEST_PIN(x) WRITE_PIN_D06(x) 
+#define WRITE_BS8_PIN(x) WRITE_PIN_A3(x)
+#define READ_LOCK_PIN READ_PIN_D07 
 
-#define READ_S0_PIN READ_PIN_D11
-#define READ_S1_PIN READ_PIN_D12
-#define READ_S2_PIN READ_PIN_D10
+#define READ_S0_PIN READ_MRDC_PIN
+#define READ_S1_PIN READ_MWTC_PIN
+#define READ_M_IO_PIN READ_PIN_D10
 
 // ------------------------- 82288 status pins --------------------------------
-#define READ_ALE_PIN READ_PIN_D08
+#define READ_ALE_PIN (!READ_PIN_D09)
 
-#define READ_MRDC_PIN READ_PIN_D07
+#define READ_MRDC_PIN (!(!READ_PIN_A5 && READ_M_IO_PIN))
 #define READ_AMWC_PIN (1)
-#define READ_MWTC_PIN READ_PIN_D08
-#define READ_IORC_PIN (1)
+#define READ_MWTC_PIN (!(!READ_PIN_A4 && READ_M_IO_PIN))
+#define READ_IORC_PIN (!(!READ_PIN_A5 && !READ_M_IO_PIN))
 #define READ_AIOWC_PIN (1)
-#define READ_IOWC_PIN (1)
+#define READ_IOWC_PIN (!(!READ_PIN_A4 && !READ_M_IO_PIN))
 
 // -------------------------- CPU Bus pins ------------------------------------
 #define SET_DBUS_00 do { SET_PIN_D22; } while (0)
@@ -160,17 +179,21 @@ void cycle();
 #define READ_ABUS_19 READ_PIN_D16
 #define READ_ABUS_20 READ_PIN_D15
 #define READ_ABUS_21 READ_PIN_D14
+#define READ_ABUS_22 READ_PIN_D00
+#define READ_ABUS_23 READ_PIN_D01
 
-  // How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
-  #define RESET_HOLD_CYCLE_COUNT 500
-  // How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
-  #define RESET_CYCLE_COUNT 500
-  // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 2000000
-  // What logic level RESET is when asserted
-  #define RESET_ASSERT 1
-  // What logic level RESET is when deasserted
-  #define RESET_DEASSERT 0
+#define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
+
+// How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
+#define RESET_HOLD_CYCLE_COUNT 50
+// How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
+#define RESET_CYCLE_COUNT 500
+// If we didn't see an ALE after this many cycles, give up
+#define RESET_CYCLE_TIMEOUT 1000
+// What logic level RESET is when asserted
+#define RESET_ASSERT 1
+// What logic level RESET is when deasserted
+#define RESET_DEASSERT 0
 
 class Hat80386 : public HatBase<Hat80386> {
 
@@ -180,23 +203,27 @@ private:
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Bottom half of double-row header
     21, 20, 17, 16, 15, 14
   }};
-  const int ADDRESS_LINES = 22;
+  static constexpr int ADDRESS_LINES = 22;
+  static constexpr int ADDRESS_DIGITS = 6; // 22 bits = 6 digits in hex
 
-  static constexpr std::array<int,7> OUTPUT_PINS = {
+  static constexpr std::array<int,9> OUTPUT_PINS = {
     4,  // CLK
     5,  // RESET
+    6,  // BUSY
     76, // HOLD (A0)
     77, // READY (A1)
     78, // NMI (A2)
-    79, // INTR (A3)
-    83  // TEST/BUSY (A7)
+    79, // BS8 (A3)
+    83, // TEST/BUSY (A7)
+    84  // NMI
   };
 
   // All input pins, used to set pin direction on setup
-  static constexpr std::array<int,28> INPUT_PINS = {{
-    13, 12, 11, 10, 9, 8, // (6) Various signal pins
+  static constexpr std::array<int,37> INPUT_PINS = {{
+    13, 12, 11, 10, 9, 8, 7, 6, // (6) Various signal pins
+    80, 81, 82, // (3) R, W, RW
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Address pins - Bottom half of double-row header
-    21, 20, 17, 16, 15, 14, // (6) Address pins - Top row of GPIO pins
+    21, 20, 17, 16, 15, 14, 3, 2, 1, 0, // (6) Address pins - Top row of GPIO pins
   }};
   
   bool _emulate_bus_controller = false;
@@ -220,11 +247,120 @@ public:
       pinMode(pin, INPUT);
     }
 
+    pinMode(RW_PIN, INPUT_PULLUP);
+
     digitalWrite(INTR_PIN, LOW);  // Must set these to a known value or risk spurious interrupts!
     digitalWrite(NMI_PIN, LOW);   // Must set these to a known value or risk spurious interrupts!
     digitalWrite(HOLD_PIN, LOW);  // Hold pin is active high, make sure it is low by default.
+    digitalWrite(BS8_PIN, HIGH); // BS8 pin is active low, so we set it high by default.
   }
 
+  static int getAddressBusWidth() {
+    return ADDRESS_LINES;
+  }
+
+  static int getAddressDigits() {
+    return ADDRESS_DIGITS;
+  }
+
+  /// @brief Return true if the current hat has a multiplexed bus.
+  static bool hasMultiplexedBusImpl() {
+    return false;
+  }
+
+  static BusStatus decodeBusStatus(uint8_t status_byte) {
+    switch (status_byte & 0x07) {
+        case 0: return BusStatus::INTA;
+        case 1: return BusStatus::PASV;
+        case 2: return BusStatus::IOR;
+        case 3: return BusStatus::IOW;
+        case 4: return BusStatus::CODE;
+        case 5: return BusStatus::HALT;
+        case 6: return BusStatus::MEMR;
+        case 7: return BusStatus::MEMW;
+      default: return BusStatus::PASV;
+    }
+  }
+
+    static bool isTransferDoneImpl(BusStatus latched_status) {
+    return true;
+    // switch (latched_status) {
+    //   case IOR:
+    //     // IORC is active-low, so we are returning true if it is off
+    //     return READ_IORC_PIN;
+    //   case IOW:
+    //     // IOWC is active-low, so we are returning true if it is off
+    //     return READ_IOWC_PIN;
+    //   case CODE:
+    //     // FALLTHRU
+    //   case MEMR:
+    //     // MRDC is active-low, so we are returning true if it is off
+    //     return READ_MRDC_PIN;
+    //   case MEMW:
+    //     // MWTC is active-low, so we are returning true if it is off
+    //     return READ_MWTC_PIN;
+    //   default:
+    //     // Rely on external READY pin
+    //     return READ_READY_PIN;
+    //     break;
+    // }
+  }
+
+  static TCycle getNextCycleImpl(TCycle current_cycle, BusStatus current_status, BusStatus latched_status) {
+    // Return the next cycle for the CPU
+     switch (current_cycle) {
+      case TI:
+        return TI;
+        break;
+      
+      case T1:
+        // Begin a bus cycle only if signalled, otherwise wait in T1
+        if (current_status != PASV) {
+          return T2;
+        }
+        break;
+
+      case T2:
+        if (isTransferDoneImpl(latched_status)) {
+          return TI;
+        } else {
+  #if DEBUG_TSTATE
+          debugPrintlnColor(ansi::yellow, "Setting T-cycle to Tw");
+  #endif
+          return TW;
+        }
+        break;
+
+      case TW:
+        // Transition to TI if read/write signals are complete
+        if (isTransferDoneImpl(latched_status)) {
+          return TI;
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    return TI; // Default to TI if no other condition matches
+  }
+
+  static const char * getTCycleString(TCycle cycle) {
+    switch (cycle) {
+      case T1: return "Ts";
+      case T2: return "Tc";
+      case TW: return "Tw";
+      case TI: return "Ti";
+      default: return "T?"; // Unknown cycle
+    }
+  }
+
+  static bool hasSegmentStatus() {
+    return false; // 386 does not have segment status lines.
+  }
+
+  /// @brief Tick the CPU one clock cycle.
+  /// For 386, this is two external clock cycles per CPU clock cycle.
   static void tickCpuImpl() {
     WRITE_PIN_D04(1);
     if (ClockHighDelay > 0) {
@@ -244,8 +380,10 @@ public:
     }
   }
 
-  uint16_t readDataBus(ActiveBusWidth width) {
-    setBusDirection(BusDirection::Input, width);
+  uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
+    if(!peek) {
+      setBusDirection(BusDirection::Input, width);
+    }
 
     uint16_t data = 0;
 
@@ -359,8 +497,8 @@ public:
     if (READ_ABUS_19) address |= 0x00080000;
     if (READ_ABUS_20) address |= 0x00100000;
     if (READ_ABUS_21) address |= 0x00200000;
-    //if (READ_ABUS_22) address |= 0x00400000;
-    //if (READ_ABUS_23) address |= 0x00800000;
+    if (READ_ABUS_22) address |= 0x00400000;
+    if (READ_ABUS_23) address |= 0x00800000;
     return address;
   }
 
@@ -377,7 +515,7 @@ public:
         WRITE_PIN_A3(value);
         break;
       case OutputPin::Nmi:
-        WRITE_PIN_A2(value);
+        WRITE_PIN_D84(value);
         break;
       default:
         // Handle other pins if necessary
@@ -386,12 +524,12 @@ public:
   }
 
   template<typename Board>
-  static CpuResetResult resetCpuImpl(Board& board) {
+  CpuResetResult resetCpuImpl(Board& board) {
 
     CpuResetResult result = {};
     result.success = false;
     result.queueStatus = false;
-    result.busWidth = BusWidth::Sixteen; // 286 is always 16-bit bus width
+    result.busWidth = BusWidth::Sixteen; // We're using a 386EX, so 16-bit bus width
 
     digitalWrite(INTR_PIN, LOW); // INTR must be low or CPU will immediately interrupt.
     digitalWrite(NMI_PIN, LOW); // NMI must be low or CPU will immediately interrupt.
@@ -400,9 +538,13 @@ public:
     bool ale_went_off = false;
     //bool bhe_went_off = false;
 
-    WRITE_TEST_PIN(1); // Set TEST pin high to allow CPU to reset without entering test mode.
-    delayMicroseconds(10); // Make sure that TEST pin is settled high before asserting RESET.
-    WRITE_PIN_D05(0); // Assert RESET high for hold count.
+    // Clock the CPU a few times before asserting RESET.
+    for (int i = 0; i < PRE_RESET_CYCLE_COUNT; i++) {
+      //tickCpu();
+      cycle();
+    }
+
+    WRITE_PIN_D05(1); // Assert RESET high for hold count.
 
     for (int i = 0; i < RESET_HOLD_CYCLE_COUNT; i++) {
       if (READ_ALE_PIN == false) {
@@ -412,14 +554,18 @@ public:
       cycle();
     }
 
-    // CPU didn't reset for some reason.
-    if (ale_went_off == false) {
-      //set_error("CPU failed to reset: ALE not off!");   
-      return result;
-    }
+    // // CPU didn't reset for some reason.
+    // if (ale_went_off == false) {
+    //   //set_error("CPU failed to reset: ALE not off!");   
+    //   return result;
+    // }
+
+
+    WRITE_TEST_PIN(1); // Set TEST pin high to allow CPU to reset without entering test mode.
+    delayMicroseconds(10); // Make sure that TEST pin is settled high before de-asserting RESET.
 
     // Deassert RESET pin to allow CPU to start.
-    WRITE_PIN_D05(1);
+    WRITE_PIN_D05(0);
 
     // Clock CPU while waiting for ALE
     int ale_cycles = 0;
@@ -448,6 +594,7 @@ public:
         board.debugPrintln(DebugType::RESET, "## Reset CPU!                            ##");
         board.debugPrintln(DebugType::RESET, "###########################################");
         result.success = true;
+        break;
       }
     }
 
@@ -470,6 +617,15 @@ public:
   static bool readALEPinImpl() {
     return READ_ALE_PIN;
   }
+
+  static bool readLockPinImpl() {
+    return READ_LOCK_PIN;
+  }
+    static bool readReadyPinImpl() {
+    // Read the READY pin
+    return READ_READY_PIN;
+  }
+
   static bool readMRDCPinImpl() {
     return READ_MRDC_PIN;
   }
@@ -499,17 +655,9 @@ public:
   static uint8_t readCpuStatusLinesImpl() {
     // Read the CPU status lines
     uint8_t status = 0;
-    if (READ_S0_PIN) { status |= 0x01; }; // S0
-    if (READ_S1_PIN) { status |= 0x02; }; // S1
-    if (READ_S2_PIN) { status |= 0x04; }; // S2
-    
-    //if (READ_PIN_D38) { status |= 0x08; }; // S3
-    //if (READ_PIN_D39) { status |= 0x10; }; // S4
-    //if (READ_PIN_D40) { status |= 0x20; }; // S5
-    
-    // Queue status lines not supported on 80286
-    //if (READ_PIN_D09) { status |= 0x40; }; // QS0
-    //if (READ_PIN_D08) { status |= 0x80; }; // QS1
+    if (READ_RW_PIN) { status |= 0x01; };
+    if (READ_DC_PIN) { status |= 0x02; }; 
+    if (READ_M_IO_PIN) { status |= 0x04; };
 
     return status;
   }

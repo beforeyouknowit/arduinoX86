@@ -32,6 +32,8 @@
 #define WRITE_CYCLE T3
 #define ADDRESS_SPACE_MASK 0xFFFFF
 
+#define STORE_IO_BASE 0x0000
+
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
 

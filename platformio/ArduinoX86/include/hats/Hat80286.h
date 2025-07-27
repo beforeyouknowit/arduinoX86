@@ -37,6 +37,11 @@ void cycle();
 #include <i82288Emulator.h>
 
 #define CPU_286
+#define USE_SETUP_PROGRAM 0
+#define SETUP_PROGRAM SETUP_PROGRAM_86
+#define SETUP_PROGRAM_PATCH_OFFSET 0
+
+#define STORE_IO_BASE 0x0000
 
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
@@ -44,6 +49,8 @@ void cycle();
 
 #define ADDRESS_SPACE_MASK 0x3FFFFF // 4MB address space for 80286
 #define WRITE_CYCLE T2
+#define STORE_TIMEOUT 300
+#define LOAD_TIMEOUT 1000
 
 // ------------------------- CPU Control pins ---------------------------------
 #define CLK_PIN 4
@@ -293,7 +300,7 @@ public:
 
   static BusStatus decodeBusStatus(uint8_t status_byte) {
     switch (status_byte & 0x0F) {
-      case 0b0000: return BusStatus::IRQA;
+      case 0b0000: return BusStatus::INTA;
       case 0b0001: return BusStatus::PASV; // Reserved
       case 0b0010: return BusStatus::PASV; // Reserved
       case 0b0011: return BusStatus::PASV; // None

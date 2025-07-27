@@ -1,6 +1,6 @@
 [package]
-name = "ard808x_cpu"
-description = "A library crate that leverages the Arduino808x serial protocol to control an Intel 8088, 8086, NEC V20, or V30 CPU."
+name = "arduinox86_cpu"
+description = "A library crate that leverages the ArduinoX86 serial protocol to control various Intel CPUs."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "ard808x_cpu"
+name = "arduinox86_cpu"
 path = "src/lib.rs"
 crate-type = ["cdylib", "lib"]
 

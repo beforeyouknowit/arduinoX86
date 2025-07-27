@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use ard808x_cpu::{arduinox86_client, *};
 use arduinox86_client::*;
+use arduinox86_cpu::{arduinox86_client, *};
 use clap::Parser;
 
 const SCREEN_INIT_TIME: u64 = 3; // Seconds to wait for the screen to initialize.
@@ -89,7 +89,7 @@ fn main() {
     }
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(args.com_port.clone(), Some(2000)) {
+    let mut cpu_client = match CpuClient::init(args.com_port.clone(), Some(5000)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client

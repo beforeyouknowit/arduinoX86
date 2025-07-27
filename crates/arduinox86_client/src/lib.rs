@@ -10,6 +10,8 @@ use std::{
 };
 
 use log;
+
+#[cfg(feature = "use_moo")]
 use moo::prelude::MooIvtOrder;
 #[cfg(feature = "use_moo")]
 use moo::types::MooCpuType;
@@ -117,6 +119,7 @@ pub enum ServerCpuType {
     Intel80188(bool),
     Intel80186(bool),
     Intel80286,
+    Intel80386,
 }
 
 #[cfg(feature = "use_moo")]
@@ -124,6 +127,7 @@ impl From<ServerCpuType> for MooIvtOrder {
     fn from(cpu_type: ServerCpuType) -> Self {
         match cpu_type {
             ServerCpuType::Intel80286 => MooIvtOrder::PushFirst,
+            ServerCpuType::Intel80386 => MooIvtOrder::PushFirst,
             _ => MooIvtOrder::ReadFirst,
         }
     }
@@ -159,7 +163,8 @@ impl ServerCpuType {
             | ServerCpuType::Intel8086
             | ServerCpuType::Intel80188(_)
             | ServerCpuType::Intel80186(_)
-            | ServerCpuType::Intel80286 => true,
+            | ServerCpuType::Intel80286
+            | ServerCpuType::Intel80386 => true,
             _ => false,
         }
     }
@@ -179,7 +184,7 @@ impl ServerCpuType {
 
     pub fn tstate_to_string(&self, state: TState) -> String {
         match self {
-            ServerCpuType::Intel80286 => match state {
+            ServerCpuType::Intel80286 | ServerCpuType::Intel80386 => match state {
                 TState::Ti => "Ti".to_string(),
                 TState::T1 => "Ts".to_string(),
                 TState::T2 => "Tc".to_string(),
@@ -200,22 +205,34 @@ impl ServerCpuType {
     // Return true if the specified TState should trigger a read or write.
     // For 80286, we have very tight timings so we must write the bus in advance of T2/Tc.
     pub fn is_write_cycle(&self, state: TState) -> bool {
+        use ServerCpuType::*;
         match self {
-            ServerCpuType::Intel80286 => matches!(state, TState::T1),
+            Intel80286 | Intel80386 => matches!(state, TState::T1),
             _ => matches!(state, TState::T2),
         }
     }
 
     pub fn bus_chr_width(&self) -> usize {
+        use ServerCpuType::*;
         match self {
-            ServerCpuType::Intel80286 => 6,
+            Intel80286 => 6,
+            Intel80386 => 6,
             _ => 5,
         }
     }
 
-    pub fn decode_status(&self, status_byte: u8) -> BusState {
+    pub fn has_segment_status(&self) -> bool {
+        use ServerCpuType::*;
         match self {
-            ServerCpuType::Intel80286 => match status_byte & 0x0F {
+            Intel8088 | Intel80188(_) | Intel80186(_) | Intel8086 | NecV30 | NecV20 => true,
+            _ => false,
+        }
+    }
+
+    pub fn decode_status(&self, status_byte: u8) -> BusState {
+        use ServerCpuType::*;
+        match self {
+            Intel80286 => match status_byte & 0x0F {
                 0b0000 => BusState::INTA,
                 0b0001 => BusState::PASV, // Reserved
                 0b0010 => BusState::PASV, // Reserved
@@ -233,6 +250,16 @@ impl ServerCpuType {
                 0b1110 => BusState::PASV, // Reserved
                 0b1111 => BusState::PASV, // None
                 _ => BusState::PASV,      // Default to passive state
+            },
+            Intel80386 => match status_byte & 0x07 {
+                0 => BusState::INTA, // IRQ Acknowledge
+                1 => BusState::PASV, // Passive
+                2 => BusState::IOR,  // IO Read
+                3 => BusState::IOW,  // IO Write
+                4 => BusState::CODE, // Code fetch
+                5 => BusState::HALT, // Halt
+                6 => BusState::MEMR, // Memory Read
+                _ => BusState::MEMW, // Memory Write
             },
             _ => {
                 match status_byte & 0x07 {
@@ -273,6 +300,7 @@ impl TryFrom<u8> for ServerCpuType {
             0x05 => Ok(ServerCpuType::Intel80188((value & 0x80) != 0)),
             0x06 => Ok(ServerCpuType::Intel80186((value & 0x80) != 0)),
             0x07 => Ok(ServerCpuType::Intel80286),
+            0x08 => Ok(ServerCpuType::Intel80386),
             _ => Err(CpuClientError::TypeConversionError),
         }
     }
@@ -359,12 +387,14 @@ pub enum RegisterSetType {
     #[default]
     Intel8088,
     Intel286,
+    Intel386,
 }
 
 impl From<ServerCpuType> for RegisterSetType {
     fn from(cpu_type: ServerCpuType) -> Self {
         match cpu_type {
             ServerCpuType::Intel80286 => RegisterSetType::Intel286,
+            ServerCpuType::Intel80386 => RegisterSetType::Intel386,
             _ => RegisterSetType::Intel8088,
         }
     }
@@ -375,6 +405,7 @@ impl From<u8> for RegisterSetType {
         match value {
             0 => RegisterSetType::Intel8088,
             1 => RegisterSetType::Intel286,
+            2 => RegisterSetType::Intel386,
             _ => RegisterSetType::Intel8088, // Default to Intel8088 if unknown
         }
     }
@@ -385,6 +416,7 @@ impl From<RegisterSetType> for u8 {
         match value {
             RegisterSetType::Intel8088 => 0,
             RegisterSetType::Intel286 => 1,
+            RegisterSetType::Intel386 => 2,
         }
     }
 }
@@ -813,6 +845,14 @@ impl CpuClient {
                 if reg_data.len() < 102 {
                     return Err(CpuClientError::BadParameter(
                         "Expected at least 102 bytes for Intel286 register set".to_string(),
+                    ));
+                }
+            }
+            2 => {
+                // Type 3 register set (Intel386)
+                if reg_data.len() < 204 {
+                    return Err(CpuClientError::BadParameter(
+                        "Expected at least 204 bytes for Intel286 register set".to_string(),
                     ));
                 }
             }

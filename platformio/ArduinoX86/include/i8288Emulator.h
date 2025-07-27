@@ -105,7 +105,7 @@ class BusController {
         case T2:
           t_cycle_ = T3;
             switch(status_latch_) {
-              case IRQA:
+              case INTA:
                 break;
               case IOW:
                 iowc = true;

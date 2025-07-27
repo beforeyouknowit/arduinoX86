@@ -3,10 +3,11 @@
 ;
 ; Registers for 80286 CPUs.
 ; For 8088, 8086, V20, V30 or 80186 CPUs, use program_regs.asm.
+; For 80386 CPUs, use program_regs_386.asm.
 ;
 ; Assembling this file creates a BIN file representing the initial register state.
 ; Assemble with NASM:
-; nasm program_regs.asm -o regs.bin
+; nasm program_regs_286.asm -o regs.bin
 ; -----------------------------------------------------------------------------
 %define CPU_286
 %include "Arduinox86.inc"

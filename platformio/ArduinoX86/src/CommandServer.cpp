@@ -211,16 +211,17 @@ const char* CommandServer<BoardType, HatType>::get_state_string(ServerState stat
       case ServerState::Load: return "Load";
       case ServerState::LoadDone: return "LoadDone";
       case ServerState::EmuEnter: return "EmuEnter";
+      case ServerState::Prefetch: return "Prefetch";
       case ServerState::Execute: return "Execute";
       case ServerState::ExecuteFinalize: return "ExecuteFinalize";
       case ServerState::ExecuteDone: return "ExecuteDone";
       case ServerState::EmuExit: return "EmuExit";
       case ServerState::Store: return "Store";
       case ServerState::StoreDone: return "StoreDone";
-      case ServerState::StoreAll: return "StoreAll";
       case ServerState::Done: return "Done";
+      case ServerState::StoreAll: return "StoreAll";
+      case ServerState::Shutdown: return "Shutdown";
       case ServerState::Error: return "Error";
-      case ServerState::Prefetch: return "Prefetch";
       default: return "Invalid";
   }
 }
@@ -245,6 +246,7 @@ char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
       case ServerState::StoreAll: return 'A';
       case ServerState::Done: return 'D';
       case ServerState::Error: return '!';
+      case ServerState::Shutdown: return 'H';
       default: return '?';
   }
 }
@@ -434,6 +436,8 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       CPU.cpuid_queue_reads = 0;
       break;
     case ServerState::CpuSetup:
+      CPU.program = &SETUP_PROGRAM;
+      CPU.program->reset();
       CPU.v_pc = 0;
       break;
     case ServerState::CpuId:
@@ -456,6 +460,11 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       if (CPU.cpu_type == CpuType::i80286) {
         // Use LOADALL instead of load program on 286.
         CPU.program = &LOAD_PROGRAM_286;
+        CPU.program->reset();
+      }
+      else if (CPU.cpu_type == CpuType::i80386) {
+        // Use LOADALL instead of load program on 386.
+        CPU.program = &LOAD_PROGRAM_386;
         CPU.program->reset();
       }
       else {
@@ -496,8 +505,14 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
         CPU.program = &EMU_EXIT_PROGRAM;
       } 
       else if (CPU.nmi_terminate) {
-        CPU.program = &STORE_PROGRAM_NMI;
-      } 
+        if (CPU.cpu_type == CpuType::i80386) {
+          CPU.program = &STORE_PROGRAM_NMI_386;
+        } 
+        else {
+          // Use STORE_PROGRAM_NMI
+          CPU.program = &STORE_PROGRAM_NMI;
+        } 
+      }
       else {
         CPU.program = &STORE_PROGRAM_INLINE;
       }
@@ -520,7 +535,13 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       break;
     case ServerState::StoreAll:
       CPU.wait_states = 2;
-      CPU.program = &STOREALL_PROGRAM;
+      if (CPU.cpu_type == CpuType::i80386) {
+        // Use STOREALL for 386.
+        CPU.program = &STOREALL_PROGRAM_386;
+      }
+      else {
+        CPU.program = &STOREALL_PROGRAM;
+      }
       CPU.program->reset();
       break;
     case ServerState::StoreDone:
@@ -646,7 +667,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
       patch_load_pgm(&LOAD_PROGRAM, &CPU.load_regs);
       patch_brkem_pgm(&EMU_ENTER_PROGRAM, &CPU.load_regs);
 
-      CPU.load_regs.flags &= CPU_FLAG_DEFAULT_CLEAR;
+      CPU.load_regs.flags &= CPU_FLAG_DEFAULT_CLEAR_8086;
       CPU.load_regs.flags |= CPU_FLAG_DEFAULT_SET_8086;
     break;
 
@@ -660,18 +681,38 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
       }
 
       // Write raw command bytes over register struct.
-      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.loadall_regs);
+      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.loadall_regs_286);
       for (size_t i = 0; i < sizeof(Loadall286); i++) {
         *read_p++ = commandBuffer_[i];
       }
 
-      CPU.loadall_regs.flags &= CPU_FLAG_DEFAULT_CLEAR;
-      CPU.loadall_regs.flags |= CPU_FLAG_DEFAULT_SET_286;
+      CPU.loadall_regs_286.flags &= CPU_FLAG_DEFAULT_CLEAR_286;
+      CPU.loadall_regs_286.flags |= CPU_FLAG_DEFAULT_SET_286;
+    break;
+
+    case 2:
+      Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 80386 (LOADALL)");
+      read_result = readParameterBytes(commandBuffer_, sizeof(commandBuffer_), sizeof(Loadall386));
+      if (!read_result) {
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
+        set_error("Failed to read parameter bytes");
+        return false;
+      }
+
+      // Write raw command bytes over register struct.
+      read_p = reinterpret_cast<volatile uint8_t*>(&CPU.loadall_regs_386);
+      for (size_t i = 0; i < sizeof(Loadall386); i++) {
+        *read_p++ = commandBuffer_[i];
+      }
+
+      CPU.loadall_regs_386.eflags &= CPU_FLAG_DEFAULT_CLEAR_386;
+      CPU.loadall_regs_386.eflags |= CPU_FLAG_DEFAULT_SET_386;
     break;
 
     default:
       set_error("Invalid register type");
       return false;
+      break;
   }
 
   CpuResetResult result = Controller.resetCpu();
@@ -680,7 +721,12 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
     Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
     return false;
   }
+
+#if USE_SETUP_PROGRAM
+  change_state(ServerState::CpuSetup);
+#else
   change_state(ServerState::JumpVector);
+#endif
 
   // Run CPU and wait for load to finish
   int load_timeout = 0;
@@ -942,7 +988,7 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
     cycle();
     store_timeout++;
 
-    if (store_timeout > 500) {
+    if (store_timeout > STORE_TIMEOUT) {
       controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: Timeout! ##");
       set_error("StoreDone timeout.");
       error_beep();
@@ -959,12 +1005,33 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
     convert_inline_registers(&CPU.post_regs);
   }
 
-  INBAND_SERIAL.write((uint8_t)0); // Send 0 to indicate V1 register format.
+  Loadall386 regs368;
 
-  // Dump final register state to Serial port
-  uint8_t *reg_p = (uint8_t *)&CPU.post_regs;
-  for (size_t i = 0; i < sizeof CPU.post_regs; i++) {
-    INBAND_SERIAL.write(reg_p[i]);
+  switch (CPU.cpu_type) {
+    case CpuType::i8088:
+    case CpuType::i80186:
+    case CpuType::i80286:
+      // Send 0 to indicate V1 register format.
+      INBAND_SERIAL.write((uint8_t)0);
+      // Write the registers in the V1 format.
+      INBAND_SERIAL.write((uint8_t *)&CPU.post_regs, sizeof(registers1_t));
+      break;
+
+    case CpuType::i80386:
+      // Send 2 to indicate V3 register format.
+      INBAND_SERIAL.write((uint8_t)2);
+      // Write the registers in the V2 format.
+      regs368 = ArduinoX86::Bus->loadall386_regs();
+      INBAND_SERIAL.write((uint8_t *)&regs368, sizeof(Loadall386));
+      controller_.getBoard().debugPrintf(DebugType::STORE, false, "## STORE: Wrote %d bytes of registers in V3 format.\n\r", sizeof(Loadall386));
+      break;
+
+    default:
+      // Unknown CPU type?
+      change_state(ServerState::Error);
+      controller_.getBoard().debugPrintln(DebugType::ERROR, "## STORE: Unknown CPU type!");
+      set_error("Unknown CPU type: %d", (int)CPU.cpu_type);
+      break;
   }
 
 #if STORE_INDICATOR

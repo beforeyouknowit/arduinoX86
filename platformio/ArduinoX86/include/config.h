@@ -18,8 +18,8 @@
 // Only define one of these!
 //#define HAT_8088_V1
 //#define HAT_80186_3V_V1
-#define HAT_286_5V_V1
-//#define HAT_386_3V_V1
+//#define HAT_286_5V_V1
+#define HAT_386_3V_V1
 
 #if (defined(HAT_8088_V1) + defined(HAT_80186_V1) + defined(HAT_286_5V_V1) + defined(HAT_386_3V_V1)) != 1
   #error "You must define only one hat type!"
@@ -60,15 +60,15 @@
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
 #define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
-#define TRACE_SETUP     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
+#define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
 #define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
-#define TRACE_LOAD      ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
+#define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.
 #define TRACE_EMU_ENTER ((0 | TRACE_ALL) & ~TRACE_NONE)
 #define TRACE_EMU_EXIT  ((0 | TRACE_ALL) & ~TRACE_NONE)
 #define TRACE_EXECUTE   ((1 | TRACE_ALL) & ~TRACE_NONE)
-#define TRACE_STORE     ((0 | TRACE_ALL) & ~TRACE_NONE)
+#define TRACE_STORE     ((1 | TRACE_ALL) & ~TRACE_NONE)
 #define TRACE_FINALIZE  ((1 | TRACE_ALL) & ~TRACE_NONE)
 
 #define DEBUG_ALL 0  // DEBUG_ALL will enable all debugs (DEBUG_NONE overrides)
@@ -76,8 +76,8 @@
 
 #define DEBUG_SERVER    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the server state
 #define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about state changes and time spent in each state
-#define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
-#define DEBUG_SETUP     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
+#define DEBUG_RESET     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
+#define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
 #define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about jump vector program execution
 #define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about CPU identification
 #define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
@@ -89,18 +89,17 @@
 #define DEBUG_EMU       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about 8080 emulation mode state
 #define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
-#define DEBUG_PIN_CMD   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
+#define DEBUG_PIN_CMD   ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
 #define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
 #define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the serial cpu_server protocol (verbose)
-#define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
+#define DEBUG_CMD       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
 #define DEBUG_DUMP      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about dump commands
 
 #define MAX_ERR_LEN 50 // Maximum length of an error string
 
 #define FINALIZE_TIMEOUT 30
 #define FINALIZE_EMU_TIMEOUT 90 // We need more time to exit emulation mode
-#define STORE_TIMEOUT 300
-#define LOAD_TIMEOUT 1000
+
 
 #if CPU_186
   // 186 CPU
@@ -121,9 +120,6 @@
   // Set this to 0 in that case to use alternate logic.
   #define HAVE_QUEUE_STATUS 0
   // 80186 needs setup to enable interrupts. 
-  #define USE_SETUP_PROGRAM 1
-  #define SETUP_PROGRAM SETUP_PROGRAM_186
-  #define SETUP_PROGRAM_PATCH_OFFSET SETUP_PATCH_VECTOR_OFFSET_186
 #else
   // Non-186 CPU
 
@@ -132,7 +128,5 @@
   // Leave this at 1 for non-186 CPUs as they will always have the queue status lines.
   #define HAVE_QUEUE_STATUS 1
   // 8086 needs no setup. Disable entering CpuSetup state.
-  #define USE_SETUP_PROGRAM 0
-  #define SETUP_PROGRAM SETUP_PROGRAM_86
-  #define SETUP_PROGRAM_PATCH_OFFSET 0
+
 #endif
