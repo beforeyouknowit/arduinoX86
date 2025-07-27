@@ -81,79 +81,50 @@ In theory the board could also support an 8086 CPU. Version 1.1 adds a connectio
 which indicates the size of the current bus transfer. The cpu_server sketch and protocol still needs modification to
 support 16 bit data transfers and the longer queue length on the 8086.
 
-Please read all the notes in the next section before ordering/assembling parts. Failure to heed warnings will cause
-damage to your Arduino.
+## Project Structure
 
-# BOM
-
-- A compatible CPU. For best results, use a CMOS CPU such as a Harris 80C88, Oki 80C88, or NEC V20 CPU. Beware of
-  counterfeits on eBay and other online vendors.
-  A legitimate chip will not look shiny and new with perfect printing on it.
-
-- (Optional) An Intel 8288 or OKI 82C88 Bus Controller. If not using an 8288, set the EMULATE_8288 flag in cpu_server.
-
-- A set of Arduino stacking headers (also usable with DUE)
-  https://www.amazon.com/Treedix-Stacking-Headers-Stackable-Compatible/dp/B08G4FGBPQ
-
-- A DIP-40 and (optionally) DIP-20 socket
-    - Optional: You can spring for a ZIF socket such
-      as [https://www.amazon.com/-/en/gp/product/B00B886OZI](https://www.amazon.com/-/en/gp/product/B00B886OZI)
-
-- (2x) 0805 0.047uf bypass capacitors
-  https://www.mouser.com/ProductDetail/80-C0805C473KARAUTO
-
-- (Optional) A 12mm, active buzzer with 7.6mm pin spacing.
-
-    - For DUE: A 3V piezoelectric, low power buzzer <= 6mA
-      https://www.mouser.com/ProductDetail/Mallory-Sonalert/PK-11N40PQ?qs=SXHtpsd1MbZ%252B7jeUyAAOVA%3D%3D
-
-    - For MEGA: Any 3-5V buzzer <= 30mA
-      WARNING: Only connect an electromagnetic buzzer if using an Arduino MEGA. The DUE has much lower GPIO max current
-      supply.
-
-- (2x) 750Ohm resistors (for LEDs)
-  https://www.mouser.com/ProductDetail/667-ERA-6AED751V
-
-- (2x) Any 0805 ~2V LED of your choice with 1.8-1.9mA forward current
-    - https://www.mouser.com/ProductDetail/604-APTD2012LCGCK (Green)
-    - https://www.mouser.com/ProductDetail/604-APT2012LSECKJ4RV (Orange)
-
-- RS232 board for debug output - choose gender based on your desired cabling
-    - https://www.amazon.com/Ultra-Compact-RS232-Converter-1Mbps/dp/B074BMLM11 (male)
-    - https://www.amazon.com/Ultra-Compact-RS232-Converter-Female/dp/B074BTGLJN (female)
-    - WARNING: DO NOT connect 5V to rs232 board on DUE
-
-# Project Structure
-
-## /asm
+### /asm
 
 Assembly language files, intended to be assembled with NASM. To execute code on the Arduino808X, one must supply two
 binary files, one containing the program to be executed, and one containing the register values to load onto the CPU
 before program execution.
 
-## /crates/arduinox86_client
+### /crates/arduinox86_client
 
-A library crate that implements a client for the Arduino808X's serial protocol.
+A library crate that implements a client for the ArduinoX86's serial protocol.
 
-## /crates/arduinox86_cpu
+### /crates/arduinox86_cpu
 
 A library crate built on top of the `arduinox86_client` crate, this provides a `RemoteCpu` struct that models CPU state
 and can execute programs.
 
-## /crates/exec_program
+### /crates/exec_program
 
-A binary implementing an interface for the `arduinox86_cpu` crate that will load a provided register state binary and
+A program implementing an interface for the `arduinox86_cpu` crate that will load a provided register state binary and
 execute the specified program binary.
 
-## /pcb
+### /crates/test_generator
 
-Contains the KiCad project files and Gerber files for the Arduino808X PCB.
+A program that generates CPU tests for emulator authors.
 
-## /sketches/cpu_server
+### /hats
 
-The main Arduino sketch for Arduino808X. Implements a server for a serial protocol enabling remote control of a 16-bit
-Intel CPU on the Arduino DUE.
+Contains the KiCad project files and Gerber files for the various ArduinoX86 HATs. See the README.md in each HAT
+directory for more information and BOMs for building each.
 
-## /sketches/run_program
+### /platformio/ArduinoX86
 
-An older sketch that can execute a program directly on the Arduino MEGA. Supports the 8088 only.
+The main server code that runs on the Arduino Due or GIGA. You must have [platformio](https://platformio.org/) installed
+to build and upload the project to your Arduino.
+
+## Archived Directories
+
+### /sketches/cpu_server
+
+The original cpu_server Arduino IDE sketch. Development has since moved to platformio.
+
+### /sketches/run_program
+
+The original sketch for Arduino MEGA only demonstrating how to control an 8088. It does not contain a serial protocol
+server - code is run directly from an array defined within the sketch.
+

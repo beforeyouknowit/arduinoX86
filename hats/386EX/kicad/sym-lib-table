@@ -1,0 +1,4 @@
+(sym_lib_table
+  (lib (name "80286")(type "KiCad")(uri "${KIPRJMOD}/80286.kicad_sym")(options "")(descr ""))
+  (lib (name "mega")(type "KiCad")(uri "${KIPRJMOD}/arduino.kicad_sym")(options "")(descr ""))
+)
