@@ -2,6 +2,7 @@
 members = [
     "crates/arduinox86_client",
     "crates/arduinox86_cpu",
+    "crates/arduinox86_egui",
     "crates/exec_program",
     "crates/test_generator",
 ]
