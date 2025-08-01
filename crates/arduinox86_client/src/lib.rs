@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_variables)]
 
+mod register_printer;
 mod registers;
 
 use std::{
@@ -20,6 +21,7 @@ use serialport::{ClearBuffer, SerialPort};
 use thiserror::Error;
 
 pub const ARDUINO_BAUD: u32 = 1000000;
+pub use register_printer::*;
 pub use registers::*;
 
 pub struct ServerFlags;
@@ -37,6 +39,7 @@ impl ServerFlags {
     pub const EXECUTE_AUTOMATIC: u32    = 0x0000_0002; // Execute automatically after load
     pub const HASH_BACKEND: u32         = 0x0000_0004; // Use hash backend for memory
     pub const HALT_AFTER_JUMP: u32      = 0x0000_0008; // Insert halt after flow control
+    pub const USE_SDRAM_BACKEND: u32    = 0x0000_0010; // Use SDRAM backend for memory
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
@@ -151,6 +154,7 @@ impl From<&MooCpuType> for ServerCpuType {
             MooCpuType::Intel80188 => ServerCpuType::Intel80188(false),
             MooCpuType::Intel80186 => ServerCpuType::Intel80186(false),
             MooCpuType::Intel80286 => ServerCpuType::Intel80286,
+            MooCpuType::Intel80386Ex => ServerCpuType::Intel80386,
         }
     }
 }

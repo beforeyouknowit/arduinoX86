@@ -105,6 +105,14 @@ impl RemoteCpuRegisters {
             RemoteCpuRegisters::V3(_) => 0,
         }
     }
+
+    pub fn code_address(&self) -> u32 {
+        match self {
+            RemoteCpuRegisters::V1(regs) => regs.calculate_code_address(),
+            RemoteCpuRegisters::V2(regs) => regs.calculate_code_address(),
+            RemoteCpuRegisters::V3(regs) => regs.calculate_code_address(),
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -126,6 +134,24 @@ pub struct RemoteCpuRegistersV1 {
 }
 
 impl RemoteCpuRegistersV1 {
+    pub const FLAG_CARRY: u16 = 0b0000_0000_0000_0001;
+    pub const FLAG_RESERVED1: u16 = 0b0000_0000_0000_0010;
+    pub const FLAG_PARITY: u16 = 0b0000_0000_0000_0100;
+    pub const FLAG_RESERVED3: u16 = 0b0000_0000_0000_1000;
+    pub const FLAG_AUX_CARRY: u16 = 0b0000_0000_0001_0000;
+    pub const FLAG_RESERVED5: u16 = 0b0000_0000_0010_0000;
+    pub const FLAG_ZERO: u16 = 0b0000_0000_0100_0000;
+    pub const FLAG_SIGN: u16 = 0b0000_0000_1000_0000;
+    pub const FLAG_TRAP: u16 = 0b0000_0001_0000_0000;
+    pub const FLAG_INT_ENABLE: u16 = 0b0000_0010_0000_0000;
+    pub const FLAG_DIRECTION: u16 = 0b0000_0100_0000_0000;
+    pub const FLAG_OVERFLOW: u16 = 0b0000_1000_0000_0000;
+    pub const FLAG_F15: u16 = 0b1000_0000_0000_0000; // Reserved bit 15
+    pub const FLAG_MODE: u16 = 0b1000_0000_0000_0000;
+    pub const FLAG_NT: u16 = 0b0100_0000_0000_0000; // Nested Task
+    pub const FLAG_IOPL0: u16 = 0b0001_0000_0000_0000; // Nested Task
+    pub const FLAG_IOPL1: u16 = 0b0010_0000_0000_0000; // Nested Task
+
     pub fn rewind_ip(&mut self, adjust: u16) {
         self.ip = self.ip.wrapping_sub(adjust);
     }
@@ -506,10 +532,35 @@ pub struct RemoteCpuRegistersV3 {
     pub ldt_desc: SegmentDescriptorV2,
     pub gs_desc: SegmentDescriptorV2,
     pub fs_desc: SegmentDescriptorV2,
-    pub es_desc: SegmentDescriptorV2,
-    pub cs_desc: SegmentDescriptorV2,
-    pub ss_desc: SegmentDescriptorV2,
     pub ds_desc: SegmentDescriptorV2,
+    pub ss_desc: SegmentDescriptorV2,
+    pub cs_desc: SegmentDescriptorV2,
+    pub es_desc: SegmentDescriptorV2,
+}
+
+impl RemoteCpuRegistersV3 {
+    pub const FLAG_CARRY: u32 = 0b0000_0000_0000_0001;
+    pub const FLAG_RESERVED1: u32 = 0b0000_0000_0000_0010;
+    pub const FLAG_PARITY: u32 = 0b0000_0000_0000_0100;
+    pub const FLAG_RESERVED3: u32 = 0b0000_0000_0000_1000;
+    pub const FLAG_AUX_CARRY: u32 = 0b0000_0000_0001_0000;
+    pub const FLAG_RESERVED5: u32 = 0b0000_0000_0010_0000;
+    pub const FLAG_ZERO: u32 = 0b0000_0000_0100_0000;
+    pub const FLAG_SIGN: u32 = 0b0000_0000_1000_0000;
+    pub const FLAG_TRAP: u32 = 0b0000_0001_0000_0000;
+    pub const FLAG_INT_ENABLE: u32 = 0b0000_0010_0000_0000;
+    pub const FLAG_DIRECTION: u32 = 0b0000_0100_0000_0000;
+    pub const FLAG_OVERFLOW: u32 = 0b0000_1000_0000_0000;
+    pub const FLAG_F15: u32 = 0b1000_0000_0000_0000; // Reserved bit 15
+    pub const FLAG_MODE: u32 = 0b1000_0000_0000_0000;
+    pub const FLAG_NT: u32 = 0b0100_0000_0000_0000; // Nested Task
+    pub const FLAG_IOPL0: u32 = 0b0001_0000_0000_0000; // Nested Task
+    pub const FLAG_IOPL1: u32 = 0b0010_0000_0000_0000; // Nested Task
+
+    /// Calculate the code address based on CS descriptor and EIP
+    pub fn calculate_code_address(&self) -> u32 {
+        self.cs_desc.address + self.eip
+    }
 }
 
 impl TryFrom<&[u8]> for RemoteCpuRegistersV3 {
@@ -575,11 +626,10 @@ fn parse_v3(buf: &[u8]) -> Result<RemoteCpuRegistersV3, &'static str> {
     new_regs.ldt_desc = read_descriptor_v2(desc_slice, 3);
     new_regs.gs_desc = read_descriptor_v2(desc_slice, 4);
     new_regs.fs_desc = read_descriptor_v2(desc_slice, 5);
-    new_regs.es_desc = read_descriptor_v2(desc_slice, 6);
-    new_regs.cs_desc = read_descriptor_v2(desc_slice, 7);
-    new_regs.ss_desc = read_descriptor_v2(desc_slice, 8);
-    new_regs.ds_desc = read_descriptor_v2(desc_slice, 9);
-
+    new_regs.ds_desc = read_descriptor_v2(desc_slice, 6);
+    new_regs.ss_desc = read_descriptor_v2(desc_slice, 7);
+    new_regs.cs_desc = read_descriptor_v2(desc_slice, 8);
+    new_regs.es_desc = read_descriptor_v2(desc_slice, 9);
     Ok(new_regs)
 }
 
