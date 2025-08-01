@@ -29,6 +29,8 @@ Arduino_Uno_Shield.kicad_mod
 Arduino_Zero_Shield.kicad_mod
 Pro_Mini_Clone_Socket.kicad_mod
 # 808X HAT
+hats/**/*.lck
+hats/**/*.bak
 hats/808x/kicad/ard8088-backups/
 hats/808x/kicad/gerbers*
 hats/808x/gerbers/*.zip
@@ -36,7 +38,6 @@ hats/808x/kicad/ard8088.wrl
 # 286 HAT
 hats/286_5V/kicad/gerbers
 hats/286_5V/kicad/arduino_286_5v-backups
-hats/286_5V/kicad/80286.bak
 hats/286_5V/kicad/arduino*bak
 hats/286_5V/kicad/Package_LCC.pretty/*
 !hats/286_5V/kicad/Package_LCC.pretty/286-plcc.pretty
