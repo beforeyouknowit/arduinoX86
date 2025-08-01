@@ -224,7 +224,7 @@ impl TestInstruction {
         }
 
         let initial_decode_buffer = instruction_bytes.clone();
-        let mut decoder = Decoder::new(config.cpu_type.bitness(), &initial_decode_buffer, decoder_opts);
+        let mut decoder = Decoder::new(config.cpu_type.reg_bitness(), &initial_decode_buffer, decoder_opts);
 
         let mut iced_i = decoder.decode();
         let mut instruction_byte_ct = iced_i.len();
@@ -309,7 +309,7 @@ impl TestInstruction {
         }
 
         if modified_iced {
-            let mut encoder = iced_x86::Encoder::new(config.cpu_type.bitness());
+            let mut encoder = iced_x86::Encoder::new(config.cpu_type.reg_bitness());
             encoder.encode(&iced_i, 0)?;
             let buffer = encoder.take_buffer();
 
@@ -320,7 +320,7 @@ impl TestInstruction {
             // prefix whenever we override an immediate, but this is an acceptable limitation.
 
             instruction_bytes = buffer.to_vec();
-            decoder = Decoder::new(config.cpu_type.bitness(), &instruction_bytes, decoder_opts);
+            decoder = Decoder::new(config.cpu_type.reg_bitness(), &instruction_bytes, decoder_opts);
             iced_i = decoder.decode();
             instr_text = iced_i.to_string();
             instruction_byte_ct = iced_i.len();

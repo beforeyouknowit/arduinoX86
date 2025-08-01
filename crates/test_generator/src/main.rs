@@ -195,6 +195,8 @@ pub struct TestGen {
     flow_control_opcodes: Vec<u8>,
     prefixes: Vec<u8>,
     segment_prefixes: Vec<u8>,
+    operand_size_prefix: Option<u8>,
+    address_size_prefix: Option<u8>,
     rep_prefixes: Vec<u8>,
     rep_opcodes: Vec<u8>,
     rep_cx_mask: u16,
