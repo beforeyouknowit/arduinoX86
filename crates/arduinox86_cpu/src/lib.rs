@@ -40,7 +40,6 @@ use opcodes::*;
 use queue::*;
 use remote_program::RemoteProgram;
 
-use crate::RunState::Program;
 pub use arduinox86_client::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
 pub use queue::QueueDataType;
 
@@ -89,6 +88,27 @@ macro_rules! cycle_comment {
     ($self:ident, $($t:tt)*) => {{
         $self.cycle_comment = Some(format!($($t)*));
     }};
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct RunOptions {
+    pub automatic: bool,
+    pub cycle_limit: Option<u32>,
+    pub wait_states: Option<u32>,
+    pub print_opts: PrintOptions,
+    pub polling_sleep: u32,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            automatic: false,
+            cycle_limit: None,
+            wait_states: None,
+            print_opts: PrintOptions::default(),
+            polling_sleep: 10, // Default sleep time for polling
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -428,12 +448,23 @@ impl RemoteCpu<'_> {
         self.pc
     }
 
-    pub fn mount_bin(&mut self, data: &[u8], location: usize) -> bool {
+    pub fn mount_bin(&mut self, automatic: bool, data: &[u8], location: usize) -> Result<bool, String> {
+        if automatic {
+            self.client
+                .set_flags(ServerFlags::EXECUTE_AUTOMATIC | ServerFlags::USE_SDRAM_BACKEND)
+                .map_err(|e| e.to_string())?;
+            return self.client.set_memory(location as u32, data).map_err(|e| e.to_string());
+        }
+
         let src_size = data.len();
 
         if location + src_size > self.memory.len() {
             // copy request goes out of bounds
-            return false;
+            return Err(format!(
+                "Mounting program at location [{:05X}] would exceed memory bounds of [{}] bytes.",
+                location,
+                self.memory.len()
+            ));
         }
 
         let mem_slice: &mut [u8] = &mut self.memory[location..location + src_size];
@@ -450,7 +481,7 @@ impl RemoteCpu<'_> {
             self.start_addr,
             self.end_addr
         );
-        true
+        Ok(true)
     }
 
     pub fn set_program_bounds(&mut self, start: usize, end: usize) {
@@ -1406,7 +1437,11 @@ impl RemoteCpu<'_> {
     }
 
     /// Run the CPU for the specified number of cycles.
-    pub fn run(&mut self, cycle_limit: Option<u32>, print_opts: &PrintOptions) -> Result<RemoteCpuRegisters, bool> {
+    pub fn run(&mut self, run_options: &RunOptions) -> Result<RemoteCpuRegisters, String> {
+        if run_options.automatic {
+            return self.run_automatic(run_options).map_err(|e| e.to_string());
+        }
+
         if let Some(preload_pgm) = &mut self.preload_pgm {
             preload_pgm.reset();
             log::trace!("Entering [Preload] run state");
@@ -1417,7 +1452,7 @@ impl RemoteCpu<'_> {
             self.run_state = RunState::Program;
         }
 
-        self.update_state(false).map_err(|_| false)?;
+        self.update_state(false).map_err(|_| "Failed to update state")?;
 
         // ALE should be active at start of execution
         if !self.ale() {
@@ -1428,13 +1463,13 @@ impl RemoteCpu<'_> {
             self.mcycle_state = self.cpu_type.decode_status(self.status);
         }
 
-        self.print_run_state(&print_opts);
+        self.print_run_state(&run_options.print_opts);
 
         while self.program_state != ProgramState::ExecuteDone {
             match self.program_state {
                 ProgramState::Execute => {
                     self.cycle();
-                    self.print_run_state(&print_opts);
+                    self.print_run_state(&run_options.print_opts);
                     self.cycle_comment = None;
                 }
                 ProgramState::ExecuteFinalize => {
@@ -1451,18 +1486,34 @@ impl RemoteCpu<'_> {
 
         // Program finalized!
         log::trace!("Program finalized! Run store now.");
-        let regs = self.store();
+        let mut regs = self.store().map_err(|e| e.to_string())?;
+        regs.rewind_ip(self.program_end_offset);
 
-        match regs {
-            Ok(mut regs) => {
-                regs.rewind_ip(self.program_end_offset);
-                Ok(regs)
-            }
-            Err(e) => {
-                log::error!("Failed to store registers: {}", e);
-                Err(false)
-            }
+        Ok(regs)
+    }
+
+    fn run_automatic(&mut self, run_options: &RunOptions) -> Result<RemoteCpuRegisters, String> {
+        // Run the CPU in automatic mode.
+        log::trace!("Running CPU in automatic mode...");
+        self.client
+            .set_flags(ServerFlags::EXECUTE_AUTOMATIC)
+            .map_err(|e| e.to_string())?;
+
+        // Reset the CPU state
+        use ProgramState::*;
+        let mut state = self.client.get_program_state().map_err(|e| e.to_string())?;
+        while !matches!(state, StoreDone | Shutdown | Error) {
+            // Sleep for a little bit so we're not spamming the Arduino.
+            std::thread::sleep(std::time::Duration::from_millis(run_options.polling_sleep.into()));
+            state = self.client.get_program_state().map_err(|e| e.to_string())?;
         }
+
+        if matches!(state, Shutdown | Error) {
+            log::error!("CPU server is in shutdown or error state: {:?}", state);
+            return Err(format!("CPU server is in shutdown or error state: {:?}", state));
+        }
+
+        Ok(self.store().map_err(|e| e.to_string())?)
     }
 
     /// Command the CPU server to store registers, and return them as a [RemoteCpuRegisters] enum
@@ -1499,391 +1550,12 @@ impl RemoteCpu<'_> {
 
     pub fn print_reg_buf(reg_buf: &[u8], cpu_type: ServerCpuType) {
         let regs = RemoteCpuRegisters::try_from(reg_buf).expect("Failed to convert register buffer");
-        Self::print_regs(&regs, cpu_type);
-    }
-
-    pub fn print_regs(regs: &RemoteCpuRegisters, cpu_type: ServerCpuType) {
-        match regs {
-            RemoteCpuRegisters::V1(regs_v1) => {
-                Self::print_regs_v1(regs_v1, cpu_type);
-            }
-            RemoteCpuRegisters::V2(regs_v2) => {
-                Self::print_regs_v2(regs_v2, cpu_type);
-            }
-            RemoteCpuRegisters::V3(regs_v3) => {
-                Self::print_regs_v3(regs_v3, cpu_type);
-            }
-        }
-    }
-
-    pub fn print_regs_v1(regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
-        let reg_str = format!(
-            "AX: {:04X} BX: {:04X} CX: {:04X} DX: {:04X}\n\
-          SP: {:04X} BP: {:04X} SI: {:04X} DI: {:04X}\n\
-          CS: {:04X} DS: {:04X} ES: {:04X} SS: {:04X}\n\
-          IP: {:04X}\n\
-          FLAGS: {:04X}",
-            regs.ax,
-            regs.bx,
-            regs.cx,
-            regs.dx,
-            regs.sp,
-            regs.bp,
-            regs.si,
-            regs.di,
-            regs.cs,
-            regs.ds,
-            regs.es,
-            regs.ss,
-            regs.ip,
-            regs.flags
-        );
-
-        print!("{} ", reg_str);
-
-        // Expand flag info
-        let f = regs.flags;
-        let c_chr = if CPU_FLAG_CARRY & f != 0 { 'C' } else { 'c' };
-        let p_chr = if CPU_FLAG_PARITY & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 { 'A' } else { 'a' };
-        let z_chr = if CPU_FLAG_ZERO & f != 0 { 'Z' } else { 'z' };
-        let s_chr = if CPU_FLAG_SIGN & f != 0 { 'S' } else { 's' };
-        let t_chr = if CPU_FLAG_TRAP & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 { 'I' } else { 'i' };
-        let d_chr = if CPU_FLAG_DIRECTION & f != 0 { 'D' } else { 'd' };
-        let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
-        let m_chr = if cpu_type.is_intel() {
-            if matches!(cpu_type, ServerCpuType::Intel80286) {
-                if CPU_FLAG_F15 & f != 0 {
-                    '1'
-                }
-                else {
-                    '0'
-                }
-            }
-            else {
-                '1'
-            }
-        }
-        else {
-            if f & CPU_FLAG_MODE != 0 {
-                'M'
-            }
-            else {
-                'm'
-            }
+        let printer = RegisterPrinter {
+            regs: &regs,
+            final_regs: None,
+            cpu_type,
+            options: 0,
         };
-
-        let nt_chr = if matches!(cpu_type, ServerCpuType::Intel80286) {
-            if f & CPU_FLAG_NT != 0 {
-                '1'
-            }
-            else {
-                '0'
-            }
-        }
-        else {
-            '1'
-        };
-
-        let nt_chr = if f & CPU_FLAG_NT != 0 { '1' } else { '0' };
-        let iopl0_chr = if f & CPU_FLAG_IOPL0 != 0 { '1' } else { '0' };
-        let iopl1_chr = if f & CPU_FLAG_IOPL1 != 0 { '1' } else { '0' };
-
-        println!(
-            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
-        );
-    }
-
-    pub fn print_regs_v2(regs: &RemoteCpuRegistersV2, cpu_type: ServerCpuType) {
-        println!(
-            "X0: {:04X} X1: {:04X} X2: {:04X} X3: {:04X} X4: {:04X}\n\
-             X5: {:04X} X6: {:04X} X7: {:04X} X8: {:04X} X9: {:04X}",
-            regs.x0, regs.x1, regs.x2, regs.x3, regs.x4, regs.x5, regs.x6, regs.x7, regs.x8, regs.x9
-        );
-
-        let v1_regs = RemoteCpuRegistersV1::from(regs);
-
-        println!("MSW: {:04X} TR: {:04X} LDT: {:04X}", regs.msw, regs.tr, regs.ldt);
-
-        Self::print_regs_v1(&v1_regs, cpu_type);
-    }
-
-    pub fn print_regs_v3(regs: &RemoteCpuRegistersV3, cpu_type: ServerCpuType) {
-        let reg_str = format!(
-            "EAX: {:08X} EBX: {:08X} ECX: {:08X} EDX: {:08X}\n\
-          ESP: {:08X} EBP: {:08X} ESI: {:08X} EDI: {:08X}\n\
-          CS: {:04X} DS: {:04X} ES: {:04X} FS: {:04X} GS: {:04X} SS: {:04X}\n\
-          EIP: {:08X}\n\
-          FLAGS: {:08X}",
-            regs.eax,
-            regs.ebx,
-            regs.ecx,
-            regs.edx,
-            regs.esp,
-            regs.ebp,
-            regs.esi,
-            regs.edi,
-            regs.cs,
-            regs.ds,
-            regs.es,
-            regs.fs,
-            regs.gs,
-            regs.ss,
-            regs.eip,
-            regs.eflags
-        );
-
-        print!("{} ", reg_str);
-
-        // Expand flag info
-        let f = regs.eflags;
-        let c_chr = if CPU_FLAG_CARRY as u32 & f != 0 { 'C' } else { 'c' };
-        let p_chr = if CPU_FLAG_PARITY as u32 & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY as u32 & f != 0 { 'A' } else { 'a' };
-        let z_chr = if CPU_FLAG_ZERO as u32 & f != 0 { 'Z' } else { 'z' };
-        let s_chr = if CPU_FLAG_SIGN as u32 & f != 0 { 'S' } else { 's' };
-        let t_chr = if CPU_FLAG_TRAP as u32 & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE as u32 & f != 0 { 'I' } else { 'i' };
-        let d_chr = if CPU_FLAG_DIRECTION as u32 & f != 0 { 'D' } else { 'd' };
-        let o_chr = if CPU_FLAG_OVERFLOW as u32 & f != 0 { 'O' } else { 'o' };
-        let m_chr = if cpu_type.is_intel() {
-            if matches!(cpu_type, ServerCpuType::Intel80286) {
-                if CPU_FLAG_F15 as u32 & f != 0 {
-                    '1'
-                }
-                else {
-                    '0'
-                }
-            }
-            else {
-                '1'
-            }
-        }
-        else {
-            if f & CPU_FLAG_MODE as u32 != 0 {
-                'M'
-            }
-            else {
-                'm'
-            }
-        };
-
-        let nt_chr = if matches!(cpu_type, ServerCpuType::Intel80286) {
-            if f & CPU_FLAG_NT as u32 != 0 {
-                '1'
-            }
-            else {
-                '0'
-            }
-        }
-        else {
-            '1'
-        };
-
-        let nt_chr = if f & CPU_FLAG_NT as u32 != 0 { '1' } else { '0' };
-        let iopl0_chr = if f & CPU_FLAG_IOPL0 as u32 != 0 { '1' } else { '0' };
-        let iopl1_chr = if f & CPU_FLAG_IOPL1 as u32 != 0 { '1' } else { '0' };
-
-        println!(
-            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
-        );
-    }
-
-    pub fn print_regs_delta(initial: &RemoteCpuRegisters, regs: &RemoteCpuRegisters, cpu_type: ServerCpuType) {
-        match (initial, regs) {
-            (RemoteCpuRegisters::V1(initial_v1), RemoteCpuRegisters::V1(regs_v1)) => {
-                Self::print_regs_delta_v1(initial_v1, regs_v1, cpu_type);
-            }
-            (RemoteCpuRegisters::V2(initial_v2), RemoteCpuRegisters::V1(final_v1)) => {
-                let initial_v1 = RemoteCpuRegistersV1::from(initial_v2);
-                Self::print_regs_delta_v1(&initial_v1, final_v1, cpu_type);
-            }
-            (RemoteCpuRegisters::V3(initial_v3), RemoteCpuRegisters::V3(final_v3)) => {
-                Self::print_regs_delta_v3(&initial_v3, final_v3);
-            }
-            _ => {
-                log::error!("Unsupported register version for delta printing!");
-            }
-        }
-    }
-
-    pub fn print_regs_delta_v1(initial: &RemoteCpuRegistersV1, regs: &RemoteCpuRegistersV1, cpu_type: ServerCpuType) {
-        let a_diff = initial.ax != regs.ax;
-        let b_diff = initial.bx != regs.bx;
-        let c_diff = initial.cx != regs.cx;
-        let d_diff = initial.dx != regs.dx;
-        let sp_diff = initial.sp != regs.sp;
-        let bp_diff = initial.bp != regs.bp;
-        let si_diff = initial.si != regs.si;
-        let di_diff = initial.di != regs.di;
-        let cs_diff = initial.cs != regs.cs;
-        let ds_diff = initial.ds != regs.ds;
-        let es_diff = initial.es != regs.es;
-        let ss_diff = initial.ss != regs.ss;
-        let ip_diff = initial.ip != regs.ip;
-        let f_diff = initial.flags != regs.flags;
-
-        let reg_str = format!(
-            "AX:{}{:04X} BX:{}{:04X} CX:{}{:04X} DX:{}{:04X}\n\
-             SP:{}{:04X} BP:{}{:04X} SI:{}{:04X} DI:{}{:04X}\n\
-             CS:{}{:04X} DS:{}{:04X} ES:{}{:04X} SS:{}{:04X}\n\
-             IP: {:04X}\n\
-             FLAGS:{}{:04X}",
-            if a_diff { "*" } else { " " },
-            regs.ax,
-            if b_diff { "*" } else { " " },
-            regs.bx,
-            if c_diff { "*" } else { " " },
-            regs.cx,
-            if d_diff { "*" } else { " " },
-            regs.dx,
-            if sp_diff { "*" } else { " " },
-            regs.sp,
-            if bp_diff { "*" } else { " " },
-            regs.bp,
-            if si_diff { "*" } else { " " },
-            regs.si,
-            if di_diff { "*" } else { " " },
-            regs.di,
-            if cs_diff { "*" } else { " " },
-            regs.cs,
-            if ds_diff { "*" } else { " " },
-            regs.ds,
-            if es_diff { "*" } else { " " },
-            regs.es,
-            if ss_diff { "*" } else { " " },
-            regs.ss,
-            regs.ip,
-            if f_diff { "*" } else { " " },
-            regs.flags
-        );
-
-        print!("{} ", reg_str);
-
-        // Expand flag info
-        let f = regs.flags;
-        let c_chr = if CPU_FLAG_CARRY & f != 0 { 'C' } else { 'c' };
-        let p_chr = if CPU_FLAG_PARITY & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY & f != 0 { 'A' } else { 'a' };
-        let z_chr = if CPU_FLAG_ZERO & f != 0 { 'Z' } else { 'z' };
-        let s_chr = if CPU_FLAG_SIGN & f != 0 { 'S' } else { 's' };
-        let t_chr = if CPU_FLAG_TRAP & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE & f != 0 { 'I' } else { 'i' };
-        let d_chr = if CPU_FLAG_DIRECTION & f != 0 { 'D' } else { 'd' };
-        let o_chr = if CPU_FLAG_OVERFLOW & f != 0 { 'O' } else { 'o' };
-        let m_chr = if cpu_type.is_intel() {
-            if matches!(cpu_type, ServerCpuType::Intel80286) {
-                if CPU_FLAG_F15 & f != 0 {
-                    '1'
-                }
-                else {
-                    '0'
-                }
-            }
-            else {
-                '1'
-            }
-        }
-        else {
-            if f & CPU_FLAG_MODE != 0 {
-                'M'
-            }
-            else {
-                'm'
-            }
-        };
-
-        let nt_chr = if f & CPU_FLAG_NT != 0 { '1' } else { '0' };
-        let iopl0_chr = if f & CPU_FLAG_IOPL0 != 0 { '1' } else { '0' };
-        let iopl1_chr = if f & CPU_FLAG_IOPL1 != 0 { '1' } else { '0' };
-
-        println!(
-            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
-        );
-    }
-
-    pub fn print_regs_delta_v3(initial: &RemoteCpuRegistersV3, regs: &RemoteCpuRegistersV3) {
-        let a_diff = initial.eax != regs.eax;
-        let b_diff = initial.ebx != regs.ebx;
-        let c_diff = initial.ecx != regs.ecx;
-        let d_diff = initial.edx != regs.edx;
-        let sp_diff = initial.esp != regs.esp;
-        let bp_diff = initial.ebp != regs.ebp;
-        let si_diff = initial.esi != regs.esi;
-        let di_diff = initial.edi != regs.edi;
-        let cs_diff = initial.cs != regs.cs;
-        let ds_diff = initial.ds != regs.ds;
-        let es_diff = initial.es != regs.es;
-        let fs_diff = initial.fs != regs.fs;
-        let gs_diff = initial.gs != regs.gs;
-        let ss_diff = initial.ss != regs.ss;
-        let ip_diff = initial.eip != regs.eip;
-        let f_diff = initial.eflags != regs.eflags;
-
-        let reg_str = format!(
-            "EAX:{}{:08X} EBX:{}{:08X} ECX:{}{:08X} EDX:{}{:08X}\n\
-             EDI:{}{:08X} ESI:{}{:08X} EBP:{}{:08X} ESP:{}{:08X}\n\
-             CS:{}{:04X} DS:{}{:04X} ES:{}{:04X} FS:{}{:04X} GS:{}{:04X} SS:{}{:04X}\n\
-             IP: {:04X}\n\
-             FLAGS:{}{:04X}",
-            if a_diff { "*" } else { " " },
-            regs.eax,
-            if b_diff { "*" } else { " " },
-            regs.ebx,
-            if c_diff { "*" } else { " " },
-            regs.ecx,
-            if d_diff { "*" } else { " " },
-            regs.edx,
-            if di_diff { "*" } else { " " },
-            regs.edi,
-            if si_diff { "*" } else { " " },
-            regs.esi,
-            if bp_diff { "*" } else { " " },
-            regs.ebp,
-            if sp_diff { "*" } else { " " },
-            regs.esp,
-            if cs_diff { "*" } else { " " },
-            regs.cs,
-            if ds_diff { "*" } else { " " },
-            regs.ds,
-            if es_diff { "*" } else { " " },
-            regs.es,
-            if fs_diff { "*" } else { " " },
-            regs.fs,
-            if gs_diff { "*" } else { " " },
-            regs.gs,
-            if ss_diff { "*" } else { " " },
-            regs.ss,
-            regs.eip,
-            if f_diff { "*" } else { " " },
-            regs.eflags
-        );
-
-        print!("{} ", reg_str);
-
-        // Expand flag info
-        let f = regs.eflags;
-        let c_chr = if CPU_FLAG_CARRY as u32 & f != 0 { 'C' } else { 'c' };
-        let p_chr = if CPU_FLAG_PARITY as u32 & f != 0 { 'P' } else { 'p' };
-        let a_chr = if CPU_FLAG_AUX_CARRY as u32 & f != 0 { 'A' } else { 'a' };
-        let z_chr = if CPU_FLAG_ZERO as u32 & f != 0 { 'Z' } else { 'z' };
-        let s_chr = if CPU_FLAG_SIGN as u32 & f != 0 { 'S' } else { 's' };
-        let t_chr = if CPU_FLAG_TRAP as u32 & f != 0 { 'T' } else { 't' };
-        let i_chr = if CPU_FLAG_INT_ENABLE as u32 & f != 0 { 'I' } else { 'i' };
-        let d_chr = if CPU_FLAG_DIRECTION as u32 & f != 0 { 'D' } else { 'd' };
-        let o_chr = if CPU_FLAG_OVERFLOW as u32 & f != 0 { 'O' } else { 'o' };
-        let m_chr = if CPU_FLAG_F15 as u32 & f != 0 { '1' } else { '0' };
-        let nt_chr = if f & CPU_FLAG_NT as u32 != 0 { '1' } else { '0' };
-        let iopl0_chr = if f & CPU_FLAG_IOPL0 as u32 != 0 { '1' } else { '0' };
-        let iopl1_chr = if f & CPU_FLAG_IOPL1 as u32 != 0 { '1' } else { '0' };
-
-        println!(
-            "{}{}{}{}{}{}{}{}{}{}0{}0{}1{}",
-            m_chr, nt_chr, iopl1_chr, iopl0_chr, o_chr, d_chr, i_chr, t_chr, s_chr, z_chr, a_chr, p_chr, c_chr
-        );
+        println!("{}", printer);
     }
 }

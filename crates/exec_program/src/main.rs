@@ -24,10 +24,19 @@ struct Args {
     #[arg(long, required(true))]
     bin_file: PathBuf,
 
-    // Specify the address in memory to mount the bin file. This should typically
-    // match the address specified by CS:IP, but doesn't have to...
-    #[arg(long, required(true))]
-    mount_addr: String,
+    // Specify the address in memory to mount the bin file. Typically, you would prefer to use
+    // the `automount` option to mount the binary at CS:IP, but this option allows you to mount it
+    // at arbitrary addresses.
+    #[arg(long)]
+    mount_addr: Option<String>,
+
+    // Automatically mount the binary file at CS:IP.
+    #[arg(long)]
+    automount: bool,
+
+    // Offset the automount address by the specified value.
+    #[arg(long)]
+    mount_offset: Option<String>,
 
     // Specify the number of wait states for every bus transfer.
     // TODO: Currently no division between memory and IO, should change...
@@ -60,6 +69,14 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     reset_only: bool,
+
+    // Run the CPU in automatic execution mode.
+    #[arg(long)]
+    automatic: bool,
+
+    // Enable serial debugging.
+    #[arg(long)]
+    serial_debug: bool,
 }
 
 fn main() {
@@ -73,15 +90,35 @@ fn main() {
         std::process::exit(1);
     });
 
+    // Capture initial regs before adjustment.
+    let initial_regs = match RemoteCpuRegisters::try_from(reg_bytes.as_slice()) {
+        Ok(regs) => regs,
+        Err(e) => {
+            eprintln!("Error parsing register binary: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let bin_bytes = std::fs::read(args.bin_file.clone()).unwrap_or_else(|e| {
         eprintln!("Couldn't read binary file {:?}: {}", args.bin_file, e);
         std::process::exit(1);
     });
 
-    let mount_addr = u32::from_str_radix(&args.mount_addr, 16).unwrap_or_else(|e| {
-        eprintln!("Couldn't parse code mount address '{}': {}", args.mount_addr, e);
+    let mount_addr = if let Some(mount_addr) = &args.mount_addr {
+        let addr = u32::from_str_radix(mount_addr, 16).unwrap_or_else(|e| {
+            eprintln!("Couldn't parse code mount address '{}': {}", mount_addr, e);
+            std::process::exit(1);
+        });
+        println!("Mounting code at address [{:08X}]", addr);
+        addr
+    }
+    else if args.automount {
+        initial_regs.code_address()
+    }
+    else {
+        eprintln!("Either --mount_addr or --automount must be specified.");
         std::process::exit(1);
-    });
+    };
 
     if (mount_addr as usize) > (0xFFFFFusize - bin_bytes.len()) {
         eprintln!("Specified mount point out of range.");
@@ -172,18 +209,17 @@ fn main() {
         return;
     }
 
-    // Capture initial regs before adjustment.
-    let initial_regs = match RemoteCpuRegisters::try_from(reg_bytes.as_slice()) {
-        Ok(regs) => regs,
-        Err(e) => {
-            eprintln!("Error parsing register binary: {}", e);
-            std::process::exit(1);
-        }
-    };
-
     // Copy the binary to memory
     log::debug!("Mounting program code at: {:05X}", mount_addr);
-    cpu.mount_bin(&bin_bytes, mount_addr as usize);
+    match cpu.mount_bin(args.automatic, &bin_bytes, mount_addr as usize) {
+        Ok(_) => {
+            log::debug!("Program code mounted successfully.");
+        }
+        Err(e) => {
+            eprintln!("Error mounting program code: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     // Set up IVR table
     cpu.setup_ivt();
@@ -195,7 +231,15 @@ fn main() {
 
         println!("Initial register state:");
 
-        RemoteCpu::print_regs(&initial_regs, cpu_type);
+        println!(
+            "{}",
+            RegisterPrinter {
+                regs: &initial_regs,
+                final_regs: None,
+                cpu_type,
+                options: 0,
+            }
+        );
 
         let print_opts = PrintOptions {
             print_pgm: true,
@@ -203,14 +247,29 @@ fn main() {
             print_finalize: false,
         };
 
-        //cpu.test();
-        match cpu.run(Some(10_000), &print_opts) {
+        let run_options = RunOptions {
+            automatic: args.automatic,
+            cycle_limit: Some(10_000),
+            wait_states: None,
+            print_opts,
+            ..Default::default()
+        };
+
+        match cpu.run(&run_options) {
             Ok(regs) => {
                 println!("Final register state:");
-                RemoteCpu::print_regs_delta(&initial_regs, &regs, cpu_type);
+                println!(
+                    "{}",
+                    RegisterPrinter {
+                        regs: &initial_regs,
+                        final_regs: Some(&regs),
+                        cpu_type,
+                        options: 0,
+                    }
+                );
             }
-            Err(_) => {
-                log::error!("Program execution failed!");
+            Err(e) => {
+                log::error!("Program execution failed: {}", e);
             }
         }
     }
