@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <arduinoX86.h>
+#include <globals.h>
+#include "opcodes.h"
 
 // LUT of primary opcode to Mnemonic (Or Group name)
 extern const uint8_t OPCODE_REFS[] = {
@@ -301,3 +304,82 @@ extern const char * const OPCODE_8080_STRS[] = {
   "INVAL",
   "EXT",
 };
+
+
+// ----------------------------------Opcodes-----------------------------------
+const char *get_80_opcode_str(uint8_t op1, uint8_t op2) {
+  size_t op_idx = (size_t)OPCODE_8080_REFS[op1];
+
+  if (op1 == 0xED) {
+    if (op2 == 0xEF) {
+      return "CALLN";
+    }
+    else if (op2 == 0xFD) {
+      return "RETEM";
+    }
+    else {
+      return "INVAL";
+    }
+  }
+
+  return OPCODE_8080_STRS[(size_t)op_idx];
+}
+
+// Return the mnemonic name for the specified opcode. If the opcode is a group
+// opcode, op2 should be specified and modrm set to true.
+const char *get_86_opcode_str(uint8_t op1, uint8_t op2, bool modrm) {
+
+  size_t op_idx = (size_t)OPCODE_REFS[op1];
+  size_t grp_idx = 0;
+
+  if(!modrm) {
+    // Just return primary opcode
+    return OPCODE_STRS[op_idx];
+  }
+  else {
+    // modrm is in use, check if this is a group instruction...
+    if(IS_GRP_OP(op1)) {  
+      // Lookup opcode group
+      grp_idx = MODRM_OP(op2);
+
+      switch(OPCODE_REFS[op1]) {
+        case GRP1:
+          return OPCODE_STRS_GRP1[grp_idx];
+          break;        
+        case GRP2A:
+          return OPCODE_STRS_GRP2A[grp_idx];        
+          break;    
+        case GRP2B:
+          return OPCODE_STRS_GRP2B[grp_idx];         
+          break;                   
+        case GRP3:
+          return OPCODE_STRS_GRP3[grp_idx];        
+          break;        
+        case GRP4:
+          return OPCODE_STRS_GRP4[grp_idx];          
+          break;        
+        case GRP5:
+          return OPCODE_STRS_GRP5[grp_idx];         
+          break;
+        default:
+          return "***";
+          break;
+      }
+    }
+    else {
+      // Not a group instruction, just return as normal
+      return OPCODE_STRS[op_idx];
+    }
+  }
+}
+
+const char *get_opcode_str(uint8_t op1, uint8_t op2, bool modrm) {
+  if (CPU.in_emulation) {
+    return get_80_opcode_str(op1, op2);
+  }
+  else {
+    return get_86_opcode_str(op1, op2, modrm);
+  }
+}
+
+

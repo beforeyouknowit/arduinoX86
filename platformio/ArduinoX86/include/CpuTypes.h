@@ -25,6 +25,29 @@
 
 #include <BusTypes.h>
 
+enum class FpuType : uint8_t {
+  noFpu,
+  i8087,
+};
+
+enum class CpuBusWidth : uint8_t {
+  Eight,
+  Sixteen,
+};
+
+// Type of CPU. These are either detected or specified by the configured hat.
+enum class CpuType : uint8_t {
+  Undetected,
+  i8088, 
+  i8086,
+  necV20,
+  necV30,
+  i80188,
+  i80186,
+  i80286,
+  i80386,
+};
+
 struct CpuResetResult {
   bool success;         // True if reset was successful
   BusWidth busWidth;    // The bus width detected (Eight or Sixteen)

@@ -28,9 +28,15 @@
 // Null backend: does nothing and returns zero
 class NullBackend : public IBusBackend {
 public:
+  IBusBackendType type() const override {
+    return IBusBackendType::Null;
+  }
+
+  size_t   size() const override { return 0; }
   uint8_t  read_u8(uint32_t) override { return 0; }
   uint16_t read_u16(uint32_t) override { return 0; }
   uint16_t read_bus(uint32_t, bool) override { return 0; }
+  uint8_t *get_ptr(uint32_t) override { return NULL; }
   void     write_u8(uint32_t, uint8_t) override {}
   void     write_u16(uint32_t, uint16_t) override {}
   void     write_bus(uint32_t, uint16_t, bool) override {}

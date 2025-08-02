@@ -54,14 +54,14 @@
 // Print a character to the debugging output on each store command.
 #define STORE_INDICATOR (SILENT_MODE)
 
-#define TRACE_ALL 0 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
+#define TRACE_ALL 1 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
 #define TRACE_NONE (0 | SILENT_MODE) // TRACE_NONE will override all set traces
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
-#define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
+#define TRACE_RESET     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
 #define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
-#define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
+#define TRACE_VECTOR    ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
 #define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.
@@ -76,11 +76,11 @@
 
 #define DEBUG_SERVER    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the server state
 #define DEBUG_STATE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about state changes and time spent in each state
-#define DEBUG_RESET     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
-#define DEBUG_SETUP     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
+#define DEBUG_RESET     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the reset process
+#define DEBUG_SETUP     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
 #define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about jump vector program execution
 #define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about CPU identification
-#define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
+#define DEBUG_LOAD      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
 #define DEBUG_LOAD_DONE ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD_DONE state
 #define DEBUG_EXECUTE   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during EXECUTE state
 #define DEBUG_STORE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during STORE state
@@ -90,9 +90,9 @@
 #define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
-#define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
+#define DEBUG_BUS       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
 #define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the serial cpu_server protocol (verbose)
-#define DEBUG_CMD       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
+#define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
 #define DEBUG_DUMP      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about dump commands
 
 #define MAX_ERR_LEN 50 // Maximum length of an error string
@@ -100,33 +100,3 @@
 #define FINALIZE_TIMEOUT 30
 #define FINALIZE_EMU_TIMEOUT 90 // We need more time to exit emulation mode
 
-
-#if CPU_186
-  // 186 CPU
-  // How many cycles to assert the RESET pin.
-  #define RESET_HOLD_CYCLE_COUNT 30
-  // How many cycles it takes to reset the CPU after RESET signal de-asserts. First ALE should occur after this many cycles.
-  #define RESET_CYCLE_COUNT 35
-  // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 45
-  // What logic level RESET is when asserted
-  #define RESET_ASSERT 0
-  // What logic level RESET is when deasserted
-  #define RESET_DEASSERT 1
-  // The 186 doesn't need an 8288. We can synthesize 8288 outputs using the CPU's own RD & WR & S2 signals.
-  // Leave this value at 0 when using a 186.
-  #define EMULATE_8288 0
-  // If you are using a newer 186 like an 80L186EB it won't have queue status lines.
-  // Set this to 0 in that case to use alternate logic.
-  #define HAVE_QUEUE_STATUS 0
-  // 80186 needs setup to enable interrupts. 
-#else
-  // Non-186 CPU
-
-  // Set this to 1 to use i8288 emulation
-  #define EMULATE_8288 1
-  // Leave this at 1 for non-186 CPUs as they will always have the queue status lines.
-  #define HAVE_QUEUE_STATUS 1
-  // 8086 needs no setup. Disable entering CpuSetup state.
-
-#endif

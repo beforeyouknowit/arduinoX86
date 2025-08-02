@@ -25,6 +25,14 @@
 #include <cstdint>
 #include <cstddef>
 
+
+enum class IBusBackendType : uint8_t {
+  Null,
+  HashTable,
+  Sdram,
+  Invalid,
+};
+
 // Abstract interface for bus backing implementations
 class IBusBackend {
 public:
@@ -36,9 +44,12 @@ public:
     Invalid,
   };
 
+  virtual IBusBackendType type() const = 0;
+  virtual size_t   size() const = 0;
   virtual uint8_t  read_u8(uint32_t address) = 0;
   virtual uint16_t read_u16(uint32_t address) = 0;
   virtual uint16_t read_bus(uint32_t address, bool bhe) = 0;
+  virtual uint8_t *get_ptr(uint32_t address) = 0;
   virtual void     write_u8(uint32_t address, uint8_t  value) = 0;
   virtual void     write_u16(uint32_t address, uint16_t value) = 0;
   virtual void     write_bus(uint32_t address, uint16_t value, bool bhe) = 0;

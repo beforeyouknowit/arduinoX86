@@ -34,8 +34,19 @@ public:
   explicit HashBackend(size_t mem_capacity = 65536)
     : mem_table_(mem_capacity), base_seed_(0), strategy_start_(0x1024), strategy_end_(0xFFFFFF) {}
 
-  // ---------------- Memory Interface ----------------
+  ~HashBackend() {
+    DEBUG_SERIAL.println("## HASH_BACKEND: Memory freed");
+  }
 
+  IBusBackendType type() const override {
+    return IBusBackendType::HashTable;
+  }
+
+  size_t size() const override {
+    return 0;
+  }
+
+  // ---------------- Memory Interface ----------------
   uint8_t read_u8(uint32_t address) override {
     const uint32_t addr16 = address >> 1;
     uint16_t word = 0;
@@ -64,6 +75,11 @@ public:
       word = gen_default_u16(address);
     }
     return word;
+  }
+
+  uint8_t *get_ptr(uint32_t addr) override { 
+    // Can't get a pointer with this backend.
+    return NULL; 
   }
 
   void write_u8(uint32_t address, uint8_t value) override {

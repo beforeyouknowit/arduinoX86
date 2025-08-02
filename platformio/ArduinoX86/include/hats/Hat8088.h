@@ -41,8 +41,21 @@ void cycle();
 
 #define STORE_IO_BASE 0x0000
 
+#define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
+// How many cycles to hold the RESET signal high. Intel says 18 cycles for the 80286. 
+#define RESET_HOLD_CYCLE_COUNT 8
+// How many cycles it takes to reset the CPU after RESET signal goes low. Intel says 38 cycles for the 80286. 
+// If we didn't see an ALE after this many cycles, give up
+#define RESET_CYCLE_TIMEOUT 40
+// What logic level RESET is when asserted
+#define RESET_ASSERT 1
+// What logic level RESET is when deasserted
+#define RESET_DEASSERT 0
+
 #define ADDRESS_SPACE_MASK 0xFFFFF // 20-bit address space for 8088
 #define WRITE_CYCLE T3
+#define STORE_TIMEOUT 1000
+#define LOAD_TIMEOUT 1000
 
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
@@ -152,9 +165,9 @@ void cycle();
   #define PORT_K_DBUS_WRITE 0x00001540
   #define PORT_J_DBUS_MASK 0x0CFFC000
   #define PORT_J_DBUS_READ 0
-  #define PORT_J_DBUS_WRITE 0x51411555
-  #define PORT_J_DBUS_WRITE_HI 0x04101540
-  #define PORT_J_DBUS_WRITE_LO 0x51410015
+  #define PORT_J_DBUS_WRITE 0x51001555
+  #define PORT_J_DBUS_WRITE_HI 0x00001540
+  #define PORT_J_DBUS_WRITE_LO 0x51000015
   #define PORT_G_DBUS_MASK 0xF0FFFFFF
   #define PORT_G_DBUS_READ 0
   #define PORT_G_DBUS_WRITE 0x05000000
@@ -239,9 +252,15 @@ void cycle();
 #define RQ_PIN 3
 
 // --------------------------8288 Control Inputs ------------------------------
+// These are mapped to analog pins A0 & A1 which map to different digital pin
+// numbers on different boards.
+#if defined (ARDUINO_GIGA)
+#define AEN_PIN 76
+#define CEN_PIN 77
+#else
 #define AEN_PIN 54
 #define CEN_PIN 55
-
+#endif
 // --------------------------8288 Control lines -------------------------------
 #define ALE_PIN 50
 #define DTR_PIN 49
@@ -405,29 +424,36 @@ public:
     digitalWrite(READY_PIN, HIGH);
     digitalWrite(INTR_PIN, LOW);  // Must set these to a known value or risk spurious interrupts!
     digitalWrite(NMI_PIN, LOW);   // Must set these to a known value or risk spurious interrupts!
-
-#if !EMULATE_8288
+    // Enable i8228 outputs
     digitalWrite(AEN_PIN, LOW);   // AEN is enable-low
     digitalWrite(CEN_PIN, HIGH);  // Command enable enables the outputs on the i8288
-#endif
   }
 
   template<typename Board>
-  static CpuResetResult resetCpuImpl(Board& board) {
+  CpuResetResult resetCpuImpl(Board& board) {
     CpuResetResult result = {};
     result.success = false;
     result.queueStatus = false;
     result.busWidth = BusWidth::Eight;
-
+    setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
     WRITE_TEST_PIN(0);
     WRITE_INTR_PIN(0);
     WRITE_NMI_PIN(0);
-
-    //reset_cpu_struct(false);
+    WRITE_RESET(0);
 
     bool ale_went_off = false;
     bool bhe_went_off = false;
     bool qs0_high = false;
+    bool have_i8288 = false;
+    
+    // Clock the CPU a few times before asserting RESET.
+    for (int i = 0; i < PRE_RESET_CYCLE_COUNT; i++) {
+      tickCpu();
+    }
+
+    // Enable i8288 outputs.
+    digitalWrite(AEN_PIN, LOW);
+    digitalWrite(CEN_PIN, HIGH);
 
     // Assert RESET high for hold count.
     WRITE_RESET(1);
@@ -436,7 +462,18 @@ public:
       if (READ_ALE_PIN == false) {
         ale_went_off = true;
       }
-      tickCpu();
+      cycle();
+    }
+
+
+    // Check the i8288 control lines
+    if (!READ_MRDC_PIN && !READ_MWTC_PIN && !READ_AMWC_PIN) {
+      board.debugPrintln(DebugType::RESET, "## No i8288 detected ##");
+      have_i8288 = false;
+    }
+    else {
+      board.debugPrintln(DebugType::RESET, "## i8288 detected ##");
+      have_i8288 = true;
     }
 
     WRITE_RESET(0);
@@ -481,6 +518,7 @@ public:
         board.debugPrintln(DebugType::RESET, "###########################################");
         result.success = true;
         result.queueStatus = !qs0_high;
+        break;
       }
     }
     return result;
@@ -525,7 +563,7 @@ public:
     }
   }
 
-  static TCycle getNextCycleImpl(TCycle current_cycle, BusStatus current_status) {
+  static TCycle getNextCycleImpl(TCycle current_cycle, BusStatus current_status, BusStatus latched_status) {
     // Return the next cycle for the CPU
      switch (current_cycle) {
       case TI:
@@ -543,7 +581,7 @@ public:
         break;
 
       case T3:
-        if (is_transfer_done()) {
+        if (isTransferDoneImpl(latched_status)) {
           return T4;
         } else {
   #if DEBUG_TSTATE
@@ -555,7 +593,7 @@ public:
 
       case TW:
         // Transition to T4 if read/write signals are complete
-        if (is_transfer_done()) {
+        if (isTransferDoneImpl(latched_status)) {
           return T4;
         }
         break;
@@ -567,6 +605,8 @@ public:
         return T1;
         break;
     }
+
+    return current_cycle; // If no change, return the current cycle
   }
 
   uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
@@ -630,6 +670,8 @@ public:
       setBusDirection(BusDirection::Output, width);
 
       if ((width == ActiveBusWidth::EightLow) || (width == ActiveBusWidth::Sixteen)) {
+        DEBUG_SERIAL.print("Writing low data bus: ");
+        DEBUG_SERIAL.println(data & 0x00FF, HEX);
         WRITE_BIT(data, 0x01, SET_DBUS_00, CLEAR_DBUS_00);
         WRITE_BIT(data, 0x02, SET_DBUS_01, CLEAR_DBUS_01);
         WRITE_BIT(data, 0x04, SET_DBUS_02, CLEAR_DBUS_02);
@@ -638,9 +680,30 @@ public:
         WRITE_BIT(data, 0x20, SET_DBUS_05, CLEAR_DBUS_05);
         WRITE_BIT(data, 0x40, SET_DBUS_06, CLEAR_DBUS_06);
         WRITE_BIT(data, 0x80, SET_DBUS_07, CLEAR_DBUS_07);
+
+        // SET_DBUS_00;
+        // SET_DBUS_01;
+        // SET_DBUS_02;
+        // SET_DBUS_03;
+        // SET_DBUS_04;
+        // SET_DBUS_05;
+        // SET_DBUS_06;
+        // SET_DBUS_07;
+
+        // CLEAR_DBUS_00;
+        // CLEAR_DBUS_01;
+        // CLEAR_DBUS_02;
+        // CLEAR_DBUS_03;
+        // CLEAR_DBUS_04;
+        // CLEAR_DBUS_05;
+        // CLEAR_DBUS_06;
+        // CLEAR_DBUS_07;
+
       }
       
       if ((width == ActiveBusWidth::EightHigh) || (width == ActiveBusWidth::Sixteen)) {
+        DEBUG_SERIAL.print("Writing high data bus: ");
+        DEBUG_SERIAL.println(data >> 8, HEX);
         WRITE_BIT(data, 0x0100, SET_DBUS_08, CLEAR_DBUS_08);
         WRITE_BIT(data, 0x0200, SET_DBUS_09, CLEAR_DBUS_09);
         WRITE_BIT(data, 0x0400, SET_DBUS_10, CLEAR_DBUS_10);
@@ -654,7 +717,7 @@ public:
   }  
 
   /// Read the multiplexed address bus. Returns a 20-bit value.
-  uint32_t readAddressBus(bool peek = true) {
+  uint32_t readAddressBusImpl(bool peek = true) {
     // If we're not peeking, set the bus direction to input
     if (!peek) {
       setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
@@ -685,7 +748,42 @@ public:
     return address;
   }
 
-    static void writePinImpl(OutputPin pin, bool value) {
+    static bool readBHEPinImpl() {
+    // Read the BHE pin (Bus High Enable)
+    return READ_BHE_PIN;
+  }
+  static bool readALEPinImpl() {
+    return READ_ALE_PIN;
+  }
+  static bool readLockPinImpl() {
+    return READ_LOCK_PIN;
+  }
+  static bool readReadyPinImpl() {
+    return READ_READY_PIN;
+  }
+  static bool readMRDCPinImpl() {
+    return READ_MRDC_PIN;
+  }
+  static bool readAMWCPinImpl() {
+    return READ_AMWC_PIN;
+  }
+  static bool readMWTCPinImpl() {
+    return READ_MWTC_PIN;
+  }
+  static bool readIORCPinImpl() {
+    return READ_IORC_PIN;
+  }
+  static bool readIOWCPinImpl() {
+    return READ_IOWC_PIN;
+  }
+  static bool readAIOWCPinImpl() {
+    return READ_AIOWC_PIN;
+  }
+  static bool readINTAPinImpl() {
+    return false;
+  }
+
+  static void writePinImpl(OutputPin pin, bool value) {
     switch (pin) {
       case OutputPin::Ready:
         WRITE_READY_PIN(value);
@@ -708,14 +806,14 @@ public:
   static uint8_t readCpuStatusLinesImpl() {
     // Read the CPU status lines
     uint8_t status = 0;
-    if (READ_PIN_D14) { status |= 0x01; };
-    if (READ_PIN_D15) { status |= 0x02; };
-    if (READ_PIN_D16) { status |= 0x04; };
-    if (READ_PIN_D38) { status |= 0x08; };
-    if (READ_PIN_D39) { status |= 0x10; };
-    if (READ_PIN_D40) { status |= 0x20; };
-    if (READ_PIN_D09) { status |= 0x40; };
-    if (READ_PIN_D08) { status |= 0x80; };
+    if (READ_S0_PIN) { status |= 0x01; };
+    if (READ_S1_PIN) { status |= 0x02; };
+    if (READ_S2_PIN) { status |= 0x04; };
+    if (READ_S3_PIN) { status |= 0x08; };
+    if (READ_S4_PIN) { status |= 0x10; };
+    if (READ_S5_PIN) { status |= 0x20; };
+    if (READ_QS0_PIN) { status |= 0x40; };
+    if (READ_QS1_PIN) { status |= 0x80; };
     return status;
   }
 
@@ -734,7 +832,7 @@ public:
     return command;
   }
 
-    static uint8_t readBusControllerControlLinesImpl() {
+  static uint8_t readBusControllerControlLinesImpl() {
     // Read the bus controller control lines
     uint8_t control = 0;
     control |= READ_ALE_PIN ? 0x01 : 0;     // ALE      - Pin 50

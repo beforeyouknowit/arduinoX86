@@ -1,16 +1,38 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
 #![allow(dead_code, unused_variables)]
 
 mod register_printer;
 mod registers;
 
+use log;
 use std::{
     cell::RefCell,
+    fmt::Display,
     io::{Read, Write},
     rc::Rc,
     str,
 };
-
-use log;
 
 #[cfg(feature = "use_moo")]
 use moo::prelude::MooIvtOrder;
@@ -81,6 +103,7 @@ pub enum ServerCommand {
     CmdEnableDebug = 0x21,
     CmdSetMemoryStrategy = 0x22,
     CmdGetFlags = 0x23,
+    CmdReadMemory = 0x24,
     CmdInvalid,
 }
 
@@ -123,6 +146,22 @@ pub enum ServerCpuType {
     Intel80186(bool),
     Intel80286,
     Intel80386,
+}
+
+impl Display for ServerCpuType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ServerCpuType::Undetected => write!(f, "Undetected"),
+            ServerCpuType::Intel8088 => write!(f, "Intel 8088"),
+            ServerCpuType::Intel8086 => write!(f, "Intel 8086"),
+            ServerCpuType::NecV20 => write!(f, "NEC V20"),
+            ServerCpuType::NecV30 => write!(f, "NEC V30"),
+            ServerCpuType::Intel80188(_) => write!(f, "Intel 80188"),
+            ServerCpuType::Intel80186(_) => write!(f, "Intel 80186"),
+            ServerCpuType::Intel80286 => write!(f, "Intel 80286"),
+            ServerCpuType::Intel80386 => write!(f, "Intel 80386"),
+        }
+    }
 }
 
 #[cfg(feature = "use_moo")]
@@ -386,12 +425,22 @@ impl From<CpuWidth> for usize {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, strum_macros::Display, Debug, Default)]
 pub enum RegisterSetType {
     #[default]
     Intel8088,
     Intel286,
     Intel386,
+}
+
+impl From<&RemoteCpuRegisters> for RegisterSetType {
+    fn from(value: &RemoteCpuRegisters) -> Self {
+        match value {
+            RemoteCpuRegisters::V1(_) => RegisterSetType::Intel8088,
+            RemoteCpuRegisters::V2(_) => RegisterSetType::Intel286,
+            RemoteCpuRegisters::V3(_) => RegisterSetType::Intel386,
+        }
+    }
 }
 
 impl From<ServerCpuType> for RegisterSetType {
@@ -1147,6 +1196,41 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdSetMemoryStrategy)?;
         self.send_buf(&buf)?;
         self.read_result_code(ServerCommand::CmdSetMemoryStrategy)
+    }
+
+    pub fn read_memory<W: Write>(&mut self, start: u32, size: u32, writer: &mut W) -> Result<bool, CpuClientError> {
+        const READ_BUFFER_SIZE: usize = 1024;
+        let mut read_buf: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
+
+        let mut bytes_left = size;
+
+        self.send_command_byte(ServerCommand::CmdReadMemory)?;
+
+        // Send the start address
+        let mut buf: [u8; 4] = [0; 4];
+        buf[0..4].copy_from_slice(&start.to_le_bytes());
+        self.send_buf(&buf)?;
+
+        // Send the size of the read operation
+        buf[0..4].copy_from_slice(&size.to_le_bytes());
+        self.send_buf(&buf)?;
+
+        while bytes_left > 0 {
+            let read_size = if bytes_left < READ_BUFFER_SIZE as u32 {
+                bytes_left as usize
+            }
+            else {
+                READ_BUFFER_SIZE
+            };
+            self.recv_buf(&mut read_buf[..read_size])?;
+            // Write the received data to the writer
+            writer
+                .write_all(&read_buf[..read_size])
+                .map_err(|_| CpuClientError::WriteFailure)?;
+
+            bytes_left -= read_size as u32;
+        }
+        self.read_result_code(ServerCommand::CmdReadMemory)
     }
 
     pub fn enable_debug(&mut self, enable: bool) -> Result<(), CpuClientError> {

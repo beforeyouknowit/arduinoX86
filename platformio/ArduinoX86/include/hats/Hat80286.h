@@ -52,6 +52,17 @@ void cycle();
 #define STORE_TIMEOUT 300
 #define LOAD_TIMEOUT 1000
 
+#define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
+// How many cycles to hold the RESET signal high. Intel says 18 cycles for the 80286. 
+#define RESET_HOLD_CYCLE_COUNT 20
+// How many cycles it takes to reset the CPU after RESET signal goes low. Intel says 38 cycles for the 80286. 
+// If we didn't see an ALE after this many cycles, give up
+#define RESET_CYCLE_TIMEOUT 40
+// What logic level RESET is when asserted
+#define RESET_ASSERT 1
+// What logic level RESET is when deasserted
+#define RESET_DEASSERT 0
+
 // ------------------------- CPU Control pins ---------------------------------
 #define CLK_PIN 4
 #define RESET_PIN 5
@@ -183,17 +194,6 @@ void cycle();
 #define READ_ABUS_21 READ_PIN_D01
 #define READ_ABUS_22 READ_PIN_D02
 #define READ_ABUS_23 READ_PIN_D03
-
-  #define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
-  // How many cycles to hold the RESET signal high. Intel says 18 cycles for the 80286. 
-  #define RESET_HOLD_CYCLE_COUNT 20
-  // How many cycles it takes to reset the CPU after RESET signal goes low. Intel says 38 cycles for the 80286. 
-  // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 40
-  // What logic level RESET is when asserted
-  #define RESET_ASSERT 1
-  // What logic level RESET is when deasserted
-  #define RESET_DEASSERT 0
 
 #define LOOP_COUNT 20
 

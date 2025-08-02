@@ -12,7 +12,7 @@ default-members = ["crates/exec_program"]
 [workspace.package]
 version = "0.3.0"
 edition = "2021"
-authors = ["Daniel Balsom", "Andreas Jonsson"]
+authors = ["Daniel Balsom"]
 license = "MIT"
 repository = "https://github.com/dbalsom/arduinoX86"
 
@@ -30,7 +30,10 @@ thiserror = "2.0"
 rand = "0.9"
 rand_distr = "0.5"
 indexmap = "2.2"
+strum_macros = "0.27"
 moo-rs = { git = "https://github.com/dbalsom/moo", default-features = false, features = ["serde"] }
+crossbeam-channel = "0.5"
+pollster = "0.2"
 
 [workspace.dependencies.iced-x86]
 version = "1.21"

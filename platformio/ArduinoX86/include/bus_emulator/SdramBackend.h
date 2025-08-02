@@ -34,17 +34,34 @@ public:
   SdramBackend(size_t size, size_t mask)
     : size_(size), mask_(mask) {
       
-      mem_ = (uint8_t*)SDRAM.malloc(4 * 1024 * 1024);
+      mem_ = (uint8_t*)SDRAM.malloc(size);
       if (!mem_) {
           DEBUG_SERIAL.println("## SDRAM: Failed to allocate memory!");
           size_ = 0;
       }
       else {
+          memset(mem_, 0, size_); // Initialize memory to zero
           DEBUG_SERIAL.print("## SDRAM: Allocated ");
           DEBUG_SERIAL.print(size_);
           DEBUG_SERIAL.println(" bytes memory");
       }
     }                       
+
+  ~SdramBackend() {
+    if (mem_) {
+      SDRAM.free(mem_);
+      mem_ = nullptr;
+      DEBUG_SERIAL.println("## SDRAM: Memory freed");
+    }
+  }
+
+  IBusBackendType type() const override {
+    return IBusBackendType::Sdram;
+  }
+  
+  size_t size() const override {
+    return size_;
+  }
 
   uint8_t read_u8(uint32_t addr) override {
     return mem_[addr & mask_];
@@ -85,6 +102,10 @@ public:
     mem_[masked_addr0] = (uint8_t)(val & 0xFF);
     mem_[masked_addr1] = (uint8_t)(val >> 8);
   };
+
+  uint8_t *get_ptr(uint32_t addr) override { 
+    return mem_ + addr;
+  }
 
   /// Write to the bus. The AT bus is a odd/even arrangement where A0 is not used
   /// to address memory. Therefore we can address words by shifting the address

@@ -152,7 +152,7 @@ void setup() {
 
   // Initialize the bus emulator
   if (ArduinoX86::Bus == nullptr) {
-    ArduinoX86::Bus = create_bus_emulator();
+    ArduinoX86::Bus = new BusEmulator(new HashBackend());
     if (ArduinoX86::Bus == nullptr) {
       Board.debugPrintln(DebugType::SETUP, "Failed to create bus emulator!");
       set_error("Failed to create bus emulator!");
@@ -199,7 +199,7 @@ void setup() {
     pinMode(87, OUTPUT);  
     pinMode(88, OUTPUT);
     // Turn LED green
-    digitalWrite(88, HIGH);
+    digitalWrite(88, LOW);
   #endif
   DEBUG_SERIAL.flush();
   clear_error();
@@ -223,43 +223,11 @@ void setup() {
   Board.debugPrintln(DebugType::SETUP, "Arduino8088 Server Initialized! Waiting for commands...");
 }
 
-void reset_cpu_struct(bool reset_load_regs) {
-
-  // Retain detected cpu type, width and emulation flags.
-  CpuType cpu_type = CPU.cpu_type;
-  cpu_width_t width = CPU.width;
-  bool do_emulation = CPU.do_emulation;
-  
-  // Make a copy of the register values if needed
-  uint8_t load_regs_backup[sizeof(registers1_t)];
-  if (!reset_load_regs) {
-    memcpy(load_regs_backup, (const void*)&CPU.load_regs, sizeof(registers1_t));
-  }
-
-  // Zero the CPU struct
-  memset(&CPU, 0, sizeof CPU);
-
-  if (!reset_load_regs) {
-    // Restore regs
-    memcpy((void*)&CPU.load_regs, (const void*)load_regs_backup, sizeof(registers1_t));
-  }
-
-  // Restore retained values
-  CPU.cpu_type = cpu_type;
-  CPU.width = width;
-  CPU.do_emulation = do_emulation;
-
-  // Recreate default program pointer
-  CPU.program = &JUMP_VECTOR;
-
-  ArduinoX86::Server.change_state(ServerState::Reset);
-  CPU.data_bus = 0x0000;
-}
-
 bool cpu_id() {
 
   Board.debugPrintln(DebugType::ID, "cpu_id(): resetting CPU...");
   CpuResetResult reset_result = Controller.resetCpu();
+  CPU.reset(reset_result, true);
   if (!reset_result.success) {
     Board.debugPrintln(DebugType::ID, "cpu_id(): Failed to reset CPU!");
     set_error("Failed to reset CPU!");
@@ -272,7 +240,7 @@ bool cpu_id() {
 #if defined(CPU_186)
   // We can detect 188 vs 186 here. No need to enter CPU id program as we don't support
   // any other variants with this pinout.
-  if (CPU.width == BusWidthEight) {
+  if (CPU.width == CpuBusWidth::Eight) {
     CPU.cpu_type = CpuType::i80188;
   } else {
     CPU.cpu_type = CpuType::i80186;
@@ -319,6 +287,10 @@ bool cpu_id() {
   
   ArduinoX86::Bus->set_cpu_type(CPU.cpu_type);
   return true;
+}
+
+uint32_t calc_flat_address(uint16_t seg, uint16_t offset) {
+  return ((uint32_t)seg << 4) + offset;
 }
 
 // Read a byte from the data bus. The half of the bus to read is determined
@@ -507,7 +479,7 @@ void print_cpu_state() {
   }
 
   // Set the bus string width
-  if (CPU.width == BusWidthEight) {
+  if (CPU.width == CpuBusWidth::Eight) {
     bus_str_width = 2;
   } else {
     bus_str_width = 4;
@@ -589,9 +561,11 @@ void print_cpu_state() {
       buf_len,
       ":%04X",
       Controller.readDataBus(ActiveBusWidth::Sixteen, true));
+
+    DEBUG_SERIAL.print(buf);
   }
 
-  DEBUG_SERIAL.print(buf);
+  
 
   snprintf(
       buf,
@@ -630,8 +604,8 @@ void print_cpu_state() {
   snprintf(
     buf,
     buf_len,
-    "[%0X] %s %8s | %c%d [%-*s]",
-    CPU.status0,
+    "[%1X] %s %8s | %c%d [%-*s]",
+    CPU.status0 & 0xF,
     t_str,
     op_buf,
     q_char,
@@ -642,21 +616,21 @@ void print_cpu_state() {
   DEBUG_SERIAL.print(buf);
 
 // Print queue status string if we have queue status pins available.
-#if HAVE_QUEUE_STATUS
-  if (q == QUEUE_FIRST) {
-    // First byte of opcode read from queue. Decode it to opcode
-    snprintf(q_buf, 15, " <-q %02X %s", CPU.qb, get_opcode_str(CPU.opcode, 0, false));
-    DEBUG_SERIAL.print(q_buf);
-  } else if (q == QUEUE_SUBSEQUENT) {
-    if (!CPU.in_emulation && IS_GRP_OP(CPU.opcode) && CPU.q_fn == 1) {
-      // Modrm was just fetched for a group opcode, so display the mnemonic now
-      snprintf(q_buf, 15, " <-q %02X %s", CPU.qb, get_opcode_str(CPU.opcode, CPU.qb, true));
-    } else {
-      snprintf(q_buf, 15, " <-q %02X", CPU.qb);
+  if (CPU.have_queue_status) {
+    if (q == QUEUE_FIRST) {
+      // First byte of opcode read from queue. Decode it to opcode
+      snprintf(q_buf, 15, " <-q %02X %s", CPU.qb, get_opcode_str(CPU.opcode, 0, false));
+      DEBUG_SERIAL.print(q_buf);
+    } else if (q == QUEUE_SUBSEQUENT) {
+      if (!CPU.in_emulation && IS_GRP_OP(CPU.opcode) && CPU.q_fn == 1) {
+        // Modrm was just fetched for a group opcode, so display the mnemonic now
+        snprintf(q_buf, 15, " <-q %02X %s", CPU.qb, get_opcode_str(CPU.opcode, CPU.qb, true));
+      } else {
+        snprintf(q_buf, 15, " <-q %02X", CPU.qb);
+      }
+      DEBUG_SERIAL.print(q_buf);
     }
-    DEBUG_SERIAL.print(q_buf);
   }
-#endif
 
   if (!Controller.getBoard().haveDeferredBuffer()) {
     DEBUG_SERIAL.println("");
@@ -736,24 +710,19 @@ uint16_t read_nops(ActiveBusWidth width) {
 void set_data_bus_width() {
   if (!READ_BHE_PIN) {
     if ((CPU.address_latch & 1) == 0) {
-// BHE is active, and address is even. Bus width is 16.
-#if DEBUG_BUS
-      debugPrintlnColor(ansi::bright_yellow, "Bus width 16");
-#endif
+      // BHE is active, and address is even. Bus width is 16.
+      Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 16");
       CPU.data_width = ActiveBusWidth::Sixteen;
     } else {
-// BHE is active, and address is odd. Bus width is EightHigh.
-#if DEBUG_BUS
-      debugPrintlnColor(ansi::bright_yellow, "Bus width 8 (Odd)");
-#endif
+      // BHE is active, and address is odd. Bus width is EightHigh.
+      Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Odd)");
       CPU.data_width = ActiveBusWidth::EightHigh;
     }
-  } else {
-// If BHE is inactive, then we can't read an even address. So this must be
-// EightLow.
-#if DEBUG_BUS
-    debugPrintlnColor(ansi::bright_yellow, "Bus width 8 (Even)");
-#endif
+  } 
+  else {
+    // If BHE is inactive, then we can't read an even address. So this must be
+    // EightLow.
+    Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Even)");
     CPU.data_width = ActiveBusWidth::EightLow;
   }
 }
@@ -767,7 +736,7 @@ void latch_address() {
 void cycle() {
 
   // Resolve data bus from last cycle.
-  if (!Controller.readMRDCPin() || !Controller.readIORCPin()) {
+  if (!CPU.data_bus_resolved && (!Controller.readMRDCPin() || !Controller.readIORCPin())) {
     Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);
   }
@@ -785,7 +754,7 @@ void cycle() {
   CPU.bus_state = Controller.decodeBusStatus(CPU.status0);
   // Save last address bus value for skipped bus cycle detection.
   CPU.last_address_bus = CPU.address_bus;
-  CPU.address_bus = Controller.readAddressBus(true);
+  CPU.address_bus = Controller.readAddressBus(false);
   CPU.data_bus = Controller.readDataBus(CPU.data_width, true);
 
   CycleState cycle_state;
@@ -804,7 +773,7 @@ void cycle() {
   if (CPU.wait_state_ct >= CPU.wait_states) {
     // If we have waited enough, we can clear the wait state.
     Controller.writePin(OutputPin::Ready, true);
-    Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state cleared ##");
+    //Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state cleared ##");
   }
 
   // Check for CPU shutdown.
@@ -869,114 +838,79 @@ void cycle() {
 
   cycle_state.cpu_state = static_cast<uint8_t>(CPU.bus_cycle);
 
-// Handle queue activity
-#if HAVE_QUEUE_STATUS
-  if ((q == QUEUE_FIRST) || (q == QUEUE_SUBSEQUENT)) {
-    // We fetched a byte from queue last cycle
-    if (CPU.queue.len() > 0) {
-      CPU.queue.pop(&CPU.qb, &CPU.qt);
-      if (q == QUEUE_FIRST) {
-        // Set flag for first instruction byte fetched
-        CPU.q_ff = true;
-        CPU.q_fn = 0;  // First byte of instruction
-        CPU.opcode = CPU.qb;
-        CPU.mnemonic = get_opcode_str(CPU.opcode, 0, false);
-#if DEBUG_INSTR
-        if (!IS_GRP_OP(CPU.opcode)) {
-          DEBUG_SERIAL.print("INST: ");
-          DEBUG_SERIAL.println(CPU.mnemonic);
+  // Handle queue activity
+  if (CPU.have_queue_status) {
+    if ((q == QUEUE_FIRST) || (q == QUEUE_SUBSEQUENT)) {
+      // We fetched a byte from queue last cycle
+      if (CPU.queue.len() > 0) {
+        CPU.queue.pop(&CPU.qb, &CPU.qt);
+        if (q == QUEUE_FIRST) {
+          // Set flag for first instruction byte fetched
+          CPU.q_ff = true;
+          CPU.q_fn = 0;  // First byte of instruction
+          CPU.opcode = CPU.qb;
+          CPU.mnemonic = get_opcode_str(CPU.opcode, 0, false);
+ 
+          if (!IS_GRP_OP(CPU.opcode)) {
+            Controller.getBoard().debugPrintf(DebugType::INSTR, false, "## INST: %s ##\n\r", CPU.mnemonic);
+          } else {
+            Controller.getBoard().debugPrintln(DebugType::INSTR, "## INST: Decoding GRP... ##");
+          }
+
+        } 
+        else {
+          if (IS_GRP_OP(CPU.opcode) && CPU.q_fn == 1) {
+            CPU.mnemonic = get_opcode_str(CPU.opcode, CPU.qb, true);
+            Controller.getBoard().debugPrintf(DebugType::INSTR, false, "## INST: %s ##\n\r", CPU.mnemonic);
+          }
+          // Subsequent byte of instruction fetched
+          CPU.q_fn++;
+        }
+      } 
+      else {
+        // Queue read while queue empty? Bad condition.
+        if (ArduinoX86::Server.state() != ServerState::Reset) {
+          // Sometimes we get a spurious queue read signal in Reset.
+          // We can safely ignore any queue reads during the Reset state.
+          Controller.getBoard().debugPrintln(DebugType::ERROR, "## Error: Invalid Queue Length-- ##");
+        }
+      }
+    } 
+    else if (q == QUEUE_FLUSHED) {
+      // Queue was flushed last cycle.
+
+      // Warn if queue is flushed during CODE cycle.
+      if (CPU.bus_state_latched == CODE) {
+        const char *t_cycle_str = Controller.getTCycleString(CPU.bus_cycle);
+        Controller.getBoard().debugPrintf(DebugType::ERROR, "## FLUSH during CODE fetch! t-state: %s ##\n\r", t_cycle_str);
+      }
+
+      // The queue is flushed once during store program, so we need to adjust s_pc
+      // by the length of the queue when it was flushed or else we'll skip bytes
+      // of the store program.
+      if (CPU.s_pc > 0) {
+
+        if (CPU.s_pc < 4) {
+          Controller.getBoard().debugPrintln(DebugType::STORE, "## FLUSHed STORE bytes (early): Reset s_pc ##");
+          CPU.s_pc = 0;
+        } else if (CPU.s_pc >= CPU.queue.len()) {
+          uint16_t pc_adjust = (uint16_t)CPU.queue.len();
+
+          if ((pc_adjust & 1) && (CPU.width == CpuBusWidth::Sixteen)) {
+            // If we have an odd queue length and 16-bit fetches, account for one more byte
+            //pc_adjust++;
+          }
+          CPU.s_pc -= pc_adjust;
+          Controller.getBoard().debugPrintf(DebugType::STORE, false, "## FLUSHed STORE bytes: Adjusted s_pc by: %d new s_pc: %d ##\n\r", pc_adjust, CPU.s_pc);
         } else {
-          DEBUG_SERIAL.println("INST: Decoding GRP...");
+          Controller.getBoard().debugPrintln(DebugType::STORE, "## FLUSHed STORE bytes: Reset s_pc on flush");
         }
-#endif
-      } else {
-        if (IS_GRP_OP(CPU.opcode) && CPU.q_fn == 1) {
-          CPU.mnemonic = get_opcode_str(CPU.opcode, CPU.qb, true);
-#if DEBUG_INSTR
-          DEBUG_SERIAL.print("INST: ");
-          DEBUG_SERIAL.println(CPU.mnemonic);
-#endif
-        }
-        // Subsequent byte of instruction fetched
-        CPU.q_fn++;
       }
-    } else {
-      // Queue read while queue empty? Bad condition.
-      if (ArduinoX86::Server.state() != ServerState::Reset) {
-        // Sometimes we get a spurious queue read signal in Reset.
-        // We can safely ignore any queue reads during the Reset state.
-        debugPrintlnColor(ansi::bright_red, "## Error: Invalid Queue Length-- ##");
-      }
+
+      CPU.queue.flush();
+      Controller.getBoard().debugPrintf(DebugType::QUEUE, false, "## Queue Flushed, new PC: %04X ##\n\r", CPU.v_pc);
     }
-  } else if (q == QUEUE_FLUSHED) {
-    // Queue was flushed last cycle.
-
-    // Warn if queue is flushed during CODE cycle.
-    if (CPU.bus_state_latched == CODE) {
-      DEBUG_SERIAL.print("## FLUSH during CODE fetch! t-state: ");
-      switch (CPU.bus_cycle) {
-        case TI:
-          DEBUG_SERIAL.println("Ti");
-          break;
-        case T1:
-          DEBUG_SERIAL.println("T1");
-          break;
-        case T2:
-          DEBUG_SERIAL.println("T2");
-          break;
-        case T3:
-          DEBUG_SERIAL.println("T3");
-          break;
-        case TW:
-          DEBUG_SERIAL.println("Tw");
-          break;
-        case T4:
-          DEBUG_SERIAL.println("T4");
-          break;
-      }
-    }
-
-    // The queue is flushed once during store program, so we need to adjust s_pc
-    // by the length of the queue when it was flushed or else we'll skip bytes
-    // of the store program.
-    if (CPU.s_pc > 0) {
-
-      if (CPU.s_pc < 4) {
-#if DEBUG_STORE
-        DEBUG_SERIAL.println("## FLUSHed STORE bytes (early): Reset s_pc");
-#endif
-        CPU.s_pc = 0;
-      } else if (CPU.s_pc >= CPU.queue.len()) {
-        uint16_t pc_adjust = (uint16_t)CPU.queue.len();
-
-        if ((pc_adjust & 1) && (CPU.width == BusWidthSixteen)) {
-          // If we have an odd queue length and 16-bit fetches, account for one more byte
-          //pc_adjust++;
-        }
-        CPU.s_pc -= pc_adjust;
-#if DEBUG_STORE
-        DEBUG_SERIAL.print("## FLUSHed STORE bytes: Adjusted s_pc by: ");
-        DEBUG_SERIAL.print(pc_adjust);
-        DEBUG_SERIAL.print(" new s_pc: ");
-        DEBUG_SERIAL.println(CPU.s_pc);
-#endif
-      } else {
-#if DEBUG_STORE
-        DEBUG_SERIAL.print("## FLUSHed STORE bytes: Reset s_pc on flush");
-#endif
-        CPU.s_pc = 0;
-      }
-    }
-
-    CPU.queue.flush();
-
-#if DEBUG_QUEUE
-    DEBUG_SERIAL.println("## Queue Flushed ##");
-    DEBUG_SERIAL.print("## PC: ");
-    DEBUG_SERIAL.println(CPU.v_pc);
-#endif
   }
-#endif  // END IF HAVE_QUEUE_STATUS
 
   uint32_t run_address = 0;
 
@@ -1094,7 +1028,7 @@ void cycle() {
           // CPU is doing memory read
           // This will occur when RETEM pops IP, CS and Flags from the stack.
 
-          if (CPU.width == BusWidthEight) {
+          if (CPU.width == CpuBusWidth::Eight) {
             // Stack values will be read in two operations
             if (CPU.stack_r_op_ct == 0) {
               // Skip
@@ -1161,7 +1095,7 @@ void cycle() {
       if (!Controller.readMWTCPin() && (CPU.bus_state_latched == MEMW) && (CPU.bus_state == PASV)) {
         // CPU is writing. This should only happen during EmuExit when we PUSH PSW
         // to save the 8080 flags.
-        if (CPU.width == BusWidthEight) {
+        if (CPU.width == CpuBusWidth::Eight) {
           // 8-bit data bus
           if (CPU.stack_w_op_ct == 0) {
             // Flags will be in first byte written (second byte will be AL)
@@ -1393,16 +1327,16 @@ void handle_cpuid_state(uint8_t q) {
 
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
-    if (CPU.bus_state == CODE) {
+    if ((CPU.bus_state_latched == CODE) && (CPU.bus_cycle == WRITE_CYCLE)) {
       // We are reading a code byte
 
       // Feed the program if we haven't this bus cycle.
-      if (!CPU.data_bus_resolved && (CPU.program->has_remaining())) {
+      if (!CPU.data_bus_resolved) {
         // Feed CPU ID instruction to CPU.
         CPU.data_bus = CPU.program->read(CPU.address_latch, CPU.data_width);
         CPU.data_type = QueueDataType::Program;
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-
+        CPU.data_bus_resolved = true;
         CPU.program->debug_print(Controller.getBoard(), DebugType::ID, "## CPUID", CPU.data_bus);
       }
     }
@@ -1466,7 +1400,7 @@ void handle_cpu_setup_state() {
 void handle_jump_vector_state(uint8_t q) {
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
-    if (CPU.bus_state_latched == CODE) {
+    if ((CPU.bus_state_latched == CODE) && (CPU.bus_cycle == WRITE_CYCLE)) {
       // We are reading a code byte.
       // If the data bus hasn't been resolved this m-cycle, feed in the JUMP_VECTOR program
       if (!CPU.data_bus_resolved) {
@@ -1480,12 +1414,9 @@ void handle_jump_vector_state(uint8_t q) {
           CPU.data_bus = read_nops(CPU.data_width);
           CPU.data_type = QueueDataType::ProgramEnd;
         }
-
-        CPU.program->debug_print(Controller.getBoard(), DebugType::VECTOR, "## JUMP_VECTOR", CPU.data_bus);
-        CPU.data_bus_resolved = true;
-        
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-        //Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+        CPU.data_bus_resolved = true;
+        CPU.program->debug_print(Controller.getBoard(), DebugType::VECTOR, "## JUMP_VECTOR", CPU.data_bus);
       }
     }
   }
@@ -1842,7 +1773,7 @@ void handle_emu_enter_state(uint8_t q) {
   }
 
   if (!Controller.readMWTCPin()) {
-    if (CPU.width == BusWidthEight) {
+    if (CPU.width == CpuBusWidth::Eight) {
       // Flags will be read in two operations
       if (CPU.stack_w_op_ct == 0) {
 #if DEBUG_EMU
@@ -2380,7 +2311,7 @@ void reset_screen() {
 // Detect the CPU type based on the number of CPU cycles spent executing the
 // CPU ID program.
 void detect_cpu_type(uint32_t cpuid_cycles) {
-  if (CPU.width == BusWidthEight) {
+  if (CPU.width == CpuBusWidth::Eight) {
     if (cpuid_cycles > 5) {
       Controller.getBoard().debugPrintln(DebugType::ID, "detect_cpu_type(): Detected NEC V30H");
       CPU.cpu_type = CpuType::necV20;
@@ -2400,7 +2331,7 @@ void detect_cpu_type(uint32_t cpuid_cycles) {
 }
 
 void detect_fpu_type() {
-  CPU.fpu_type = i8087;
+  CPU.fpu_type = FpuType::i8087;
 }
 
 void do_frame_update() {
@@ -2425,6 +2356,11 @@ void do_frame_update() {
     screen->updateCell(0, 1, screen->makeColor(128, 128, 255), buf);
     screen->updateCell(1, 1, screen->makeColor(128, 128, 255), ArduinoX86::Server.get_state_string(ArduinoX86::Server.state()));
     fps_counter++;
+
+
+    // Get video memory buffer.
+    //uint8_t *vga_memory = ArduinoX86::Bus->get_ptr(0xA0000);
+    //screen->vga()->convert(vga_memory);
   }
 
   if (second_ms_accumulator >= 1000) {
@@ -2489,16 +2425,18 @@ void loop() {
   bool executing = (ArduinoX86::Server.get_state() == ServerState::Execute) ||
                   (ArduinoX86::Server.get_state() == ServerState::ExecuteFinalize) ||
                   (ArduinoX86::Server.get_state() == ServerState::ExecuteDone) ||
+                  (ArduinoX86::Server.get_state() == ServerState::Store) ||
                   (ArduinoX86::Server.get_state() == ServerState::StoreAll);
 
   if (executing && (ArduinoX86::Server.is_execute_automatic())) {
     CPU.execute_cycle_ct++;
-    if (CPU.execute_cycle_ct < EXECUTE_TIMEOUT) {
-      cycle();
-    }
-    else if (CPU.execute_cycle_ct == EXECUTE_TIMEOUT) {
-      Controller.getBoard().debugPrintln(DebugType::ERROR, "## Execute cycle timeout reached! Ending execution.");
-      ArduinoX86::Server.change_state(ServerState::Error);
-    }
+    cycle();
+    // if (CPU.execute_cycle_ct < EXECUTE_TIMEOUT) {
+    //   cycle();
+    // }
+    // else if (CPU.execute_cycle_ct == EXECUTE_TIMEOUT) {
+    //   Controller.getBoard().debugPrintln(DebugType::ERROR, "## Execute cycle timeout reached! Ending execution.");
+    //   ArduinoX86::Server.change_state(ServerState::Error);
+    // }
   }
 }

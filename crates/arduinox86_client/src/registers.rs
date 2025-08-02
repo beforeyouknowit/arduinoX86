@@ -21,9 +21,9 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use std::io::Write;
+use std::io::{Seek, Write};
 
-use binrw::BinReaderExt;
+use binrw::{binrw, BinReaderExt, BinWrite};
 use modular_bitfield::{bitfield, prelude::*};
 #[cfg(feature = "use_moo")]
 use moo::prelude::MooRegisters1Init;
@@ -33,6 +33,7 @@ use moo::types::MooRegisters1;
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
+#[derive(Clone)]
 pub enum RemoteCpuRegisters {
     V1(RemoteCpuRegistersV1),
     V2(RemoteCpuRegistersV2),
@@ -113,9 +114,33 @@ impl RemoteCpuRegisters {
             RemoteCpuRegisters::V3(regs) => regs.calculate_code_address(),
         }
     }
+
+    pub fn write<WS: Write + Seek>(&self, writer: &mut WS) -> std::io::Result<()> {
+        let mut buf = vec![0u8; 204];
+
+        match self {
+            RemoteCpuRegisters::V1(regs) => {
+                regs.write_buf(&mut buf);
+                writer.write_all(&buf[0..28])
+            }
+            // RemoteCpuRegisters::V2(regs) => {
+            //     regs.write_buf(&mut buf);
+            //     writer.write_all(&buf[0..102])
+            // }
+            RemoteCpuRegisters::V3(regs) => regs.write_le(writer).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to write RemoteCpuRegistersV3: {}", e),
+                )
+            }),
+            _ => {
+                unimplemented!("Need V2 write_buf() implementation");
+            }
+        }
+    }
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct RemoteCpuRegistersV1 {
     pub ax:    u16,
     pub bx:    u16,
@@ -311,7 +336,7 @@ impl SegmentDescriptorV1 {
 
 /// [RemoteCpuRegistersV2] is the full set of registers for the Intel 80286.
 /// This structure is loaded via the LOADALL instruction, 0F 05.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RemoteCpuRegistersV2 {
     pub x0: u16,
     pub x1: u16,
@@ -486,6 +511,8 @@ impl Default for RemoteCpuRegistersV2 {
     }
 }
 
+#[binrw]
+#[brw(little)]
 #[derive(Clone, Default)]
 pub struct SegmentDescriptorV2 {
     pub access:  u32,
@@ -493,9 +520,18 @@ pub struct SegmentDescriptorV2 {
     pub limit:   u32,
 }
 
+impl SegmentDescriptorV2 {
+    pub fn with_access(mut self, access: u32) -> Self {
+        self.access = access;
+        self
+    }
+}
+
 /// [RemoteCpuRegistersV2] is the full set of registers for the Intel 80286.
 /// This structure is loaded via the LOADALL instruction, 0F 05.
-#[derive(Default)]
+#[binrw]
+#[brw(little)]
+#[derive(Clone)]
 pub struct RemoteCpuRegistersV3 {
     pub cr0: u32,    // +00
     pub eflags: u32, // +04
@@ -536,6 +572,55 @@ pub struct RemoteCpuRegistersV3 {
     pub ss_desc: SegmentDescriptorV2,
     pub cs_desc: SegmentDescriptorV2,
     pub es_desc: SegmentDescriptorV2,
+}
+
+impl Default for RemoteCpuRegistersV3 {
+    fn default() -> Self {
+        RemoteCpuRegistersV3 {
+            cr0: 0,
+            eflags: 0x00000002, // reserved bit 1 set
+            eip: 0,
+            edi: 0,
+            esi: 0,
+            ebp: 0,
+            esp: 0,
+            ebx: 0,
+            edx: 0,
+            ecx: 0,
+            eax: 0,
+            dr6: 0,
+            dr7: 0,
+            tr: 0,
+            tr_pad: 0,
+            ldt: 0,
+            ldt_pad: 0,
+            gs: 0,
+            gs_pad: 0,
+            fs: 0,
+            fs_pad: 0,
+            ds: 0,
+            ds_pad: 0,
+            ss: 0,
+            ss_pad: 0,
+            cs: 0xFFF0, // Reset vector
+            cs_pad: 0,
+            es: 0,
+            es_pad: 0,
+
+            // Default access values provided by Robert Collins
+            // https://www.rcollins.org/ftp/source/386load/386load.asm
+            tss_desc: SegmentDescriptorV2::default().with_access(0x00008900),
+            idt_desc: SegmentDescriptorV2::default().with_access(0x00008000),
+            gdt_desc: SegmentDescriptorV2::default().with_access(0x00008000),
+            ldt_desc: SegmentDescriptorV2::default().with_access(0x00008200),
+            gs_desc:  SegmentDescriptorV2::default().with_access(0x00009300),
+            fs_desc:  SegmentDescriptorV2::default().with_access(0x00009300),
+            ds_desc:  SegmentDescriptorV2::default().with_access(0x00009300),
+            ss_desc:  SegmentDescriptorV2::default().with_access(0x00009300),
+            cs_desc:  SegmentDescriptorV2::default().with_access(0x00009B00),
+            es_desc:  SegmentDescriptorV2::default().with_access(0x00009300),
+        }
+    }
 }
 
 impl RemoteCpuRegistersV3 {

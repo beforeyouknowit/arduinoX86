@@ -18,8 +18,8 @@ org	0h
 ; -----------------------------------------------------------------------------
 %define CS_REG      0x1000
 %define EIP_REG     0x00000000
-%define CR0_REG     0x7FFFFFE0
-%define DR6_REG     0x00000000
+%define CR0_REG     0x7FFEFFF0
+%define DR6_REG     0xFFFF0FF0
 %define DR7_REG     0x00000000
 
 %define EFLAGS_REG  0x00000002
@@ -42,8 +42,6 @@ org	0h
 %define ESI_REG     0x22222222
 %define EBP_REG     0x33333333
 %define ESP_REG     0xFFFFFFF4
-
-
 
 %define X0_REG      0x00000000
 %define X1_REG      0x0000

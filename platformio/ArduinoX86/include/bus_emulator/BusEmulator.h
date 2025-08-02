@@ -156,6 +156,15 @@ public:
     cpu_type_ = cpu_type;
   }
 
+  void replace_backend(IBusBackend* backend) {
+    delete backend_;
+    backend_ = backend;
+  }
+
+  size_t mem_size() const {
+    return backend_->size();
+  }
+
   // Memory reads: isFetch==true logs as CodeFetch
   uint8_t mem_read_u8(uint32_t address, bool isFetch) {
     uint8_t val = backend_->read_u8(address);
@@ -176,6 +185,10 @@ public:
       val
     });
     return val;
+  }
+  uint8_t *get_ptr(uint32_t address) {
+    uint8_t *ptr = backend_->get_ptr(address);
+    return ptr;
   }
   void mem_write_u8(uint32_t address, uint8_t value) {
     backend_->write_u8(address, value);
@@ -330,7 +343,7 @@ inline BusEmulator* create_bus_emulator() {
   );
 #else
   return new BusEmulator(
-      new NullBackend()
+      new HashBackend()
   );
 #endif
 }

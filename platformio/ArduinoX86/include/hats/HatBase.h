@@ -66,8 +66,8 @@ class HatBase {
       static_cast<Derived*>(this)->writeDataBusImpl(b, d, w);
     }
 
-    static uint32_t readAddressBus(bool peek) {
-       return Derived::readAddressBusImpl(peek);
+    uint32_t readAddressBus(bool peek) {
+       return static_cast<Derived*>(this)->readAddressBusImpl(peek);
     }
 
     int8_t readCpuStatusLines() {
@@ -214,10 +214,6 @@ class HatBase {
     ActiveBusWidth writeBusWidth = ActiveBusWidth::Sixteen; // Default write bus width is 16 bits
     size_t dataBusWidth = 16; // Default data bus width is 16 bits
 
-  static void initPinsCommon() {
-    // … shared pin‐setup …
-  }
-
   void setBusDirectionImpl(BusDirection direction, ActiveBusWidth width = ActiveBusWidth::Sixteen) {
     if ((direction == busDirection) && (width == writeBusWidth)) {
       return; // No change needed
@@ -235,7 +231,8 @@ class HatBase {
         GPIOJ->MODER = (GPIOJ->MODER & PORT_J_DBUS_MASK) | PORT_J_DBUS_READ;
         GPIOG->MODER = (GPIOG->MODER & PORT_G_DBUS_MASK) | PORT_G_DBUS_READ;
       #endif
-    } else {
+    } 
+    else {
       // Set data bus pins to output
       #if defined(__SAM3X8E__)
         if ((width == EightLow) || (width == Sixteen)) {
@@ -273,6 +270,10 @@ class HatBase {
 
     busDirection = direction;
     writeBusWidth = width;
+  }
+
+  static void initPinsCommon() {
+    // … shared pin‐setup …
   }
 
   virtual ~HatBase() = default;

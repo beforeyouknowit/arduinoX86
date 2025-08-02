@@ -19,6 +19,7 @@ rand.workspace = true
 rand_distr.workspace = true
 thiserror.workspace = true
 moo-rs = { workspace = true, optional = true }
+strum_macros.workspace = true
 
 [features]
 use_moo = ["dep:moo-rs"]

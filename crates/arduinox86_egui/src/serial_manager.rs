@@ -1,4 +1,26 @@
-use serialport::SerialPortInfo;
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+use serialport::{SerialPortInfo, SerialPortType};
 
 #[derive(Default)]
 pub struct SerialManager {
@@ -16,23 +38,33 @@ impl SerialManager {
         self.ports = serialport::available_ports().unwrap_or_else(|_| vec![]);
     }
 
-    pub fn port_names(&self) -> Vec<String> {
+    pub fn port_display_names(&self) -> Vec<String> {
         self.ports
             .iter()
             .map(|port| match &port.port_type {
-                serialport::SerialPortType::UsbPort(info) => {
+                SerialPortType::UsbPort(info) => {
                     format!(
                         "{} ({})",
                         port.port_name,
                         info.product.as_deref().unwrap_or("Unknown USB Device")
                     )
                 }
-                serialport::SerialPortType::BluetoothPort => {
+                SerialPortType::BluetoothPort => {
                     format!("{} (Bluetooth)", port.port_name)
+                }
+                SerialPortType::PciPort => {
+                    format!("{} (PCI)", port.port_name)
+                }
+                SerialPortType::Unknown => {
+                    format!("{} (Unknown)", port.port_name)
                 }
                 _ => port.port_name.clone(),
             })
             .collect()
+    }
+
+    pub fn port_names(&self) -> Vec<String> {
+        self.ports.iter().map(|port| port.port_name.clone()).collect()
     }
 
     pub fn ports(&self) -> &[SerialPortInfo] {

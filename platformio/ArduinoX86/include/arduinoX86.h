@@ -32,9 +32,11 @@
 #include <BusTypes.h>
 #include <Hat.h>
 #include <gpio_pins.h>
+#include <Cpu.h>
 #include <InstructionQueue.h>
 #include <InlineProgram.h>
 #include <programs.h>
+#include <registers.h>
 
 // Code segment to use for load program.
 const uint16_t LOAD_SEG = 0xD000;
@@ -43,215 +45,6 @@ const uint32_t NMI_ADDR = 0x00008;
 
 // Maximum size of the processor instruction queue. For 8088 == 4, 8086 == 6. 
 #define QUEUE_SIZE 6
-
-// CPU width. Eight if an 8088/V20 is detected on reset, Sixteen if an 8086/V30 is detected. 
-typedef enum {
-  BusWidthEight,
-  BusWidthSixteen,
-} cpu_width_t;
-
-// Type of CPU. These are either detected or specified by the configured hat.
-enum class CpuType : uint8_t {
-  Undetected,
-  i8088, 
-  i8086,
-  necV20,
-  necV30,
-  i80188,
-  i80186,
-  i80286,
-  i80386,
-};
-
-typedef enum {
-  noFpu,
-  i8087,
-} fpu_type_t;
-
-// CPU Registers - for new NMI STORE routine
-typedef struct __attribute__((packed)) registers1 {
-  uint16_t ax;
-  uint16_t bx;
-  uint16_t cx;
-  uint16_t dx;
-  uint16_t ip;
-  uint16_t cs;
-  uint16_t flags;
-  uint16_t ss;
-  uint16_t sp;
-  uint16_t ds;
-  uint16_t es;
-  uint16_t bp;
-  uint16_t si;
-  uint16_t di;
-} registers1_t;
-
-// CPU Registers - for original STORE routine
-typedef struct __attribute__((packed)) registers2 {
-  uint16_t ax;
-  uint16_t bx;
-  uint16_t cx;
-  uint16_t dx;
-  uint16_t ss;
-  uint16_t sp;
-  uint16_t flags;
-  uint16_t ip;
-  uint16_t cs;
-  uint16_t ds;
-  uint16_t es;
-  uint16_t bp;
-  uint16_t si;
-  uint16_t di;
-} registers2_t;
-
-
-struct __attribute__((packed)) SegmentDescriptor286 {
-  uint16_t addr_lo;
-  uint8_t addr_hi;
-  uint8_t access;
-  uint16_t limit;
-};
-
-struct __attribute__((packed)) SegmentDescriptor386 {
-  uint32_t access;
-  uint32_t address;
-  uint32_t limit;
-};
-
-// CPU Registers - for 286 LOADALL command
-struct __attribute__((packed)) Loadall286 {
-  uint16_t x0;
-  uint16_t x1;
-  uint16_t x2;
-  uint16_t msw;
-  uint16_t x3;
-  uint16_t x4;
-  uint16_t x5;
-  uint16_t x6;
-  uint16_t x7;
-  uint16_t x8;
-  uint16_t x9;
-  uint16_t tr;
-  uint16_t flags;
-  uint16_t ip;
-  uint16_t ldt;
-  uint16_t ds;
-  uint16_t ss;
-  uint16_t cs;
-  uint16_t es;
-  uint16_t di;
-  uint16_t si;
-  uint16_t bp;
-  uint16_t sp;
-  uint16_t bx;
-  uint16_t dx;
-  uint16_t cx;
-  uint16_t ax;
-  SegmentDescriptor286 es_desc;
-  SegmentDescriptor286 cs_desc;
-  SegmentDescriptor286 ss_desc;
-  SegmentDescriptor286 ds_desc;
-  SegmentDescriptor286 gdt_desc;
-  SegmentDescriptor286 ldt_desc;
-  SegmentDescriptor286 idt_desc;
-  SegmentDescriptor286 tss_desc;
-
-  /// @brief Patch the Loadall286 registers from a CallStackFrame.
-  void patch_stack_frame(const CallStackFrame& frame) {
-    flags = frame.flags;
-    cs    = frame.cs;
-    ip    = frame.ip;
-    sp += 6; // Adjust SP to account for the pushed flags, CS, and IP
-  }
-
-  void rewind_ip(uint16_t offset) {
-    ip -= offset;
-  }
-};
-
-#define LOADALL286_ADDRESS 0x800
-
-struct __attribute__((packed)) Store386 {
-  uint32_t eax;
-  uint32_t ebx;
-  uint32_t ecx;
-  uint32_t edx; 
-  uint32_t eip;
-  uint16_t cs;
-  uint16_t cs_pad;
-  uint32_t eflags;
-  uint16_t ss;
-  uint16_t ss_pad;
-  uint32_t esp;
-  uint16_t ds;
-  uint16_t ds_pad;
-  uint16_t es;
-  uint16_t es_pad;
-  uint16_t fs;
-  uint16_t fs_pad;
-  uint16_t gs;
-  uint16_t gs_pad;
-  uint32_t ebp;
-  uint32_t esi;
-  uint32_t edi;
-};
-
-struct __attribute__((packed)) Loadall386 {
-  uint32_t cr0;
-  uint32_t eflags;
-  uint32_t eip;
-  uint32_t edi;
-  uint32_t esi;
-  uint32_t ebp;
-  uint32_t esp;
-  uint32_t ebx;
-  uint32_t edx;
-  uint32_t ecx;
-  uint32_t eax;
-  uint32_t dr6;
-  uint32_t dr7;
-  uint16_t tr;
-  uint16_t tr_pad;
-  uint16_t ldt;
-  uint16_t ldt_pad;
-  uint16_t gs;
-  uint16_t gs_pad;
-  uint16_t fs;
-  uint16_t fs_pad;
-  uint16_t ds;
-  uint16_t ds_pad;
-  uint16_t ss;
-  uint16_t ss_pad;
-  uint16_t cs;
-  uint16_t cs_pad;
-  uint16_t es;
-  uint16_t es_pad;
-  SegmentDescriptor386 tss_desc;
-  SegmentDescriptor386 idt_desc;
-  SegmentDescriptor386 gdt_desc;
-  SegmentDescriptor386 ldt_desc;
-  SegmentDescriptor386 gs_desc;
-  SegmentDescriptor386 fs_desc;
-  SegmentDescriptor386 ds_desc;
-  SegmentDescriptor386 ss_desc;
-  SegmentDescriptor386 cs_desc;
-  SegmentDescriptor386 es_desc;
-
-
-    /// @brief Patch the Loadall386 registers from a CallStackFrame386.
-  void patch_stack_frame(const CallStackFrame386& frame) {
-    eflags = frame.eflags;
-    cs     = frame.cs;
-    eip    = frame.eip;
-    esp   += 6; // Adjust ESP to account for the pushed eflags, CS, and EIP
-  }
-
-  void rewind_ip(uint32_t offset) {
-    eip -= offset;
-  }
-};
-
-#define LOADALL386_ADDRESS 0x800
 
 // Processor instruction queue
 typedef struct queue {
@@ -286,68 +79,6 @@ typedef struct program_stats {
   uint32_t idle_cycles;
   uint32_t program_cycles;
 } p_stats;
-
-// Main CPU State
-typedef struct cpu {
-  bool doing_reset;
-  bool doing_id;
-  CpuType cpu_type; // Detected type of the CPU.
-  fpu_type_t fpu_type; // Detected type of FPU (0 if none)
-  cpu_width_t width; // Native bus width of the CPU. Detected on reset from BHE line.
-  bool do_emulation; // Flag that determines if we enter 8080 emulation mode after Load
-  bool in_emulation; // Flag set when we have entered 8080 emulation mode and cleared when we have left
-  bool do_prefetch; // Flag that determines if we enter Prefetch state and execute a prefetch program.
-  uint32_t cpuid_counter; // Cpuid cycle counter. Used to time to identify the CPU type.
-  uint32_t cpuid_queue_reads; // Number of queue reads since reset of Cpuid cycle counter.
-  uint32_t state_begin_time;
-  uint32_t last_address_bus;
-  uint32_t address_bus;
-  uint32_t address_latch;
-  BusStatus bus_state_latched; // Bus state latched on T1 and valid for entire bus cycle (immediate bus state goes PASV on T3)
-  BusStatus bus_state; // Bus state is current status of S0-S2 at given cycle (may not be valid)
-  TCycle last_bus_cycle;
-  TCycle bus_cycle;
-  ActiveBusWidth data_width; // Current size of data bus. Detected during bus transfer from BHE line.
-  uint16_t data_bus;
-  bool data_bus_resolved; // Whether we have resolved the data bus this m-cycle or not.
-  bool prefetching_store;
-  uint8_t reads_during_prefetching_store;
-  QueueDataType data_type;
-  uint8_t status0; // S0-S5, QS0 & QS1
-  uint8_t command_bits; // 8288 command outputs
-  uint8_t control_bits; // 8288 control outputs
-  uint16_t v_pc; // Virtual program counter
-  uint16_t s_pc; // Store program counter
-  uint16_t stack_r_op_ct; // Number of stack read operations in current state
-  uint16_t stack_w_op_ct; // Number of stack write operations in current state
-  uint16_t pre_emu_flags; // Flags pushed to stack by BRKEM
-  uint8_t emu_flags; // Flags pushed to stack by PUSH PSW during EmuExit program
-  volatile registers1_t load_regs; // Register state set by Load command
-  volatile Loadall286 loadall_regs_286; // Register state set by Loadall command on 286
-  volatile Loadall386 loadall_regs_386; // Register state set by Loadall command on 386
-  volatile registers1_t post_regs; // Register state retrieved from Store program
-  uint8_t *readback_p;
-  bool have_queue_status; // Whether we have access to the queue status lines. Can be detected during RESET.
-  InstructionQueue queue; // Instruction queue
-  uint8_t opcode; // Currently executing opcode
-  const char *mnemonic; // Decoded mnemonic
-  uint8_t qb; // Last byte value read from queue
-  QueueDataType qt; // Last data type read from queue
-  bool q_ff; // Did we fetch a first instruction byte from the queue this cycle?
-  uint8_t q_fn; // What # byte of instruction did we fetch?
-  bool nmi_terminate; // Whether we are entering ExecuteFinalize via NMI termination.
-  uint8_t nmi_checkpoint; // How many reads we have done at the NMI IVT address.
-  uint16_t nmi_buf_cursor;
-  InlineProgram *program = &JUMP_VECTOR;
-  CallStackFrame nmi_stack_frame; // NMI stack frame for 286/386 CPUs
-  uint8_t loadall_checkpoint;
-  int error_cycle_ct;
-  int execute_cycle_ct;
-  int wait_states;
-  int wait_state_ct;
-  bool exception_armed;
-  uint32_t predicted_fetch;
-} Cpu;
 
 typedef struct i8288 {
   BusStatus last_status; // S0-S2 of previous cycle
@@ -467,9 +198,8 @@ bool readParameterBytes(uint8_t *buf, size_t buf_len, size_t len);
 
 uint32_t calc_flat_address(uint16_t seg, uint16_t offset);
 
-void reset_cpu_struct(bool reset_regs);
 void clock_tick();
-void data_bus_write(uint16_t data, cpu_width_t width);
+void data_bus_write(uint16_t data, CpuBusWidth width);
 uint16_t data_bus_read();
 
 // cpu.cpp
@@ -477,13 +207,13 @@ void read_address(bool peek);
 void read_status0();
 uint8_t read_status0_raw();
 bool cpu_reset();
-void cpu_set_width(cpu_width_t width);
+void cpu_set_width(CpuBusWidth width);
 const char *get_opcode_str(uint8_t op1, uint8_t op2, bool modrm);
 
 // bus.cpp
 void data_bus_write(uint16_t data, ActiveBusWidth width);
 uint16_t data_bus_read(ActiveBusWidth width);
-uint16_t data_bus_peek(cpu_width_t width);
+uint16_t data_bus_peek(CpuBusWidth width);
 void read_address();
 uint32_t peek_address();
 void latch_address();

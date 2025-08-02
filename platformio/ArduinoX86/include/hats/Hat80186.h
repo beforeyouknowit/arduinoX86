@@ -43,16 +43,23 @@
 #define INTR_PIN 12
 #define NMI_PIN 13
 
-  // How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
-  #define RESET_HOLD_CYCLE_COUNT 5
-  // How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
-  #define RESET_CYCLE_COUNT 7
-  // If we didn't see an ALE after this many cycles, give up
-  #define RESET_CYCLE_TIMEOUT 20
-  // What logic level RESET is when asserted
-  #define RESET_ASSERT 1
-  // What logic level RESET is when deasserted
-  #define RESET_DEASSERT 0
+// How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
+#define RESET_HOLD_CYCLE_COUNT 30
+// How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
+#define RESET_CYCLE_COUNT 35
+// If we didn't see an ALE after this many cycles, give up
+#define RESET_CYCLE_TIMEOUT 45
+// What logic level RESET is when asserted
+#define RESET_ASSERT 0
+// What logic level RESET is when deasserted
+#define RESET_DEASSERT 1
+#define EMULATE_8288 0
+#define HAVE_QUEUE_STATUS 0
+
+#define ADDRESS_SPACE_MASK 0xFFFFF // 20-bit address space for 80186
+#define WRITE_CYCLE T3
+#define STORE_TIMEOUT 1000
+#define LOAD_TIMEOUT 1000
 
 class Hat80186 : public HatBase<Hat80186> {
 private:

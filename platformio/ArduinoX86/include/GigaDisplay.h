@@ -1,6 +1,31 @@
+/*
+    Arduino8088 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduino_8088
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+
+
 #include <Arduino.h>
 #include "Arduino_GigaDisplay_GFX.h"
 #include "Display.h"
+#include "Vga.h"
 
 class GigaDisplay : public Display {
 
@@ -19,6 +44,7 @@ private:
   static constexpr uint16_t gray25 = 0x4208; // 25% gray in RGB565 format
 
   GigaDisplay_GFX &display;
+  Vga *vga_;
   bool _isInitialized = false;
   int _rows;
 
@@ -41,7 +67,9 @@ private:
   }
 
 public:
-  GigaDisplay(GigaDisplay_GFX& ref) : display(ref) {}
+  GigaDisplay(GigaDisplay_GFX& ref) : display(ref) {
+    //vga_ = new Vga();
+  }
 
   void init() override {
     display.begin();
@@ -133,5 +161,13 @@ public:
   void flush() override {
     if (!_isInitialized) { return;}
     display.flush();
+  }
+
+  void drawVgaFrame(uint8_t *frame_buffer) {
+    display.drawBitmap(0, 0, frame_buffer, display.width(), display.height(), white);
+  }
+
+  Vga *vga() {
+    return vga_;
   }
 };

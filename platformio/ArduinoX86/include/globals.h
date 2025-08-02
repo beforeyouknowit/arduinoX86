@@ -41,6 +41,8 @@ namespace ArduinoX86 {
   extern CycleStateLogger *CycleLogger;
 }
 
+extern bool screen_init_requested;
+
 // cpu_server.cpp
 extern const char RESPONSE_CHRS[];
 extern const char VERSION_DAT[];

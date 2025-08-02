@@ -1,0 +1,98 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+use std::{
+    env,
+    error::Error,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+
+/// A little wrapper around calling `nasm` from Rust.
+pub struct Assembler {
+    nasm_path: PathBuf,
+    format:    String,
+}
+
+impl Default for Assembler {
+    fn default() -> Self {
+        Self::new("bin")
+    }
+}
+
+impl Assembler {
+    pub fn new<S: Into<String>>(format: S) -> Self {
+        let nasm_path = if let Ok(p) = env::var("NASM_PATH") {
+            PathBuf::from(p)
+        }
+        else {
+            PathBuf::from("nasm")
+        };
+
+        Assembler {
+            nasm_path,
+            format: format.into(),
+        }
+    }
+
+    /// Override where to find the `nasm` executable.
+    pub fn with_nasm_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.nasm_path = path.into();
+        self
+    }
+
+    /// Assemble the given in-memory assembly (as `&str`) into `output_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spawning `nasm` fails or if NASM exits with a non-zero code.
+    pub fn assemble_str<P: AsRef<Path>>(&self, asm: &str, output_path: P) -> Result<(), Box<dyn Error>> {
+        let mut child = Command::new(&self.nasm_path)
+            .arg("-f")
+            .arg(&self.format)
+            .arg("-o")
+            .arg(output_path.as_ref())
+            .arg("-") // read from stdin
+            .stdin(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(asm.as_bytes())?;
+            // drop(stdin) to close
+        }
+
+        let status = child.wait()?;
+        if !status.success() {
+            return Err(format!(
+                "nasm (`{}`) failed with exit code {}",
+                self.nasm_path.display(),
+                status.code().unwrap_or(-1)
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+}

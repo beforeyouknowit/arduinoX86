@@ -60,28 +60,38 @@ void cycle();
 #define BHE_PIN 13
 #define HOLD_PIN 76 // A0
 #define READY_PIN 77 // A1
-#define NMI_PIN 84 // A2
 #define BS8_PIN 79 // A3
 #define RW_PIN 82 // A6
-#define INTR_PIN 83 // A7
+#define INTR_PIN 84
+#define NMI_PIN 85
 #define READ_BHE_PIN READ_PIN_D13
-#define READ_READY_PIN READ_PIN_D77
+
+#define READ_READY_PIN READ_PIN_D84
+#define WRITE_PIN_READY(x) WRITE_PIN_D84(x)
+
 #define READ_RESET_PIN READ_PIN_D05
-#define READ_NMI_PIN READ_PIN_D84
-#define READ_INTR_PIN READ_PIN_D79
+
+#define READ_INTR_PIN READ_PIN_A1
+#define WRITE_PIN_INTR(x) WRITE_PIN_A1(x)
+
+#define READ_NMI_PIN READ_PIN_D85
+#define WRITE_PIN_NMI(x) WRITE_PIN_D85(x)
+
 #define READ_RW_PIN READ_PIN_D82
 #define READ_DC_PIN READ_PIN_D08
 
 #define READ_TEST_PIN READ_PIN_D06
 #define WRITE_TEST_PIN(x) WRITE_PIN_D06(x) 
+
 #define WRITE_BS8_PIN(x) WRITE_PIN_A3(x)
+
 #define READ_LOCK_PIN READ_PIN_D07 
 
 #define READ_S0_PIN READ_MRDC_PIN
 #define READ_S1_PIN READ_MWTC_PIN
 #define READ_M_IO_PIN READ_PIN_D10
 
-// ------------------------- 82288 status pins --------------------------------
+// ------------------------- CPU bus status pins -------------------------------
 #define READ_ALE_PIN (!READ_PIN_D09)
 
 #define READ_MRDC_PIN (!(!READ_PIN_A5 && READ_M_IO_PIN))
@@ -206,7 +216,7 @@ private:
   static constexpr int ADDRESS_LINES = 22;
   static constexpr int ADDRESS_DIGITS = 6; // 22 bits = 6 digits in hex
 
-  static constexpr std::array<int,9> OUTPUT_PINS = {
+  static constexpr std::array<int,10> OUTPUT_PINS = {
     4,  // CLK
     5,  // RESET
     6,  // BUSY
@@ -215,7 +225,8 @@ private:
     78, // NMI (A2)
     79, // BS8 (A3)
     83, // TEST/BUSY (A7)
-    84  // NMI
+    84, // INTR
+    85  // NMI
   };
 
   // All input pins, used to set pin direction on setup
@@ -246,8 +257,6 @@ public:
     for (auto pin : INPUT_PINS) {
       pinMode(pin, INPUT);
     }
-
-    pinMode(RW_PIN, INPUT_PULLUP);
 
     digitalWrite(INTR_PIN, LOW);  // Must set these to a known value or risk spurious interrupts!
     digitalWrite(NMI_PIN, LOW);   // Must set these to a known value or risk spurious interrupts!
@@ -282,7 +291,7 @@ public:
     }
   }
 
-    static bool isTransferDoneImpl(BusStatus latched_status) {
+  static bool isTransferDoneImpl(BusStatus latched_status) {
     return true;
     // switch (latched_status) {
     //   case IOR:
@@ -467,10 +476,10 @@ public:
   }
 
     /// Read the multiplexed address bus. Returns a 20-bit value.
-  uint32_t readAddressBus(bool peek) {
+  uint32_t readAddressBusImpl(bool peek = true) {
     // If we're not peeking, set the bus direction to input
     if (!peek) {
-      setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
+      //setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
     }
 
     uint32_t address = 0;
@@ -505,7 +514,7 @@ public:
   static void writePinImpl(OutputPin pin, bool value) {
     switch (pin) {
       case OutputPin::Ready:
-        WRITE_PIN_A1(value);
+        WRITE_PIN_READY(value);
         break;
       case OutputPin::Test:
         // !BUSY is tied to Vcc, so we don't control it.
@@ -515,7 +524,7 @@ public:
         WRITE_PIN_A3(value);
         break;
       case OutputPin::Nmi:
-        WRITE_PIN_D84(value);
+        WRITE_PIN_NMI(value);
         break;
       default:
         // Handle other pins if necessary
@@ -617,15 +626,12 @@ public:
   static bool readALEPinImpl() {
     return READ_ALE_PIN;
   }
-
   static bool readLockPinImpl() {
     return READ_LOCK_PIN;
   }
-    static bool readReadyPinImpl() {
-    // Read the READY pin
+  static bool readReadyPinImpl() {
     return READ_READY_PIN;
   }
-
   static bool readMRDCPinImpl() {
     return READ_MRDC_PIN;
   }

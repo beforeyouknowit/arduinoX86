@@ -1,0 +1,171 @@
+/*
+    ArduinoX86 Copyright 2022-2025 Daniel Balsom
+    https://github.com/dbalsom/arduinoX86
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the “Software”),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+*/
+#pragma once
+#include <Arduino.h>
+#include <CpuTypes.h>
+#include <BusTypes.h>
+#include <InstructionQueue.h>
+#include <programs.h>
+#include <registers.h>
+
+// Main CPU State
+class Cpu {
+public:
+
+  CpuType cpu_type; // Detected type of the CPU.
+  FpuType fpu_type; // Detected type of FPU (0 if none)
+  CpuBusWidth width; // Native bus width of the CPU. Detected on reset from BHE line.
+  bool doing_reset;
+  bool doing_id;
+  bool do_emulation; // Flag that determines if we enter 8080 emulation mode after Load
+  bool in_emulation; // Flag set when we have entered 8080 emulation mode and cleared when we have left
+  bool do_prefetch; // Flag that determines if we enter Prefetch state and execute a prefetch program.
+  uint32_t cpuid_counter; // Cpuid cycle counter. Used to time to identify the CPU type.
+  uint32_t cpuid_queue_reads; // Number of queue reads since reset of Cpuid cycle counter.
+  uint32_t state_begin_time;
+  uint32_t last_address_bus;
+  uint32_t address_bus;
+  uint32_t address_latch;
+  BusStatus bus_state_latched; // Bus state latched on T1 and valid for entire bus cycle (immediate bus state goes PASV on T3)
+  BusStatus bus_state; // Bus state is current status of S0-S2 at given cycle (may not be valid)
+  TCycle last_bus_cycle;
+  TCycle bus_cycle;
+  ActiveBusWidth data_width; // Current size of data bus. Detected during bus transfer from BHE line.
+  uint16_t data_bus;
+  bool data_bus_resolved; // Whether we have resolved the data bus this m-cycle or not.
+  bool prefetching_store;
+  uint8_t reads_during_prefetching_store;
+  QueueDataType data_type;
+  uint8_t status0; // S0-S5, QS0 & QS1
+  uint8_t command_bits; // 8288 command outputs
+  uint8_t control_bits; // 8288 control outputs
+  uint16_t v_pc; // Virtual program counter
+  uint16_t s_pc; // Store program counter
+  uint16_t stack_r_op_ct; // Number of stack read operations in current state
+  uint16_t stack_w_op_ct; // Number of stack write operations in current state
+  uint16_t pre_emu_flags; // Flags pushed to stack by BRKEM
+  uint8_t emu_flags; // Flags pushed to stack by PUSH PSW during EmuExit program
+  volatile registers1_t load_regs; // Register state set by Load command
+  volatile Loadall286 loadall_regs_286; // Register state set by Loadall command on 286
+  volatile Loadall386 loadall_regs_386; // Register state set by Loadall command on 386
+  volatile registers1_t post_regs; // Register state retrieved from Store program
+  uint8_t *readback_p;
+  bool have_queue_status; // Whether we have access to the queue status lines. Can be detected during RESET.
+  InstructionQueue queue; // Instruction queue
+  uint8_t opcode; // Currently executing opcode
+  const char *mnemonic; // Decoded mnemonic
+  uint8_t qb; // Last byte value read from queue
+  QueueDataType qt; // Last data type read from queue
+  bool q_ff; // Did we fetch a first instruction byte from the queue this cycle?
+  uint8_t q_fn; // What # byte of instruction did we fetch?
+  bool nmi_terminate; // Whether we are entering ExecuteFinalize via NMI termination.
+  uint8_t nmi_checkpoint; // How many reads we have done at the NMI IVT address.
+  uint16_t nmi_buf_cursor;
+  InlineProgram *program = &JUMP_VECTOR;
+  CallStackFrame nmi_stack_frame; // NMI stack frame for 286/386 CPUs
+  uint8_t loadall_checkpoint;
+  int error_cycle_ct;
+  int execute_cycle_ct;
+  int wait_states;
+  int wait_state_ct;
+  bool exception_armed;
+  uint32_t predicted_fetch;
+
+  void reset(CpuResetResult reset_result, bool preserve_bus_state = false, bool reset_registers = false) {
+
+    // Retain detected cpu & fpu type and emulation flags.
+    //cpu_type = CpuType::Undetected;
+    //fpu_type = FpuType::noFpu;
+    if (reset_result.busWidth == BusWidth::Eight) {
+      width = CpuBusWidth::Eight;
+      queue = InstructionQueue(4, BusWidth::Eight);
+    } else {
+      width = CpuBusWidth::Sixteen;
+      queue = InstructionQueue(6, BusWidth::Sixteen);
+    }
+    doing_reset = false;
+    doing_id = false;
+    //do_emulation = false;
+    in_emulation = false;
+    do_prefetch = false;
+    cpuid_counter = 0;
+    cpuid_queue_reads = 0;
+    state_begin_time = 0;
+
+    if (!preserve_bus_state) {
+      last_address_bus = 0;
+      address_bus = 0;
+      address_latch = 0;
+      bus_state_latched = BusStatus::PASV;
+      bus_state = BusStatus::PASV;
+      last_bus_cycle = TCycle::TI;
+      bus_cycle = TCycle::TI;
+      data_width = ActiveBusWidth::EightLow;
+      data_bus = 0;
+      data_type = QueueDataType::Program;
+      data_bus_resolved = false;
+      prefetching_store = false;
+      reads_during_prefetching_store = 0;
+      status0 = 0;
+      command_bits = 0;
+      control_bits = 0;
+    }
+    
+    v_pc = 0;
+    s_pc = 0;
+    stack_r_op_ct = 0;
+    stack_w_op_ct = 0;
+    pre_emu_flags = 0;
+    emu_flags = 0;
+    
+    if (reset_registers) {
+      memset(const_cast<registers1_t*>(&load_regs), 0, sizeof(load_regs));
+      memset(const_cast<registers1_t*>(&post_regs), 0, sizeof(post_regs));
+      memset(const_cast<Loadall286*>(&loadall_regs_286), 0, sizeof(loadall_regs_286));
+      memset(const_cast<Loadall386*>(&loadall_regs_386), 0, sizeof(loadall_regs_386));
+    }
+    readback_p = (uint8_t *)&post_regs;
+
+    have_queue_status = reset_result.queueStatus;
+
+    opcode = 0;
+    mnemonic = "NONE";
+    qb = 0;
+    qt = QueueDataType::Program;
+    q_ff = false;
+    q_fn = 0;
+    nmi_terminate = false;
+    nmi_checkpoint = 0;
+    nmi_buf_cursor = 0;
+    program = &JUMP_VECTOR;
+    program->reset();
+    memset(&nmi_stack_frame, 0, sizeof(nmi_stack_frame));
+    loadall_checkpoint = 0;
+    error_cycle_ct = 0;
+    execute_cycle_ct = 0;
+    wait_states = 0;
+    wait_state_ct = 0;
+    exception_armed = false;
+    predicted_fetch = 0;
+  }
+};
