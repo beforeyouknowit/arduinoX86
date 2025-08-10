@@ -29,7 +29,7 @@ use crate::{
 };
 
 use crate::config::ConfigFile;
-use arduinox86_client::{RegisterSetType, RemoteCpuRegisters};
+use arduinox86_client::{RegisterSetType, RemoteCpuRegisters, ServerFlags};
 use std::{fs, io::Cursor, path::PathBuf, time::Duration};
 
 use crate::{
@@ -184,6 +184,8 @@ impl eframe::App for App {
             self.ctx_init(ctx);
         }
 
+        self.gs.toasts.show(ctx);
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -313,7 +315,9 @@ impl eframe::App for App {
 
         // Render floating windows.
         if let Some(client_ctx) = &mut self.ts.client_ctx {
-            self.ts.client_window.show(ctx, client_ctx, &mut self.ts.event_queue);
+            self.ts
+                .client_window
+                .show(ctx, client_ctx, &mut self.ts.event_queue, &mut self.gs.toasts);
             let mut update_state = false;
             // Get the initial state from the client.
             let mut initial_state = client_ctx.initial_state_mut();
@@ -415,6 +419,86 @@ impl App {
                             self.ts.error_msg = Some(format!("Failed to read memory: {}", e));
                         }
                     },
+                    GuiEvent::RunProgram => {
+                        // Load the binary resources into memory.
+                        for blob in self.ts.resource_manager.blobs() {
+                            let resolved_mount_address = match blob.mount_address {
+                                MountAddress::FixedAddress(addr) => addr,
+                                MountAddress::CsIp => self
+                                    .ts
+                                    .initial_register_window
+                                    .regs(RegisterSetType::Intel386)
+                                    .code_address(),
+                            };
+
+                            if let Err(e) = client_ctx.client.set_memory(resolved_mount_address, &blob.data) {
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to load binary blob: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+
+                                log::error!("Failed to load binary blob: {}", e);
+                                self.ts.error_msg = Some(format!("Failed to load binary blob: {}", e));
+                                return;
+                            }
+                            else {
+                                self.gs
+                                    .toasts
+                                    .success(format!("Binary blob: {} loaded successfully!", blob.name))
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!(
+                                    "Binary blob: {} loaded successfully at address {:#x}",
+                                    blob.name,
+                                    resolved_mount_address
+                                );
+                            }
+                        }
+
+                        match client_ctx.set_flag_state(ServerFlags::EXECUTE_AUTOMATIC, true) {
+                            Ok(_) => {
+                                self.gs
+                                    .toasts
+                                    .success("Automatic execution flag set.")
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!("Automatic execution flag set.");
+                            }
+                            Err(e) => {
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to set automatic execution flag: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+                                log::error!("Failed to set automatic execution flag: {}", e);
+                            }
+                        }
+
+                        // Load registers.
+                        let initial_state = client_ctx.initial_state();
+
+                        let mut buf = Cursor::new(Vec::<u8>::new());
+                        initial_state
+                            .regs
+                            .write(&mut buf)
+                            .expect("Failed to write registers to buffer");
+
+                        if let Err(e) = client_ctx
+                            .client
+                            .load_registers_from_buf(RegisterSetType::from(&initial_state.regs), buf.get_ref())
+                        {
+                            self.gs
+                                .toasts
+                                .error(format!("Failed to load registers: {}", e))
+                                .duration(LONG_NOTIFICATION_TIME);
+                            log::error!("Failed to load registers: {}", e);
+                            self.ts.error_msg = Some(format!("Failed to load registers: {}", e));
+                        }
+                        else {
+                            self.gs
+                                .toasts
+                                .success("Registers loaded successfully!")
+                                .duration(NORMAL_NOTIFICATION_TIME);
+                            log::debug!("Registers loaded successfully.");
+                        }
+                    }
                 }
             }
         }

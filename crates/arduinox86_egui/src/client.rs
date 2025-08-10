@@ -28,6 +28,7 @@ use arduinox86_client::{
     RemoteCpuRegistersV1,
     RemoteCpuRegistersV2,
     RemoteCpuRegistersV3,
+    RemoteCpuRegistersV3A,
     ServerCpuType,
 };
 
@@ -65,7 +66,9 @@ impl ClientContext {
 
         // Create the appropriate register state type based on the CPU type.
         let initial_regs = match cpu_type {
-            ServerCpuType::Intel80386 => RemoteCpuRegisters::V3(RemoteCpuRegistersV3::default()),
+            ServerCpuType::Intel80386 => {
+                RemoteCpuRegisters::V3(RemoteCpuRegistersV3::A(RemoteCpuRegistersV3A::default()))
+            }
             ServerCpuType::Intel80286 => RemoteCpuRegisters::V2(RemoteCpuRegistersV2::default()),
             _ => RemoteCpuRegisters::V1(RemoteCpuRegistersV1::default()),
         };
@@ -110,5 +113,17 @@ impl ClientContext {
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         Ok(writer.into_inner())
+    }
+
+    pub fn set_flag_state(&mut self, flag: u32, state: bool) -> Result<bool> {
+        let mut flags = self.client.get_flags()?;
+        if state {
+            flags |= flag;
+        }
+        else {
+            flags &= !flag;
+        }
+        self.client.set_flags(flags)?;
+        Ok(state)
     }
 }

@@ -93,6 +93,7 @@ macro_rules! cycle_comment {
 #[derive(Copy, Clone, Debug)]
 pub struct RunOptions {
     pub automatic: bool,
+    pub use_smm: bool,
     pub cycle_limit: Option<u32>,
     pub wait_states: Option<u32>,
     pub print_opts: PrintOptions,
@@ -103,6 +104,7 @@ impl Default for RunOptions {
     fn default() -> Self {
         Self {
             automatic: false,
+            use_smm: true,
             cycle_limit: None,
             wait_states: None,
             print_opts: PrintOptions::default(),
@@ -176,6 +178,7 @@ pub enum RunState {
 
 pub struct RemoteCpu<'a> {
     cpu_type: ServerCpuType,
+    run_opts: RunOptions,
     have_fpu: bool,
     width: CpuWidth,
     client: CpuClient,
@@ -342,6 +345,7 @@ impl RemoteCpu<'_> {
 
         RemoteCpu {
             cpu_type: server_cpu_type,
+            run_opts: RunOptions::default(),
             have_fpu,
             width,
             client,
@@ -576,23 +580,39 @@ impl RemoteCpu<'_> {
                 }
             }
             ServerCpuType::Intel80386 => {
-                if reg_data.len() != 204 {
+                if reg_data.len() == 204 {
+                    self.reset();
+
+                    match self
+                        .client
+                        .load_registers_from_buf(RegisterSetType::Intel386, &reg_data)
+                    {
+                        Ok(_) => {
+                            let v3 = RemoteCpuRegistersV3A::try_from(reg_data).expect("Failed to parse V3 registers");
+                            self.regs = RemoteCpuRegisters::V3(RemoteCpuRegistersV3::A(v3));
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                }
+                else if reg_data.len() == 208 {
+                    self.reset();
+
+                    match self
+                        .client
+                        .load_registers_from_buf(RegisterSetType::Intel386, &reg_data)
+                    {
+                        Ok(_) => {
+                            let v3 = RemoteCpuRegistersV3B::try_from(reg_data).expect("Failed to parse V3 registers");
+                            self.regs = RemoteCpuRegisters::V3(RemoteCpuRegistersV3::B(v3));
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                }
+                else {
                     log::error!("Invalid register data length for 80386: {}", reg_data.len());
                     return false;
-                }
-
-                self.reset();
-
-                match self
-                    .client
-                    .load_registers_from_buf(RegisterSetType::Intel386, &reg_data)
-                {
-                    Ok(_) => {
-                        let v3 = RemoteCpuRegistersV3::try_from(reg_data).expect("Failed to parse V3 registers");
-                        self.regs = RemoteCpuRegisters::V3(v3);
-                        true
-                    }
-                    Err(_) => false,
                 }
             }
             _ => {
@@ -1438,8 +1458,17 @@ impl RemoteCpu<'_> {
 
     /// Run the CPU for the specified number of cycles.
     pub fn run(&mut self, run_options: &RunOptions) -> Result<RemoteCpuRegisters, String> {
-        if run_options.automatic {
-            return self.run_automatic(run_options).map_err(|e| e.to_string());
+        self.run_opts = run_options.clone();
+
+        if self.run_opts.automatic {
+            return self.run_automatic().map_err(|e| e.to_string());
+        }
+        if self.run_opts.use_smm {
+            log::debug!("Using SMM for register readout.");
+            let mut flags = self.client.get_flags().map_err(|e| e.to_string())?;
+            self.client
+                .set_flags(flags | ServerFlags::USE_SMM)
+                .map_err(|e| e.to_string())?;
         }
 
         if let Some(preload_pgm) = &mut self.preload_pgm {
@@ -1492,19 +1521,27 @@ impl RemoteCpu<'_> {
         Ok(regs)
     }
 
-    fn run_automatic(&mut self, run_options: &RunOptions) -> Result<RemoteCpuRegisters, String> {
+    fn run_automatic(&mut self) -> Result<RemoteCpuRegisters, String> {
         // Run the CPU in automatic mode.
         log::trace!("Running CPU in automatic mode...");
         self.client
-            .set_flags(ServerFlags::EXECUTE_AUTOMATIC)
+            .set_flags(ServerFlags::EXECUTE_AUTOMATIC | ServerFlags::USE_SDRAM_BACKEND)
             .map_err(|e| e.to_string())?;
+
+        if self.run_opts.use_smm {
+            log::debug!("Using SMM for register readout.");
+            let mut flags = self.client.get_flags().map_err(|e| e.to_string())?;
+            self.client
+                .set_flags(flags | ServerFlags::USE_SMM)
+                .map_err(|e| e.to_string())?;
+        }
 
         // Reset the CPU state
         use ProgramState::*;
         let mut state = self.client.get_program_state().map_err(|e| e.to_string())?;
         while !matches!(state, StoreDone | Shutdown | Error) {
             // Sleep for a little bit so we're not spamming the Arduino.
-            std::thread::sleep(std::time::Duration::from_millis(run_options.polling_sleep.into()));
+            std::thread::sleep(std::time::Duration::from_millis(self.run_opts.polling_sleep.into()));
             state = self.client.get_program_state().map_err(|e| e.to_string())?;
         }
 
@@ -1522,10 +1559,14 @@ impl RemoteCpu<'_> {
 
         match self.cpu_type {
             ServerCpuType::Intel80386 => {
-                let mut buf_v3: [u8; 204] = [0; 204];
+                let mut buf_v3 = match self.run_opts.use_smm {
+                    true => vec![0; 208],
+                    false => vec![0; 204],
+                };
 
                 self.client.store_registers_to_buf(&mut buf_v3)?;
-                let regs = RemoteCpuRegistersV3::from(buf_v3);
+                let regs = RemoteCpuRegistersV3::try_from(buf_v3.as_slice())
+                    .map_err(|e| CpuClientError::TypeConversionError)?;
                 Ok(RemoteCpuRegisters::V3(regs))
             }
             _ => {

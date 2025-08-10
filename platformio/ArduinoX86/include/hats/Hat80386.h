@@ -36,6 +36,7 @@ void cycle();
 
 #define CPU_386
 
+#define USE_SMI 1
 #define USE_SETUP_PROGRAM 1
 #define SETUP_PROGRAM SETUP_PROGRAM_386EX
 #define SETUP_PROGRAM_PATCH_OFFSET 0
@@ -76,6 +77,9 @@ void cycle();
 
 #define READ_NMI_PIN READ_PIN_D85
 #define WRITE_PIN_NMI(x) WRITE_PIN_D85(x)
+
+#define READ_SMI_PIN READ_PIN_D02
+#define WRITE_PIN_SMI(x) WRITE_PIN_D02(x)
 
 #define READ_RW_PIN READ_PIN_D82
 #define READ_DC_PIN READ_PIN_D08
@@ -195,7 +199,7 @@ void cycle();
 #define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
 
 // How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
-#define RESET_HOLD_CYCLE_COUNT 50
+#define RESET_HOLD_CYCLE_COUNT 90
 // How many cycles it takes to reset the CPU after RESET signal goes low. First ALE should occur after this many cycles.
 #define RESET_CYCLE_COUNT 500
 // If we didn't see an ALE after this many cycles, give up
@@ -216,25 +220,26 @@ private:
   static constexpr int ADDRESS_LINES = 22;
   static constexpr int ADDRESS_DIGITS = 6; // 22 bits = 6 digits in hex
 
-  static constexpr std::array<int,10> OUTPUT_PINS = {
+  static constexpr std::array<int,11> OUTPUT_PINS = {
+    2,  // SMI
     4,  // CLK
     5,  // RESET
-    6,  // BUSY
+    6,  // BUSY/TEST
     76, // HOLD (A0)
     77, // READY (A1)
     78, // NMI (A2)
     79, // BS8 (A3)
-    83, // TEST/BUSY (A7)
+    83, // unused (A7)
     84, // INTR
     85  // NMI
   };
 
   // All input pins, used to set pin direction on setup
-  static constexpr std::array<int,37> INPUT_PINS = {{
-    13, 12, 11, 10, 9, 8, 7, 6, // (6) Various signal pins
+  static constexpr std::array<int,35> INPUT_PINS = {{
+    13, 12, 11, 10, 9, 8, 7, // (7) Various signal pins
     80, 81, 82, // (3) R, W, RW
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Address pins - Bottom half of double-row header
-    21, 20, 17, 16, 15, 14, 3, 2, 1, 0, // (6) Address pins - Top row of GPIO pins
+    21, 20, 17, 16, 15, 14, 3, 1, 0, // (6) Address pins - Top row of GPIO pins
   }};
   
   bool _emulate_bus_controller = false;
@@ -526,6 +531,9 @@ public:
       case OutputPin::Nmi:
         WRITE_PIN_NMI(value);
         break;
+      case OutputPin::Smi:
+        WRITE_PIN_SMI(value);
+        break;
       default:
         // Handle other pins if necessary
         break;
@@ -539,11 +547,12 @@ public:
     result.success = false;
     result.queueStatus = false;
     result.busWidth = BusWidth::Sixteen; // We're using a 386EX, so 16-bit bus width
-
+    
     digitalWrite(INTR_PIN, LOW); // INTR must be low or CPU will immediately interrupt.
     digitalWrite(NMI_PIN, LOW); // NMI must be low or CPU will immediately interrupt.
     digitalWrite(HOLD_PIN, LOW); // HOLD must be low or CPU will not reset.
-
+    WRITE_PIN_SMI(1); // SMI inactive
+    
     bool ale_went_off = false;
     //bool bhe_went_off = false;
 
@@ -575,6 +584,8 @@ public:
 
     // Deassert RESET pin to allow CPU to start.
     WRITE_PIN_D05(0);
+    
+    
 
     // Clock CPU while waiting for ALE
     int ale_cycles = 0;
@@ -615,7 +626,7 @@ public:
       //set_error("CPU failed to reset: No ALE!");   
     }
     
-    
+    //WRITE_PIN_SMI(0); // Enter SMM immediately (testing purposes only)
     return result;
   }
 

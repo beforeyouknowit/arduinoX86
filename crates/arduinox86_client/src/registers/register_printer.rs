@@ -20,7 +20,14 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{RemoteCpuRegisters, RemoteCpuRegistersV1, RemoteCpuRegistersV2, RemoteCpuRegistersV3, ServerCpuType};
+use crate::{
+    registers::register_traits::Registers32,
+    registers_v3::RemoteCpuRegistersV3,
+    RemoteCpuRegisters,
+    RemoteCpuRegistersV1,
+    RemoteCpuRegistersV2,
+    ServerCpuType,
+};
 use std::fmt::Display;
 
 #[macro_export]
@@ -142,28 +149,28 @@ pub fn fmt_regs_v3(
          CS: {:04X} DS: {:04X} ES: {:04X} FS: {:04X} GS: {:04X} SS: {:04X}\n\
          EIP: {:08X}\n\
          FLAGS: {:08X}",
-        regs.eax,
-        regs.ebx,
-        regs.ecx,
-        regs.edx,
-        regs.esi,
-        regs.edi,
-        regs.ebp,
-        regs.esp,
-        regs.cs,
-        regs.ds,
-        regs.es,
-        regs.fs,
-        regs.gs,
-        regs.ss,
-        regs.eip,
-        regs.eflags
+        regs.eax(),
+        regs.ebx(),
+        regs.ecx(),
+        regs.edx(),
+        regs.esi(),
+        regs.edi(),
+        regs.ebp(),
+        regs.esp(),
+        regs.cs(),
+        regs.ds(),
+        regs.es(),
+        regs.fs(),
+        regs.gs(),
+        regs.ss(),
+        regs.eip(),
+        regs.eflags()
     );
 
     write!(fmt, "{} ", reg_str)?;
 
     // Expand flag info
-    fmt_flags_v3(fmt, regs.eflags)
+    fmt_flags_v3(fmt, regs.eflags())
 }
 
 /// Format the flags for 16-bit CPUs.
@@ -399,25 +406,25 @@ pub fn fmt_regs_v3_delta(
     regs: &RemoteCpuRegistersV3,
     _options: u32,
 ) -> std::fmt::Result {
-    let cr0_diff = initial.cr0 != regs.cr0;
-    let a_diff = initial.eax != regs.eax;
-    let b_diff = initial.ebx != regs.ebx;
-    let c_diff = initial.ecx != regs.ecx;
-    let d_diff = initial.edx != regs.edx;
-    let sp_diff = initial.esp != regs.esp;
-    let bp_diff = initial.ebp != regs.ebp;
-    let si_diff = initial.esi != regs.esi;
-    let di_diff = initial.edi != regs.edi;
-    let cs_diff = initial.cs != regs.cs;
-    let ds_diff = initial.ds != regs.ds;
-    let es_diff = initial.es != regs.es;
-    let fs_diff = initial.fs != regs.fs;
-    let gs_diff = initial.gs != regs.gs;
-    let ss_diff = initial.ss != regs.ss;
-    let ip_diff = initial.eip != regs.eip;
-    let f_diff = initial.eflags != regs.eflags;
-    let dr6_diff = initial.dr6 != regs.dr6;
-    let dr7_diff = initial.dr7 != regs.dr7;
+    let cr0_diff = initial.cr0() != regs.cr0();
+    let a_diff = initial.eax() != regs.eax();
+    let b_diff = initial.ebx() != regs.ebx();
+    let c_diff = initial.ecx() != regs.ecx();
+    let d_diff = initial.edx() != regs.edx();
+    let sp_diff = initial.esp() != regs.esp();
+    let bp_diff = initial.ebp() != regs.ebp();
+    let si_diff = initial.esi() != regs.esi();
+    let di_diff = initial.edi() != regs.edi();
+    let cs_diff = initial.cs() != regs.cs();
+    let ds_diff = initial.ds() != regs.ds();
+    let es_diff = initial.es() != regs.es();
+    let fs_diff = initial.fs() != regs.fs();
+    let gs_diff = initial.gs() != regs.gs();
+    let ss_diff = initial.ss() != regs.ss();
+    let ip_diff = initial.eip() != regs.eip();
+    let f_diff = initial.eflags() != regs.eflags();
+    let dr6_diff = initial.dr6() != regs.dr6();
+    let dr7_diff = initial.dr7() != regs.dr7();
 
     let reg_str = format!(
         "CR0:{}{:08X}\n\
@@ -427,47 +434,47 @@ pub fn fmt_regs_v3_delta(
          EIP:{}{:08X} DR6:{}{:08X} DR7:{}{:08X}\n\
          EFLAGS:{}{:08X}",
         if cr0_diff { "*" } else { " " },
-        regs.cr0,
+        regs.cr0(),
         if a_diff { "*" } else { " " },
-        regs.eax,
+        regs.eax(),
         if b_diff { "*" } else { " " },
-        regs.ebx,
+        regs.ebx(),
         if c_diff { "*" } else { " " },
-        regs.ecx,
+        regs.ecx(),
         if d_diff { "*" } else { " " },
-        regs.edx,
+        regs.edx(),
         if di_diff { "*" } else { " " },
-        regs.esi,
+        regs.esi(),
         if si_diff { "*" } else { " " },
-        regs.edi,
+        regs.edi(),
         if bp_diff { "*" } else { " " },
-        regs.ebp,
+        regs.ebp(),
         if sp_diff { "*" } else { " " },
-        regs.esp,
+        regs.esp(),
         if cs_diff { "*" } else { " " },
-        regs.cs,
+        regs.cs(),
         if ds_diff { "*" } else { " " },
-        regs.ds,
+        regs.ds(),
         if es_diff { "*" } else { " " },
-        regs.es,
+        regs.es(),
         if fs_diff { "*" } else { " " },
-        regs.fs,
+        regs.fs(),
         if gs_diff { "*" } else { " " },
-        regs.gs,
+        regs.gs(),
         if ss_diff { "*" } else { " " },
-        regs.ss,
+        regs.ss(),
         if ip_diff { "*" } else { " " },
-        regs.eip,
+        regs.eip(),
         if dr6_diff { "*" } else { " " },
-        regs.dr6,
+        regs.dr6(),
         if dr7_diff { "*" } else { " " },
-        regs.dr7,
+        regs.dr7(),
         if f_diff { "*" } else { " " },
-        regs.eflags
+        regs.eflags()
     );
 
     write!(fmt, "{} ", reg_str)?;
 
     // Expand flag info
-    fmt_flags_v3(fmt, regs.eflags)
+    fmt_flags_v3(fmt, regs.eflags())
 }

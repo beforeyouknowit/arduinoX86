@@ -21,8 +21,8 @@
     DEALINGS IN THE SOFTWARE.
 */
 use crate::{display::print_regs, registers::Registers, Config, CpuMode, TestContext, TestGen};
-use arduinox86_client::{RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
-use moo::types::{MooCpuType, MooRegisters1};
+use arduinox86_client::{registers_common::RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
+use moo::types::{MooCpuType, MooRegisters16};
 use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::Beta;
 use std::ops::Range;
@@ -33,8 +33,8 @@ pub struct TestRegisters {
     pub instruction_address: u32,
 }
 
-impl From<&MooRegisters1> for TestRegisters {
-    fn from(regs: &MooRegisters1) -> Self {
+impl From<&MooRegisters16> for TestRegisters {
+    fn from(regs: &MooRegisters16) -> Self {
         let mut v2 = RemoteCpuRegistersV2 {
             ax: regs.ax,
             bx: regs.bx,

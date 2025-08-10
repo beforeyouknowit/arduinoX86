@@ -40,7 +40,7 @@ use crate::{
 };
 use anyhow::bail;
 use iced_x86::{Mnemonic, OpKind};
-use moo::types::{MooCpuType, MooRamEntry, MooRegisters1, MooRegisters1Printer, MooStateType};
+use moo::types::{MooCpuType, MooRamEntry, MooRegisters16, MooRegisters16Printer, MooStateType};
 use rand::{Rng, SeedableRng};
 
 // Trace print macro that writes to bufwriter

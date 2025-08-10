@@ -29,6 +29,7 @@
 
 #define CPU_186
 
+#define USE_SMI 0
 #define WRITE_CYCLE T3
 #define ADDRESS_SPACE_MASK 0xFFFFF
 
@@ -60,6 +61,8 @@
 #define WRITE_CYCLE T3
 #define STORE_TIMEOUT 1000
 #define LOAD_TIMEOUT 1000
+
+#define READ_SMI_PIN 1
 
 class Hat80186 : public HatBase<Hat80186> {
 private:

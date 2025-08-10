@@ -28,6 +28,8 @@
 #include <programs.h>
 #include <registers.h>
 
+// This class is slowly being converted from a C structure. Pardon the mess.
+
 // Main CPU State
 class Cpu {
 public:
@@ -79,7 +81,9 @@ public:
   bool q_ff; // Did we fetch a first instruction byte from the queue this cycle?
   uint8_t q_fn; // What # byte of instruction did we fetch?
   bool nmi_terminate; // Whether we are entering ExecuteFinalize via NMI termination.
+  bool smi_terminate; // Whether we are entering StoreAll via SMI termination.
   uint8_t nmi_checkpoint; // How many reads we have done at the NMI IVT address.
+  uint8_t smi_checkpoint; 
   uint16_t nmi_buf_cursor;
   InlineProgram *program = &JUMP_VECTOR;
   CallStackFrame nmi_stack_frame; // NMI stack frame for 286/386 CPUs
@@ -91,81 +95,14 @@ public:
   bool exception_armed;
   uint32_t predicted_fetch;
 
-  void reset(CpuResetResult reset_result, bool preserve_bus_state = false, bool reset_registers = false) {
+  void reset(CpuResetResult reset_result, bool preserve_bus_state = false, bool reset_registers = false);
 
-    // Retain detected cpu & fpu type and emulation flags.
-    //cpu_type = CpuType::Undetected;
-    //fpu_type = FpuType::noFpu;
-    if (reset_result.busWidth == BusWidth::Eight) {
-      width = CpuBusWidth::Eight;
-      queue = InstructionQueue(4, BusWidth::Eight);
-    } else {
-      width = CpuBusWidth::Sixteen;
-      queue = InstructionQueue(6, BusWidth::Sixteen);
-    }
-    doing_reset = false;
-    doing_id = false;
-    //do_emulation = false;
-    in_emulation = false;
-    do_prefetch = false;
-    cpuid_counter = 0;
-    cpuid_queue_reads = 0;
-    state_begin_time = 0;
-
-    if (!preserve_bus_state) {
-      last_address_bus = 0;
-      address_bus = 0;
-      address_latch = 0;
-      bus_state_latched = BusStatus::PASV;
-      bus_state = BusStatus::PASV;
-      last_bus_cycle = TCycle::TI;
-      bus_cycle = TCycle::TI;
-      data_width = ActiveBusWidth::EightLow;
-      data_bus = 0;
-      data_type = QueueDataType::Program;
-      data_bus_resolved = false;
-      prefetching_store = false;
-      reads_during_prefetching_store = 0;
-      status0 = 0;
-      command_bits = 0;
-      control_bits = 0;
-    }
-    
-    v_pc = 0;
-    s_pc = 0;
-    stack_r_op_ct = 0;
-    stack_w_op_ct = 0;
-    pre_emu_flags = 0;
-    emu_flags = 0;
-    
-    if (reset_registers) {
-      memset(const_cast<registers1_t*>(&load_regs), 0, sizeof(load_regs));
-      memset(const_cast<registers1_t*>(&post_regs), 0, sizeof(post_regs));
-      memset(const_cast<Loadall286*>(&loadall_regs_286), 0, sizeof(loadall_regs_286));
-      memset(const_cast<Loadall386*>(&loadall_regs_386), 0, sizeof(loadall_regs_386));
-    }
-    readback_p = (uint8_t *)&post_regs;
-
-    have_queue_status = reset_result.queueStatus;
-
-    opcode = 0;
-    mnemonic = "NONE";
-    qb = 0;
-    qt = QueueDataType::Program;
-    q_ff = false;
-    q_fn = 0;
-    nmi_terminate = false;
-    nmi_checkpoint = 0;
-    nmi_buf_cursor = 0;
-    program = &JUMP_VECTOR;
-    program->reset();
-    memset(&nmi_stack_frame, 0, sizeof(nmi_stack_frame));
-    loadall_checkpoint = 0;
-    error_cycle_ct = 0;
-    execute_cycle_ct = 0;
-    wait_states = 0;
-    wait_state_ct = 0;
-    exception_armed = false;
-    predicted_fetch = 0;
+  bool use_smm() const { return use_smm_; }
+  void set_use_smm(bool use_smm) {
+    use_smm_ = use_smm;
   }
+
+private:
+  bool use_smm_ = false; // Use SMM for register readout on 386/486 CPUs
+
 };

@@ -38,10 +38,10 @@ pub struct MemoryViewer {
 impl Default for MemoryViewer {
     fn default() -> Self {
         Self {
-            address_string: "00000000".to_string(),
-            address: 0,
-            size_string: "00001000".to_string(), // Default to 4KB
-            size: 0x1000,                        // Default to 4KB
+            address_string: "000A0000".to_string(),
+            address: 0xA0000,
+            size_string: "00010000".to_string(), // Default to 64KB
+            size: 0x10000,                       // Default to 64KB
             icon_size: 24.0,
             dt: DataTableWidget::default(),
         }

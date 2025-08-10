@@ -59,11 +59,13 @@ public:
 
   using CmdFn = bool (CommandServer::*)();
 
-  static constexpr uint32_t FLAG_EMU_8080 = 0x00000001;
-  static constexpr uint32_t FLAG_EXECUTE_AUTOMATIC = 0x00000002;
-  static constexpr uint32_t FLAG_MEMORY_BACKEND = 0x00000004; // 0=SDRAM, 1=Hash Table
-  static constexpr uint32_t FLAG_HALT_AFTER_JUMP = 0x00000008; // Halt after flow control instruction.
-  static constexpr uint32_t FLAG_USE_SDRAM_BACKEND = 0x00000010; // Use SDRAM as memory backend (requires GIGA)
+  static constexpr uint32_t FLAG_EMU_8080           = 0x00000001;
+  static constexpr uint32_t FLAG_EXECUTE_AUTOMATIC  = 0x00000002;
+  static constexpr uint32_t FLAG_MEMORY_BACKEND     = 0x00000004; // 0=SDRAM, 1=Hash Table
+  static constexpr uint32_t FLAG_HALT_AFTER_JUMP    = 0x00000008; // Halt after flow control instruction.
+  static constexpr uint32_t FLAG_USE_SDRAM_BACKEND  = 0x00000010; // Use SDRAM as memory backend (requires GIGA)
+  static constexpr uint32_t FLAG_USE_SMM            = 0x00000020; // Use SMM for register readout on 386/486 CPUs
+  static constexpr uint32_t FLAG_DEBUG_ENABLED       = 0x00000040; // Enable debug mode
 
   enum class ServerCommand {
     CmdNone            = 0x00,
@@ -136,7 +138,7 @@ public:
     return (flags_ & FLAG_HALT_AFTER_JUMP) != 0;
   }
 
-  explicit CommandServer(BoardController<BoardType,HatType>& controller); 
+  explicit CommandServer(BoardController<BoardType,HatType>& controller);
 
 private:
   static constexpr std::size_t CMD_COUNT =
@@ -155,7 +157,7 @@ private:
   CommandState commandState_ = CommandState::WaitingForCommand;
   uint8_t commandByte_ = 0;
   ServerCommand cmd_ = ServerCommand::CmdNone;
-
+  bool useSmm_ = false; // Use SM mode for register readout on 386/486 CPUs
   size_t commandBytesExpected_ = 0;
   size_t commandByteN_ = 0;
   unsigned long commandStartTime_ = 0;

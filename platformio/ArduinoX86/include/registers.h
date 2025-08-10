@@ -155,6 +155,7 @@ struct __attribute__((packed)) Store386 {
   uint32_t edi;
 };
 
+
 struct __attribute__((packed)) Loadall386 {
   uint32_t cr0;
   uint32_t eflags;
@@ -196,7 +197,6 @@ struct __attribute__((packed)) Loadall386 {
   SegmentDescriptor386 cs_desc;
   SegmentDescriptor386 es_desc;
 
-
     /// @brief Patch the Loadall386 registers from a CallStackFrame386.
   void patch_stack_frame32(const CallStackFrame32& frame) {
     eflags = frame.eflags;
@@ -208,6 +208,88 @@ struct __attribute__((packed)) Loadall386 {
   void rewind_ip(uint32_t offset) {
     eip -= offset;
   }
+
+  // void from_smm(const SmmDump386& smm_dump) {
+  //   cr0 = smm_dump.cr0;
+  //   eflags = smm_dump.eflags;
+  //   eip = smm_dump.eip;
+  //   edi = smm_dump.edi;
+  //   esi = smm_dump.esi;
+  //   ebp = smm_dump.ebp;
+  //   esp = smm_dump.esp;
+  //   ebx = smm_dump.ebx;
+  //   edx = smm_dump.edx;
+  //   ecx = smm_dump.ecx;
+  //   eax = smm_dump.eax;
+  //   dr6 = smm_dump.dr6;
+  //   dr7 = smm_dump.dr7;
+  //   tr = smm_dump.tr;
+  //   ldt = smm_dump.ldt;
+  //   gs = smm_dump.gs;
+  //   fs = smm_dump.fs;
+  //   ds = smm_dump.ds;
+  //   ss = smm_dump.ss;
+  //   cs = smm_dump.cs;
+  //   tss_desc = smm_dump.tss_desc;
+  //   idt_desc = smm_dump.idt_desc;
+  //   gdt_desc = smm_dump.gdt_desc;
+  //   ldt_desc = smm_dump.ldt_desc;
+  //   gs_desc = smm_dump.gs_desc;
+  //   fs_desc = smm_dump.fs_desc;
+  //   ds_desc = smm_dump.ds_desc;
+  //   ss_desc = smm_dump.ss_desc;
+  //   cs_desc = smm_dump.cs_desc;
+  //   es_desc = smm_dump.es_desc;
+  // }
 };
+
+/// The 386 SMM dump structure. It is similar to LOADALL386, but adds the CR3
+/// register. In addition, it writes this structure backwards, like a stack.
+struct __attribute__((packed)) SmmDump386 {
+  uint32_t cr0;
+  uint32_t cr3;
+  uint32_t eflags;
+  uint32_t eip;
+  uint32_t edi;
+  uint32_t esi;
+  uint32_t ebp;
+  uint32_t esp;
+  uint32_t ebx;
+  uint32_t edx;
+  uint32_t ecx;
+  uint32_t eax;
+  uint32_t dr6;
+  uint32_t dr7;
+  uint16_t tr;
+  uint16_t tr_pad;
+  uint16_t ldt;
+  uint16_t ldt_pad;
+  uint16_t gs;
+  uint16_t gs_pad;
+  uint16_t fs;
+  uint16_t fs_pad;
+  uint16_t ds;
+  uint16_t ds_pad;
+  uint16_t ss;
+  uint16_t ss_pad;
+  uint16_t cs;
+  uint16_t cs_pad;
+  uint16_t es;
+  uint16_t es_pad;
+  SegmentDescriptor386 tss_desc;
+  SegmentDescriptor386 idt_desc;
+  SegmentDescriptor386 gdt_desc;
+  SegmentDescriptor386 ldt_desc;
+  SegmentDescriptor386 gs_desc;
+  SegmentDescriptor386 fs_desc;
+  SegmentDescriptor386 ds_desc;
+  SegmentDescriptor386 ss_desc;
+  SegmentDescriptor386 cs_desc;
+  SegmentDescriptor386 es_desc;
+};
+
+/// The SMRAM address is fixed on the 386EX from 0x3FE00 to 0x3FFFF.
+#define SMRAM_386EX_START_ADDRESS 0x3FE00
+#define SMRAM_386EX_END_ADDRESS 0x3FFFF
 
 #define LOADALL386_ADDRESS 0x800

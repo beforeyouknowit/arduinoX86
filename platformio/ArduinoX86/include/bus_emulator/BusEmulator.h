@@ -49,6 +49,10 @@
 // Maximum number of bus operations to record
 static const size_t BUS_LOGGER_MAX_OPS = 256;
 
+static const uint32_t LOADALL_286_ADDRESS = 0x800;
+static const uint32_t SMRAM_END   = 0x040000;
+static const uint32_t SMRAM_START = 0x03FE00;
+
 // Structure representing a single bus operation
 struct BusOperation {
   BusOperationType op_type;
@@ -202,14 +206,28 @@ public:
     backend_->write_bus(address, value, bhe);
     logger_.log({BusOperationType::MemWrite16, bus_width(address, bhe), address, value});
 
+  #if defined(CPU_286)
     // Write to loadall286 registers if address matches
-    if ((address >= 0x800) && (address < (0x800 + sizeof(Loadall286) - 1))) {
-      size_t offset = address - 0x800;
+    if ((address >= LOADALL_286_ADDRESS) && (address < (LOADALL_286_ADDRESS + sizeof(Loadall286) - 1))) {
+      size_t offset = address - LOADALL_286_ADDRESS;
       if (offset < sizeof(Loadall286)) {
         uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&loadall286_regs_) + (offset / 2);
         *reg_ptr = value;
       }
     }
+  #elif defined(CPU_386)
+    // Write to SmmDump386 registers if address matches
+    // The SMM dump is written in stack order (decreasing addresses). So we need a little bit of 
+    // logic to write the structure in forward order.
+    if ((address >= (SMRAM_END - sizeof (SmmDump386))) && (address < SMRAM_END)) {
+      size_t offset = (SMRAM_END - 4) - (address & ~0x03); // Align to 4-byte aligned dwords, decreasing addresses from SMRAM_END
+      size_t sub_offset = ((address & 0x03) != 0) ? 1 : 0; // Adjust for stack order for "high" words
+      if (offset < sizeof(SmmDump386)) {
+        uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&smm_dump386_) + (offset / 2) + sub_offset;
+        *reg_ptr = value;
+      }
+    }
+  #endif
   }
 
   uint8_t io_read_u8(uint16_t port) {
@@ -306,6 +324,10 @@ public:
     return loadall386_regs_;
   }
 
+  SmmDump386& smm_dump386_regs() {
+    return smm_dump386_;
+  }
+
   ~BusEmulator() {
       delete backend_;
   }
@@ -318,6 +340,7 @@ private:
   // Keep a shadow of Loadall registers.
   Loadall286 loadall286_regs_;
   Loadall386 loadall386_regs_;
+  SmmDump386 smm_dump386_;
 
   /// @brief Determine bus width based on address and BHE
   ActiveBusWidth bus_width(uint32_t address, bool bhe) const {

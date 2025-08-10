@@ -54,12 +54,12 @@
 // Print a character to the debugging output on each store command.
 #define STORE_INDICATOR (SILENT_MODE)
 
-#define TRACE_ALL 1 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
+#define TRACE_ALL 0 // TRACE_ALL will enable all traces (TRACE_NONE overrides)
 #define TRACE_NONE (0 | SILENT_MODE) // TRACE_NONE will override all set traces
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
-#define TRACE_RESET     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
+#define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
 #define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
 #define TRACE_VECTOR    ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
 #define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
@@ -90,7 +90,7 @@
 #define DEBUG_QUEUE     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about queue operations (flushes, regular queue ops are always reported)
 #define DEBUG_TSTATE    ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about t-state changes (mostly T3/Tw->T4)
 #define DEBUG_PIN_CMD   ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about pin write commands
-#define DEBUG_BUS       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
+#define DEBUG_BUS       ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about bus parameters (Width, etc), writes (cmd_write_data_bus)
 #define DEBUG_PROTO     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the serial cpu_server protocol (verbose)
 #define DEBUG_CMD       ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about command processing and dispatch
 #define DEBUG_DUMP      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about dump commands

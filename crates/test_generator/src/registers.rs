@@ -21,8 +21,8 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use arduinox86_client::RandomizeOpts;
-use moo::{prelude::MooRegisters1Init, types::MooRegisters1};
+use arduinox86_client::registers_common::RandomizeOpts;
+use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 use rand_distr::Beta;
 use std::io::Write;
 
@@ -31,12 +31,12 @@ pub enum Registers {
     V2(arduinox86_client::RemoteCpuRegistersV2),
 }
 
-impl TryFrom<&Registers> for MooRegisters1 {
+impl TryFrom<&Registers> for MooRegisters16 {
     type Error = String;
 
     fn try_from(regs: &Registers) -> Result<Self, Self::Error> {
         match regs {
-            Registers::V1(v1) => Ok((&MooRegisters1Init {
+            Registers::V1(v1) => Ok((&MooRegisters16Init {
                 ax:    v1.ax,
                 bx:    v1.bx,
                 cx:    v1.cx,
@@ -53,7 +53,7 @@ impl TryFrom<&Registers> for MooRegisters1 {
                 flags: v1.flags,
             })
                 .into()),
-            Registers::V2(v2) => Ok((&MooRegisters1Init {
+            Registers::V2(v2) => Ok((&MooRegisters16Init {
                 ax:    v2.ax,
                 bx:    v2.bx,
                 cx:    v2.cx,
@@ -74,10 +74,10 @@ impl TryFrom<&Registers> for MooRegisters1 {
     }
 }
 
-impl From<&Registers> for MooRegisters1Init {
+impl From<&Registers> for MooRegisters16Init {
     fn from(regs: &Registers) -> Self {
         match regs {
-            Registers::V1(v1) => MooRegisters1Init {
+            Registers::V1(v1) => MooRegisters16Init {
                 ax:    v1.ax,
                 bx:    v1.bx,
                 cx:    v1.cx,
@@ -93,7 +93,7 @@ impl From<&Registers> for MooRegisters1Init {
                 ip:    v1.ip,
                 flags: v1.flags,
             },
-            Registers::V2(v2) => MooRegisters1Init {
+            Registers::V2(v2) => MooRegisters16Init {
                 ax:    v2.ax,
                 bx:    v2.bx,
                 cx:    v2.cx,

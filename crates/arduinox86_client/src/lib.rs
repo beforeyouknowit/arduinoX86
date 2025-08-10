@@ -22,7 +22,6 @@
 */
 #![allow(dead_code, unused_variables)]
 
-mod register_printer;
 mod registers;
 
 use log;
@@ -62,6 +61,8 @@ impl ServerFlags {
     pub const HASH_BACKEND: u32         = 0x0000_0004; // Use hash backend for memory
     pub const HALT_AFTER_JUMP: u32      = 0x0000_0008; // Insert halt after flow control
     pub const USE_SDRAM_BACKEND: u32    = 0x0000_0010; // Use SDRAM backend for memory
+    pub const USE_SMM: u32              = 0x0000_0020; // Use SMM for register readout
+    pub const ENABLE_DEBUG: u32         = 0x0000_0040; // Enable debug serial output
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
@@ -902,11 +903,20 @@ impl CpuClient {
                 }
             }
             2 => {
-                // Type 3 register set (Intel386)
+                // Type 3A register set (Intel386 LOADALL)
                 if reg_data.len() < 204 {
                     return Err(CpuClientError::BadParameter(
-                        "Expected at least 204 bytes for Intel286 register set".to_string(),
+                        "Expected at least 204 bytes for Intel386 LOADALL register set".to_string(),
                     ));
+                }
+            }
+            3 => {
+                // Type 3B register set (Intel386 SMM Register dump)
+                if reg_data.len() < 208 {
+                    return Err(CpuClientError::BadParameter(format!(
+                        "Expected at least 208 bytes for Intel386 SMM register set, got: {}",
+                        reg_data.len()
+                    )));
                 }
             }
             _ => {

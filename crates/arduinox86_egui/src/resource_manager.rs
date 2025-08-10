@@ -63,4 +63,8 @@ impl ResourceManager {
             window.show(e_ctx, c_ctx, events);
         }
     }
+
+    pub fn blobs(&self) -> &[BinaryBlob] {
+        &self.blobs
+    }
 }

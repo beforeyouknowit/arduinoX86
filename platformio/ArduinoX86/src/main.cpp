@@ -454,15 +454,17 @@ void print_cpu_state() {
   char iow_chr = !iowc ? 'W' : '.';
 
   char ready_chr = READ_READY_PIN ? 'R' : '.';
-  char reset_chr = READ_RESET_PIN ? 'S' : '.';
+  char reset_chr = READ_RESET_PIN ? 'X' : '.';
   char intr_chr = READ_INTR_PIN ? 'I' : '.';
   char inta_chr = '.';
   char nmi_chr = READ_NMI_PIN ? 'N' : '.';
   char bhe_chr = !READ_BHE_PIN ? 'B' : '.';
   char lock_chr = !READ_LOCK_PIN ? 'L' : '.';
+  char smi_chr = !READ_SMI_PIN ? 'S' : '.';
+  char test_chr = !READ_TEST_PIN ? 'T' : '.';
 
   #if defined(FPU_8087)
-  char test_chr = READ_TEST_PIN ? 'T' : '.';
+  
   char rq_chr = !READ_PIN_D03 ? 'R' : '.';
   char fint_chr = READ_PIN_D20 ? 'I' : '.';  
 #endif
@@ -512,9 +514,9 @@ void print_cpu_state() {
 
   // Make string for bus reads and writes
   op_buf[0] = 0;
-  if ((!mrdc || !iorc) && CPU.bus_state == PASV) {
+  if ((!mrdc || !iorc) && (CPU.bus_cycle != T1)) {
     snprintf(op_buf, op_len, "%s-> %s", rd_str, data_buf);
-  } else if (!mwtc || !iowc) {
+  } else if ((!mwtc || !iowc) && (CPU.bus_cycle != T1)) {
     snprintf(op_buf, op_len, "<-%s %s", wr_str, data_buf);
   } else {
     snprintf(op_buf, op_len, "%*s", (int)(4 + bus_str_width), "");
@@ -570,11 +572,11 @@ void print_cpu_state() {
   snprintf(
       buf,
       buf_len,    
-      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c%c%c ",
+      " %2s M:%c%c%c I:%c%c%c P:%c%c%c%c%c%c%c%c%c ",
       seg_str,
       rs_chr, aws_chr, ws_chr,
       ior_chr, aiow_chr, iow_chr,
-      reset_chr, ready_chr, lock_chr, intr_chr, inta_chr, nmi_chr, bhe_chr);
+      reset_chr, ready_chr, lock_chr, intr_chr, inta_chr, nmi_chr, smi_chr, test_chr, bhe_chr);
 
   DEBUG_SERIAL.print(buf);
 
@@ -1398,6 +1400,7 @@ void handle_cpu_setup_state() {
 }
 
 void handle_jump_vector_state(uint8_t q) {
+
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if ((CPU.bus_state_latched == CODE) && (CPU.bus_cycle == WRITE_CYCLE)) {
@@ -1613,6 +1616,7 @@ void handle_storeall_286() {
   }
 }
 
+/// @brief Handle the SMM register store operation for 386 CPUs.
 void handle_storeall_386() {
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
@@ -1632,24 +1636,23 @@ void handle_storeall_386() {
           CPU.data_type = QueueDataType::ProgramEnd;
           //change_state(LoadDone);
         }
-        CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STOREALL_286", CPU.data_bus);
+        CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STOREALL_386", CPU.data_bus);
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         CPU.data_bus_resolved = true;
-      }
-    }
-    else {
-      if (CPU.address_latch == 0x000864) {
-        // STOREALL terminating read.
-        Controller.getBoard().debugPrintln(DebugType::STORE, "## STOREALL_286: Terminating read at 0x000864");
-        ArduinoX86::Server.change_state(ServerState::StoreDone);
       }
     }
   }
 
   if (!Controller.readMWTCPin()) {
     // CPU is writing (MWTC active-low)
-    Controller.getBoard().debugPrintf(DebugType::STORE, true, "## STOREALL_286: Sending write to bus emulator: %04X\n\r", CPU.data_bus);
+    Controller.getBoard().debugPrintf(DebugType::STORE, true, "## STOREALL_386: Sending write to bus emulator: %04X\n\r", CPU.data_bus);
     ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
+
+    if (CPU.address_latch == SMRAM_LAST_WRITE) {
+      // SMM terminating write.
+      Controller.getBoard().debugPrintf(DebugType::STORE, false, "## STOREALL_386: Terminating read at %08X\n\r", SMRAM_LAST_WRITE);
+      ArduinoX86::Server.change_state(ServerState::StoreDone);
+    }
   }
 }
 
@@ -1816,7 +1819,13 @@ void handle_execute_state() {
   bool cpu_iowc = !Controller.readIOWCPin();
 
   if (cpu_mwtc) {
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator");
+    Controller.getBoard().debugPrintf(
+      DebugType::EXECUTE, 
+      true, 
+      "## EXECUTE: Sending write to bus emulator: [%08X]<-%04X\n\r", 
+      CPU.address_latch, 
+      CPU.data_bus
+    );
     ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
   }
 
@@ -1835,7 +1844,11 @@ void handle_execute_state() {
   if (CPU.bus_state == HALT) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.");
     Controller.writePin(OutputPin::Nmi, true);
-    return;
+
+    if (CPU.cpu_type != CpuType::i80386) {
+      // The 386 keeps a persistent HALT bus state, so we can't return or we'll never escape it.
+      return;
+    }
   }
 
   if (READ_NMI_PIN) {
@@ -1856,6 +1869,20 @@ void handle_execute_state() {
       ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
     }
   }
+
+  if (!READ_SMI_PIN) {
+    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted.");
+    if (Controller.readALEPin() && CPU.bus_state == MEMW) {
+
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMW cycle detected.");
+      // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
+      if (CPU.address_latch == SMRAM_FIRST_WRITE) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted and writing to SMRAM. Entering Store...");
+        CPU.smi_terminate = true;
+        ArduinoX86::Server.change_state(ServerState::StoreAll);
+      }
+    }
+  }
 }
 
 /// @brief Handle program execution in automatic mode.
@@ -1869,7 +1896,13 @@ void handle_execute_automatic() {
 
   if (cpu_mwtc) {
     // The CPU is writing to memory. Send it to the bus emulator.
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Sending write to bus emulator", true);
+    Controller.getBoard().debugPrintf(
+      DebugType::EXECUTE, 
+      true, 
+      "## EXECUTE: Sending write to bus emulator: [%08X]<-%04X\n\r", 
+      CPU.address_latch, 
+      CPU.data_bus
+    );
     ArduinoX86::Bus->mem_write_bus(CPU.address_latch, CPU.data_bus, !Controller.readBHEPin());
     // Detect farcall / exception.
     far_call_flag = ArduinoX86::Bus->far_call_detected();
@@ -1905,18 +1938,29 @@ void handle_execute_automatic() {
 
   if (CPU.bus_state == HALT) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
-    Controller.writePin(OutputPin::Nmi, true);
+    
+    if (CPU.use_smm()) {
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
+      Controller.writePin(OutputPin::Smi, false);
+    }
+    else {
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing NMI pin high.", true);
+      Controller.writePin(OutputPin::Nmi, true);
+    }
     return;
   }
 
-  if (READ_NMI_PIN) {
+  if ((READ_NMI_PIN) && (CPU.nmi_checkpoint == 0)) {
     // Use checkpoint "1" to specify that NMI has been detected. This just prevents the debug message from
     // printing every cycle after NMI.
-    if (CPU.nmi_checkpoint == 0) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI pin high - Execute will end at IVT fetch.", true);
-      CPU.nmi_checkpoint = 1;
-      ArduinoX86::CycleLogger->disable_logging();
-    }
+    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI pin high - Execute will end at IVT fetch.", true);
+    CPU.nmi_checkpoint = 1;
+    ArduinoX86::CycleLogger->disable_logging();
+  }
+  else if ((!READ_SMI_PIN) && (CPU.smi_checkpoint == 0)) {
+    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI pin asserted - Execute will end at SMRAM write.", true);
+    CPU.smi_checkpoint = 1;
+    ArduinoX86::CycleLogger->disable_logging();
   }
 
   if (Controller.readALEPin()) {
@@ -1950,7 +1994,6 @@ void handle_execute_automatic() {
       }
     }
 
-    
     if (CPU.bus_state == MEMR) {
       //Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.", true);
 
@@ -1966,6 +2009,21 @@ void handle_execute_automatic() {
         Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...", true);
         CPU.nmi_terminate = true;
         ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
+      }
+    }
+
+    // Handle entering SMM state.
+    if (!READ_SMI_PIN) {
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted.");
+      if (Controller.readALEPin() && CPU.bus_state == MEMW) {
+
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMW cycle detected.");
+        // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
+        if (CPU.address_latch == SMRAM_FIRST_WRITE) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted and writing to SMRAM. Entering Store...");
+          CPU.smi_terminate = true;
+          ArduinoX86::Server.change_state(ServerState::StoreAll);
+        }
       }
     }
   }

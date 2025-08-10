@@ -20,52 +20,16 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::enums::{FileOpenContext, FileSaveContext};
-use std::path::PathBuf;
 
-pub enum GuiEvent {
-    LoadRegisters,
-    ReadMemory { address: u32, size: u32 },
-    RunProgram,
-}
+pub mod register_printer;
+pub mod register_traits;
+pub mod registers_common;
+pub mod registers_v1;
+pub mod registers_v2;
+pub mod registers_v3;
 
-#[derive(Default)]
-pub struct GuiEventQueue {
-    pub events: Vec<GuiEvent>,
-}
-
-impl GuiEventQueue {
-    pub fn new() -> Self {
-        Self { events: Vec::new() }
-    }
-
-    pub fn push(&mut self, event: GuiEvent) {
-        self.events.push(event);
-    }
-
-    pub fn pop(&mut self) -> Option<GuiEvent> {
-        if self.events.is_empty() {
-            None
-        }
-        else {
-            Some(self.events.remove(0))
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
-    }
-}
-
-pub enum FrontendThreadEvent {
-    FileOpenDialogComplete {
-        context: FileOpenContext,
-        path: Option<PathBuf>,
-        contents: Vec<u8>,
-    },
-    FileSaveDialogComplete(FileSaveContext),
-    FileOpenError(FileOpenContext, String),
-    FileSaveError(String),
-    FileDialogCancelled,
-    QuitRequested,
-}
+pub use register_traits::{Registers16, Registers32};
+pub use registers_common::RemoteCpuRegisters;
+pub use registers_v1::RemoteCpuRegistersV1;
+pub use registers_v2::{RemoteCpuRegistersV2, SegmentDescriptorV1};
+pub use registers_v3::{RemoteCpuRegistersV3, RemoteCpuRegistersV3A, RemoteCpuRegistersV3B, SegmentDescriptorV2};

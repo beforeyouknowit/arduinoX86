@@ -25,7 +25,7 @@ use crate::{
     events::GuiEventQueue,
     register_state::RegisterStringStateV3,
 };
-use arduinox86_client::{RemoteCpuRegistersV3, ServerCpuType};
+use arduinox86_client::{Registers32, RemoteCpuRegistersV3, RemoteCpuRegistersV3A, ServerCpuType};
 use egui::{show_tooltip, TextBuffer};
 
 const COLUMN_WIDTH: f32 = 150.0;
@@ -54,6 +54,33 @@ impl RegisterControlV3 {
 
     #[rustfmt::skip]
     pub fn show(&mut self, ui: &mut egui::Ui, events: &mut GuiEventQueue) {
+
+        match &mut self.regs {
+            RemoteCpuRegistersV3::A(_) | RemoteCpuRegistersV3::B(_) => {
+                self.show_regs32(ui, events);
+            }
+            _ => {}
+        }
+
+        egui::Grid::new("reg_flags")
+            .striped(true)
+            .max_col_width(10.0)
+            .show(ui, |ui| {
+
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.o_fl, &mut self.flag_updated, "O", "Overflow");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.d_fl, &mut self.flag_updated, "D", "Direction");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.i_fl, &mut self.flag_updated,"I","Interrupt enable",);
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.t_fl, &mut self.flag_updated, "T", "Trap");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.s_fl, &mut self.flag_updated, "S", "Sign");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.z_fl, &mut self.flag_updated, "Z", "Zero");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.a_fl, &mut self.flag_updated, "A","Auxiliary carry",);
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.p_fl, &mut self.flag_updated, "P", "Parity");
+                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.c_fl, &mut self.flag_updated, "C", "Carry");
+                ui.end_row();
+            });
+    }
+
+    fn show_regs32(&mut self, ui: &mut egui::Ui, events: &mut GuiEventQueue) {
         egui::Grid::new("reg_general_grid")
             .striped(true)
             .min_col_width(COLUMN_WIDTH)
@@ -64,7 +91,7 @@ impl RegisterControlV3 {
                         "EAX",
                         &mut self.reg_strings.eax,
                         Register32::EAX,
-                        &mut self.regs.eax,
+                        Registers32::eax_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -75,7 +102,7 @@ impl RegisterControlV3 {
                         "ESP",
                         &mut self.reg_strings.esp,
                         Register32::ESP,
-                        &mut self.regs.esp,
+                        Registers32::esp_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -88,7 +115,7 @@ impl RegisterControlV3 {
                         "EBX",
                         &mut self.reg_strings.ebx,
                         Register32::EBX,
-                        &mut self.regs.ebx,
+                        Registers32::ebx_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -99,7 +126,7 @@ impl RegisterControlV3 {
                         "EBP",
                         &mut self.reg_strings.ebp,
                         Register32::EBP,
-                        &mut self.regs.ebp,
+                        Registers32::ebp_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -112,7 +139,7 @@ impl RegisterControlV3 {
                         "ECX",
                         &mut self.reg_strings.ecx,
                         Register32::ECX,
-                        &mut self.regs.ecx,
+                        Registers32::ecx_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -123,7 +150,7 @@ impl RegisterControlV3 {
                         "ESI",
                         &mut self.reg_strings.esi,
                         Register32::ESI,
-                        &mut self.regs.esi,
+                        Registers32::esi_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -136,7 +163,7 @@ impl RegisterControlV3 {
                         "EDX",
                         &mut self.reg_strings.edx,
                         Register32::EDX,
-                        &mut self.regs.edx,
+                        Registers32::edx_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -147,7 +174,7 @@ impl RegisterControlV3 {
                         "EDI",
                         &mut self.reg_strings.edi,
                         Register32::EDI,
-                        &mut self.regs.edi,
+                        Registers32::edi_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -167,7 +194,7 @@ impl RegisterControlV3 {
                         "DS ",
                         &mut self.reg_strings.ds,
                         Register16::DS,
-                        &mut self.regs.ds,
+                        Registers32::ds_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -179,7 +206,7 @@ impl RegisterControlV3 {
                         "ES ",
                         &mut self.reg_strings.es,
                         Register16::ES,
-                        &mut self.regs.es,
+                        Registers32::es_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -191,7 +218,7 @@ impl RegisterControlV3 {
                         "FS ",
                         &mut self.reg_strings.fs,
                         Register16::FS,
-                        &mut self.regs.fs,
+                        Registers32::fs_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -203,7 +230,7 @@ impl RegisterControlV3 {
                         "GS ",
                         &mut self.reg_strings.gs,
                         Register16::GS,
-                        &mut self.regs.gs,
+                        Registers32::gs_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -215,7 +242,7 @@ impl RegisterControlV3 {
                         "SS ",
                         &mut self.reg_strings.ss,
                         Register16::SS,
-                        &mut self.regs.ss,
+                        Registers32::ss_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -227,7 +254,7 @@ impl RegisterControlV3 {
                         "CS ",
                         &mut self.reg_strings.cs,
                         Register16::CS,
-                        &mut self.regs.cs,
+                        Registers32::cs_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
@@ -238,14 +265,12 @@ impl RegisterControlV3 {
                         "EIP",
                         &mut self.reg_strings.eip,
                         Register32::EIP,
-                        &mut self.regs.eip,
+                        Registers32::eip_mut(&mut self.regs),
                         &mut self.reg_updated,
                         events,
                     );
                 });
                 ui.end_row();
-
-
 
                 // ui.horizontal(|ui| {
                 //     // IP is not a real register - don't allow editing (?)
@@ -254,27 +279,9 @@ impl RegisterControlV3 {
                 //         egui::TextEdit::singleline(&mut self.cpu_state.ip.as_str()).font(egui::TextStyle::Monospace),
                 //     );
                 // });
-
             });
 
         ui.separator();
-
-        egui::Grid::new("reg_flags")
-            .striped(true)
-            .max_col_width(10.0)
-            .show(ui, |ui| {
-
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.o_fl, &mut self.flag_updated, "O", "Overflow");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.d_fl, &mut self.flag_updated, "D", "Direction");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.i_fl, &mut self.flag_updated,"I","Interrupt enable",);
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.t_fl, &mut self.flag_updated, "T", "Trap");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.s_fl, &mut self.flag_updated, "S", "Sign");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.z_fl, &mut self.flag_updated, "Z", "Zero");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.a_fl, &mut self.flag_updated, "A","Auxiliary carry",);
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.p_fl, &mut self.flag_updated, "P", "Parity");
-                Self::show_flagbit_mut(ui, &mut self.reg_strings.flags.c_fl, &mut self.flag_updated, "C", "Carry");
-                ui.end_row();
-            });
     }
 
     fn show_reg_mut32(

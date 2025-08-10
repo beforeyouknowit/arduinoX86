@@ -119,7 +119,8 @@ InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xFF, 0xFF, 0x00, 0x00, 0x00}, 3);
 // STOREALL opcode for 286. 
 InlineProgram STOREALL_PROGRAM("STOREALL", { 0xF1, 0x0F, 0x04 });
 
-InlineProgram STOREALL_PROGRAM_386("STOREALL_386", { 0x0F, 0x08 });
+// Program to run inside SMM handler for 386EX.  Just halts.
+InlineProgram STOREALL_PROGRAM_386("STOREALL_386", { 0xF4, 0x90 });
 
 // NMI vector. Not really a program, but using the program read function to read the vector
 // address is conveneient.

@@ -47,6 +47,6 @@ constexpr std::array<int,36> Hat80286::INPUT_PINS;
 #include <hats/Hat80386.h>
 
 // Define the static constexpr members of Hat80286
-constexpr std::array<int,10> Hat80386::OUTPUT_PINS;
-constexpr std::array<int,37> Hat80386::INPUT_PINS;
+constexpr std::array<int,11> Hat80386::OUTPUT_PINS;
+constexpr std::array<int,35> Hat80386::INPUT_PINS;
 #endif

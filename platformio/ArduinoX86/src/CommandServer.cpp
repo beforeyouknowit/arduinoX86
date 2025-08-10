@@ -44,7 +44,9 @@
 template<typename BoardType, typename HatType>
 CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatType>& controller_)
   : controller_(controller_)
-{}
+{
+  useSmm_ = USE_SMI;
+}
 
 
 template<typename BoardType, typename HatType>
@@ -967,6 +969,8 @@ bool CommandServer<BoardType, HatType>::cmd_begin_store(void) {
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_store(void) {
 
+  size_t write_len = 0;
+
   if (flags_ & FLAG_EXECUTE_AUTOMATIC) {
     // In automatic mode, Store command is only valid in StoreDone state.
     if (state_ != ServerState::StoreDone) {
@@ -996,12 +1000,33 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
         break;
       case CpuType::i80386:
         {
-          // Send 2 to indicate V3 register format.
-          INBAND_SERIAL.write((uint8_t)2);
-          // Write the registers in the V2 format.
-          Loadall386 regs368 = ArduinoX86::Bus->loadall386_regs();
-          INBAND_SERIAL.write((uint8_t *)&regs368, sizeof(Loadall386));
-          controller_.getBoard().debugPrintf(DebugType::STORE, false, "## STORE: Wrote %d bytes of registers in V3 format.\n\r", sizeof(Loadall386));
+          if (useSmm_) {
+            // Send 3 to indicate V3B register format.
+            INBAND_SERIAL.write((uint8_t)3);
+            // Write the registers in the V3B format.
+            SmmDump386 smm386 = ArduinoX86::Bus->smm_dump386_regs();
+            write_len = INBAND_SERIAL.write((uint8_t *)&smm386, sizeof(SmmDump386));
+            controller_.getBoard().debugPrintf(
+              DebugType::STORE, 
+              false, 
+              "## STORE: Wrote %d bytes of registers in V3B format.\n\r", 
+              write_len
+            );
+          }
+          else {
+            // Send 2 to indicate V3A register format.
+            INBAND_SERIAL.write((uint8_t)2);
+            // Write the registers in the V3A format.
+            Loadall386 regs368 = ArduinoX86::Bus->loadall386_regs();
+            write_len = INBAND_SERIAL.write((uint8_t *)&regs368, sizeof(Loadall386));
+            controller_.getBoard().debugPrintf(
+              DebugType::STORE, 
+              false, 
+              "## STORE: Wrote %d bytes of registers in V3 format.\n\r", 
+              write_len
+            );
+          }
+
         }
         return true;
         break;
@@ -1267,6 +1292,28 @@ bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
     ArduinoX86::Bus->replace_backend(new HashBackend());
   }
 
+  if ((new_flags & CommandServer::FLAG_USE_SMM) && !(flags_ & CommandServer::FLAG_USE_SMM)) {
+    // SMM is requested, but not currently enabled. Enable SMM.
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling SMM ##");
+    useSmm_ = true;
+    CPU.set_use_smm(true);
+  }
+  else if (!(new_flags & CommandServer::FLAG_USE_SMM) && (flags_ & CommandServer::FLAG_USE_SMM)) {
+    // SMM is disabled, but currently enabled. Disable SMM.
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling SMM ##");
+    useSmm_ = false;
+    CPU.set_use_smm(false);
+  }
+
+  if ((new_flags & CommandServer::FLAG_DEBUG_ENABLED) && !(flags_ & CommandServer::FLAG_DEBUG_ENABLED)) {
+    controller_.getBoard().setDebugEnabled(true);
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling debug mode");
+  } 
+  else if (!(new_flags & CommandServer::FLAG_DEBUG_ENABLED) && (flags_ & CommandServer::FLAG_DEBUG_ENABLED)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling debug mode");
+    controller_.getBoard().setDebugEnabled(false);
+  }
+
   flags_ = new_flags;
   return true;
 }
@@ -1412,13 +1459,14 @@ template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_enable_debug() {
   bool enabled = static_cast<bool>(commandBuffer_[0]);
   if (enabled) {
+    flags_ |= CommandServer::FLAG_DEBUG_ENABLED;
     controller_.getBoard().setDebugEnabled(true);
     controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_enable_debug(): Enabling debug mode");
   } else {
+    flags_ &= ~CommandServer::FLAG_DEBUG_ENABLED;
     controller_.getBoard().debugPrintln(DebugType::CMD, "cmd_enable_debug(): Disabling debug mode");
     controller_.getBoard().setDebugEnabled(false);
   }
-  
   return true;
 }
 
@@ -1436,10 +1484,10 @@ bool CommandServer<BoardType, HatType>::cmd_set_memory_strategy() {
                     (static_cast<uint32_t>(commandBuffer_[8]) << 24);
   if (strategy < IBusBackend::DefaultStrategy::Invalid) {
     ArduinoX86::Bus->set_memory_strategy(strategy, start_address, end_address);
-    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_memory_strategy(): Set memory strategy to: %d: %06lX %06lX\n\r", strategy, start_address, end_address);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_set_memory_strategy(): Set memory strategy to: %d: %06lX %06lX\n\r", strategy, start_address, end_address);
     return true;
   } else {
-    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "cmd_set_memory_strategy(): Invalid memory strategy: %d\n\r", strategy);
+    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_set_memory_strategy(): Invalid memory strategy: %d\n\r", strategy);
     set_error("Invalid memory strategy: %d", strategy);
     return false;
   }
@@ -1467,7 +1515,7 @@ bool CommandServer<BoardType, HatType>::cmd_read_memory() {
     controller_.getBoard().debugPrintf(
       DebugType::ERROR, 
       false, 
-      "cmd_read_memory(): Invalid address range: %08lX - %08lX. Mem size: %08lX\n\r", 
+      "## cmd_read_memory(): Invalid address range: %08lX - %08lX. Mem size: %08lX\n\r", 
       address, address + size,
       mem_size
     );
@@ -1478,12 +1526,12 @@ bool CommandServer<BoardType, HatType>::cmd_read_memory() {
   uint8_t *ptr = ArduinoX86::Bus->get_ptr(address);
 
   if (ptr == nullptr) {
-    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "cmd_read_memory(): Invalid address: %08lX\n\r", address);
+    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_read_memory(): Invalid address: %08lX\n\r", address);
     set_error("Invalid address: %08lX", address);
     return false;
   }
 
-  controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_read_memory(): Sending %lu bytes from address: %08lX\n\r to client...", size, address);
+  controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
   proto_write(ptr, size);
   return true;
 }

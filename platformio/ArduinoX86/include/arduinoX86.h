@@ -38,6 +38,9 @@
 #include <programs.h>
 #include <registers.h>
 
+#define SMRAM_FIRST_WRITE 0x03FFFC
+#define SMRAM_LAST_WRITE 0x03FF10
+
 // Code segment to use for load program.
 const uint16_t LOAD_SEG = 0xD000;
 const uint16_t STORE_SEG = 0xE000;

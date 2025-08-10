@@ -127,7 +127,7 @@ public:
     if (a0 && bhe) {
         // Write high byte only
         existing_word = mem16[addr16 & mask16] & 0x00FF; // Preserve low byte.
-        mem16[addr16 & mask16] = existing_word | ((val & 0x00FF) << 8); // Set high byte
+        mem16[addr16 & mask16] = existing_word | (val & 0xFF00); // Set high byte
     } 
     else if (!a0 && bhe) {
         // Write full 16-bit value

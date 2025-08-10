@@ -39,5 +39,6 @@ enum class OutputPin : uint8_t {
   Clock,
   Hold,
   Busy,
+  Smi,
 };
 

@@ -20,7 +20,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use arduinox86_client::{RemoteCpuRegistersV3, ServerCpuType};
+use arduinox86_client::{Registers32, RemoteCpuRegistersV3, ServerCpuType};
 
 #[derive(Debug, Clone)]
 pub struct RegisterStringStateV3 {
@@ -76,26 +76,26 @@ impl Default for RegisterStringStateV3 {
 impl From<&RemoteCpuRegistersV3> for RegisterStringStateV3 {
     fn from(regs: &RemoteCpuRegistersV3) -> Self {
         RegisterStringStateV3 {
-            cr0: format!("{:#08x}", regs.cr0),
-            eflags_raw: format!("{:#08x}", regs.eflags),
-            eip: format!("{:08x}", regs.eip),
-            edi: format!("{:08x}", regs.edi),
-            esi: format!("{:08x}", regs.esi),
-            ebp: format!("{:08x}", regs.ebp),
-            esp: format!("{:08x}", regs.esp),
-            ebx: format!("{:08x}", regs.ebx),
-            edx: format!("{:08x}", regs.edx),
-            ecx: format!("{:08x}", regs.ecx),
-            eax: format!("{:08x}", regs.eax),
-            dr6: format!("{:08x}", regs.dr6),
-            dr7: format!("{:08x}", regs.dr7),
-            gs: format!("{:04x}", regs.gs),
-            fs: format!("{:04x}", regs.fs),
-            ds: format!("{:04x}", regs.ds),
-            ss: format!("{:04x}", regs.ss),
-            cs: format!("{:04x}", regs.cs),
-            es: format!("{:04x}", regs.es),
-            flags: FlagStringState::new(regs.eflags, ServerCpuType::Intel80386),
+            cr0: format!("{:#08x}", regs.cr0()),
+            eflags_raw: format!("{:#08x}", regs.eflags()),
+            eip: format!("{:08x}", regs.eip()),
+            edi: format!("{:08x}", regs.edi()),
+            esi: format!("{:08x}", regs.esi()),
+            ebp: format!("{:08x}", regs.ebp()),
+            esp: format!("{:08x}", regs.esp()),
+            ebx: format!("{:08x}", regs.ebx()),
+            edx: format!("{:08x}", regs.edx()),
+            ecx: format!("{:08x}", regs.ecx()),
+            eax: format!("{:08x}", regs.eax()),
+            dr6: format!("{:08x}", regs.dr6()),
+            dr7: format!("{:08x}", regs.dr7()),
+            gs: format!("{:04x}", regs.gs()),
+            fs: format!("{:04x}", regs.fs()),
+            ds: format!("{:04x}", regs.ds()),
+            ss: format!("{:04x}", regs.ss()),
+            cs: format!("{:04x}", regs.cs()),
+            es: format!("{:04x}", regs.es()),
+            flags: FlagStringState::new(regs.eflags(), ServerCpuType::Intel80386),
         }
     }
 }

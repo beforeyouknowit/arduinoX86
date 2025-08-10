@@ -35,6 +35,8 @@ void cycle();
 #include <DebugFilter.h>
 
 #define CPU_8088
+
+#define USE_SMI 0
 #define USE_SETUP_PROGRAM 0
 #define SETUP_PROGRAM SETUP_PROGRAM_86
 #define SETUP_PROGRAM_PATCH_OFFSET 0
@@ -233,6 +235,7 @@ void cycle();
 #define READ_TEST_PIN READ_PIN_D07
 #define READ_INTR_PIN READ_PIN_D12
 #define READ_NMI_PIN READ_PIN_D13
+#define READ_SMI_PIN 1
 #define READ_S0_PIN READ_PIN_D14
 #define READ_S1_PIN READ_PIN_D15
 #define READ_S2_PIN READ_PIN_D16

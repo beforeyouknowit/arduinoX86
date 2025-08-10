@@ -24,14 +24,20 @@ use crate::{
     client::ClientContext,
     events::{GuiEvent, GuiEventQueue},
 };
+use arduinox86_client::ServerFlags;
+use egui_notify::Toasts;
 
 pub struct ClientWindow {
     pub icon_size: f32,
+    pub use_sdram_backend: bool,
 }
 
 impl Default for ClientWindow {
     fn default() -> Self {
-        Self { icon_size: 18.0 }
+        Self {
+            icon_size: 24.0,
+            use_sdram_backend: false,
+        }
     }
 }
 
@@ -40,12 +46,35 @@ impl ClientWindow {
         Self { ..Default::default() }
     }
 
-    pub fn show(&mut self, e_ctx: &egui::Context, c_ctx: &mut ClientContext, events: &mut GuiEventQueue) {
+    pub fn show(
+        &mut self,
+        e_ctx: &egui::Context,
+        c_ctx: &mut ClientContext,
+        events: &mut GuiEventQueue,
+        toasts: &mut Toasts,
+    ) {
         egui::Window::new("Client Connection")
             .default_width(800.0)
             .default_height(600.0)
             .show(e_ctx, |ui| {
                 ui.vertical(|ui| {
+                    egui::MenuBar::new().ui(ui, |ui| {
+                        ui.menu_button("Options", |ui| {
+                            if ui.checkbox(&mut self.use_sdram_backend, "Use SDRAM Backend").changed() {
+                                match c_ctx.set_flag_state(ServerFlags::USE_SDRAM_BACKEND, self.use_sdram_backend) {
+                                    Ok(_) => {
+                                        log::debug!("SDRAM backend toggled: {}", self.use_sdram_backend);
+                                        toasts.success("SDRAM backend set successfully.");
+                                    }
+                                    Err(e) => {
+                                        log::debug!("SDRAM backend toggled: {}", self.use_sdram_backend);
+                                        toasts.error(format!("Failed to set SDRAM backend: {}", e));
+                                    }
+                                }
+                            }
+                        });
+                    });
+
                     ui.horizontal(|ui| {
                         if ui
                             .button(egui::RichText::new("📤").size(self.icon_size))
@@ -61,7 +90,7 @@ impl ClientWindow {
                             .on_hover_text("Run")
                             .clicked()
                         {
-                            // Do run
+                            events.push(GuiEvent::RunProgram);
                         }
 
                         if ui

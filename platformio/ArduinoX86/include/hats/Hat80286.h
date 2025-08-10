@@ -37,6 +37,8 @@ void cycle();
 #include <i82288Emulator.h>
 
 #define CPU_286
+
+#define USE_SMI 0
 #define USE_SETUP_PROGRAM 0
 #define SETUP_PROGRAM SETUP_PROGRAM_86
 #define SETUP_PROGRAM_PATCH_OFFSET 0
@@ -77,6 +79,7 @@ void cycle();
 #define READ_READY_PIN (!READ_PIN_D76)
 #define READ_RESET_PIN READ_PIN_D05
 #define READ_NMI_PIN READ_PIN_D78
+#define READ_SMI_PIN 1
 #define READ_INTR_PIN READ_PIN_D79
 
 #define READ_TEST_PIN READ_PIN_A0
