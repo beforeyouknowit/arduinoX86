@@ -3,9 +3,13 @@
 ![386ex_hat](./images/386ex_hat.jpg)
 
 This is a HAT for the 386EX CPU. The 386EX is a low-voltage variant of the 386 with a 16-bit data bus, intended for
-embedded operations.
+embedded applications.
 
-This HAT has external power pins. You may connect a 3.3V power source to the pins. I recommend using Dupont wires.
+This HAT has external power pins. You may connect a 3.3V or 5V power source to the pins.
+I recommend using Dupont connectors.
+
+In my observation, 5V 386EX CPUs seem to run fine at 3.3V as well, although this may not be the case at higher clock
+rates.
 
 You may find that the CPU runs even without external power. This is due to the CMOS process - many CMOS CPUs can power
 themselves by sinking current from any input pin. Correct operation in this state is not guaranteed.
