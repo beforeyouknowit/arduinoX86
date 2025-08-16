@@ -25,6 +25,8 @@ use std::io::{Seek, Write};
 
 use crate::registers_common::RandomizeOpts;
 use binrw::{binrw, BinReaderExt, BinResult, BinWrite};
+
+#[cfg(feature = "use_moo")]
 use moo::{
     prelude::MooRegisters32Init,
     types::{MooRegisters16, MooRegisters32},

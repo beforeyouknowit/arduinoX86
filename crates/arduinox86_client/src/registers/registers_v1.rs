@@ -21,6 +21,8 @@
     DEALINGS IN THE SOFTWARE.
 */
 use crate::RemoteCpuRegistersV2;
+
+#[cfg(feature = "use_moo")]
 use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 
 #[derive(Clone, Default, Debug)]

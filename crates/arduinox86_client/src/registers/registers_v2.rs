@@ -33,6 +33,8 @@ use modular_bitfield::{
     bitfield,
     prelude::{B1, B16, B2, B24, B4},
 };
+
+#[cfg(feature = "use_moo")]
 use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 
 #[bitfield]
