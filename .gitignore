@@ -31,7 +31,8 @@ Pro_Mini_Clone_Socket.kicad_mod
 # 808X HAT
 hats/**/*.lck
 hats/**/*.bak
-hats/808x/kicad/ard8088-backups/
+hats/**/*.kicad_pcb.zip
+hats/**/*-backups/
 hats/808x/kicad/gerbers*
 hats/808x/gerbers/*.zip
 hats/808x/kicad/ard8088.wrl
