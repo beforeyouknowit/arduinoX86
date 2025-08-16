@@ -20,8 +20,8 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-
 use crate::RemoteCpuRegistersV2;
+use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 
 #[derive(Clone, Default, Debug)]
 pub struct RemoteCpuRegistersV1 {
@@ -174,5 +174,35 @@ impl From<&[u8]> for RemoteCpuRegistersV1 {
             si:    buf[24] as u16 | ((buf[25] as u16) << 8),
             di:    buf[26] as u16 | ((buf[27] as u16) << 8),
         }
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<RemoteCpuRegistersV1> for MooRegisters16 {
+    fn from(remote: RemoteCpuRegistersV1) -> Self {
+        MooRegisters16::from(&remote)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&RemoteCpuRegistersV1> for MooRegisters16 {
+    fn from(remote: &RemoteCpuRegistersV1) -> Self {
+        (&MooRegisters16Init {
+            ax:    remote.ax,
+            bx:    remote.bx,
+            cx:    remote.cx,
+            dx:    remote.dx,
+            cs:    remote.cs,
+            ss:    remote.ss,
+            ds:    remote.ds,
+            es:    remote.es,
+            sp:    remote.sp,
+            bp:    remote.bp,
+            si:    remote.si,
+            di:    remote.di,
+            ip:    remote.ip,
+            flags: remote.flags,
+        })
+            .into()
     }
 }

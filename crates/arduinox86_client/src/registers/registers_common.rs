@@ -21,10 +21,10 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+use crate::registers::register_traits::Registers32;
+use binrw::BinWrite;
 use std::io::{Seek, Write};
 
-use binrw::{binrw, BinReaderExt, BinWrite};
-use modular_bitfield::{bitfield, prelude::*};
 #[cfg(feature = "use_moo")]
 use moo::prelude::MooRegisters16Init;
 #[cfg(feature = "use_moo")]
@@ -37,8 +37,6 @@ use crate::{
     RemoteCpuRegistersV3A,
     RemoteCpuRegistersV3B,
 };
-use rand::Rng;
-use rand_distr::{Beta, Distribution};
 
 #[derive(Clone)]
 pub enum RemoteCpuRegisters {
@@ -129,6 +127,14 @@ impl RemoteCpuRegisters {
         }
     }
 
+    pub fn normalize(&mut self) {
+        match self {
+            RemoteCpuRegisters::V1(regs) => {}
+            RemoteCpuRegisters::V2(regs) => regs.normalize_descriptors(),
+            RemoteCpuRegisters::V3(regs) => regs.normalize_descriptors(),
+        }
+    }
+
     pub fn write<WS: Write + Seek>(&self, writer: &mut WS) -> std::io::Result<()> {
         let mut buf = vec![0u8; 204];
 
@@ -167,39 +173,19 @@ pub struct RandomizeOpts {
     pub weight_sp_odd: f32,
     pub sp_min_value: u16,
     pub sp_max_value: u16,
+    pub sp_min_value32: u32,
+    pub sp_max_value32: u32,
     pub randomize_flags: bool,
     pub clear_trap_flag: bool,
     pub clear_interrupt_flag: bool,
     pub randomize_general: bool,
     pub randomize_ip: bool,
     pub ip_mask: u16,
+    pub eip_mask: u32,
     pub randomize_x: bool,
     pub randomize_msw: bool,
     pub randomize_tr: bool,
     pub randomize_ldt: bool,
     pub randomize_segment_descriptors: bool,
     pub randomize_table_descriptors: bool,
-}
-
-#[cfg(feature = "use_moo")]
-impl From<RemoteCpuRegistersV1> for MooRegisters16 {
-    fn from(remote: RemoteCpuRegistersV1) -> Self {
-        (&MooRegisters16Init {
-            ax:    remote.ax,
-            bx:    remote.bx,
-            cx:    remote.cx,
-            dx:    remote.dx,
-            cs:    remote.cs,
-            ss:    remote.ss,
-            ds:    remote.ds,
-            es:    remote.es,
-            sp:    remote.sp,
-            bp:    remote.bp,
-            si:    remote.si,
-            di:    remote.di,
-            ip:    remote.ip,
-            flags: remote.flags,
-        })
-            .into()
-    }
 }

@@ -127,6 +127,7 @@ pub enum Register8 {
 pub enum BusStatusByte {
     V1(u8),
     V2(u8),
+    V3(u8),
 }
 
 impl TryFrom<BusStatusByte> for BusOpType {
@@ -148,6 +149,14 @@ impl TryFrom<BusStatusByte> for BusOpType {
                 0b1001 => Ok(BusOpType::IoRead),
                 0b1010 => Ok(BusOpType::IoWrite),
                 0b1101 => Ok(BusOpType::CodeRead),
+                _ => Err(()),
+            },
+            BusStatusByte::V3(v) => match v & 0x07 {
+                0b010 => Ok(BusOpType::IoRead),
+                0b011 => Ok(BusOpType::IoWrite),
+                0b100 => Ok(BusOpType::CodeRead),
+                0b110 => Ok(BusOpType::MemRead),
+                0b111 => Ok(BusOpType::MemWrite),
                 _ => Err(()),
             },
         }

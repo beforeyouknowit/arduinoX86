@@ -33,6 +33,7 @@ use modular_bitfield::{
     bitfield,
     prelude::{B1, B16, B2, B24, B4},
 };
+use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 
 #[bitfield]
 #[derive(Default, Debug)]
@@ -438,5 +439,35 @@ impl RemoteCpuRegistersV2 {
     pub fn calculate_code_address(&self) -> u32 {
         // Calculate the code address based on CS descriptor base and IP
         self.cs_desc.base_address() + (self.ip as u32)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<RemoteCpuRegistersV2> for MooRegisters16 {
+    fn from(remote: RemoteCpuRegistersV2) -> Self {
+        MooRegisters16::from(&remote)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&RemoteCpuRegistersV2> for MooRegisters16 {
+    fn from(remote: &RemoteCpuRegistersV2) -> Self {
+        (&MooRegisters16Init {
+            ax:    remote.ax,
+            bx:    remote.bx,
+            cx:    remote.cx,
+            dx:    remote.dx,
+            cs:    remote.cs,
+            ss:    remote.ss,
+            ds:    remote.ds,
+            es:    remote.es,
+            sp:    remote.sp,
+            bp:    remote.bp,
+            si:    remote.si,
+            di:    remote.di,
+            ip:    remote.ip,
+            flags: remote.flags,
+        })
+            .into()
     }
 }

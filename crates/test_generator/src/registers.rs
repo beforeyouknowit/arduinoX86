@@ -21,14 +21,32 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use arduinox86_client::registers_common::RandomizeOpts;
-use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
+use arduinox86_client::{registers_common::RandomizeOpts, Registers32};
+use moo::{
+    prelude::{MooRegisters16Init, MooRegisters32Init},
+    types::{MooRegisters, MooRegisters16, MooRegisters32, MooRegistersInit},
+};
 use rand_distr::Beta;
-use std::io::Write;
+use std::io::{Seek, Write};
 
 pub enum Registers {
     V1(arduinox86_client::RemoteCpuRegistersV1),
     V2(arduinox86_client::RemoteCpuRegistersV2),
+    V3A(arduinox86_client::RemoteCpuRegistersV3A),
+    V3B(arduinox86_client::RemoteCpuRegistersV3B),
+}
+
+impl TryFrom<&Registers> for MooRegisters {
+    type Error = String;
+
+    fn try_from(regs: &Registers) -> Result<Self, Self::Error> {
+        match regs {
+            Registers::V1(v1) => Ok(MooRegisters::Sixteen(MooRegisters16::from(v1))),
+            Registers::V2(v2) => Ok(MooRegisters::Sixteen(MooRegisters16::from(v2))),
+            Registers::V3A(v3a) => Ok(MooRegisters::ThirtyTwo(MooRegisters32::from(v3a))),
+            Registers::V3B(v3b) => Ok(MooRegisters::ThirtyTwo(MooRegisters32::from(v3b))),
+        }
+    }
 }
 
 impl TryFrom<&Registers> for MooRegisters16 {
@@ -70,14 +88,15 @@ impl TryFrom<&Registers> for MooRegisters16 {
                 flags: v2.flags,
             })
                 .into()),
+            _ => Err("Unsupported register version for MooRegisters16 conversion".to_string()),
         }
     }
 }
 
-impl From<&Registers> for MooRegisters16Init {
+impl From<&Registers> for MooRegistersInit {
     fn from(regs: &Registers) -> Self {
         match regs {
-            Registers::V1(v1) => MooRegisters16Init {
+            Registers::V1(v1) => MooRegistersInit::Sixteen(MooRegisters16Init {
                 ax:    v1.ax,
                 bx:    v1.bx,
                 cx:    v1.cx,
@@ -92,8 +111,8 @@ impl From<&Registers> for MooRegisters16Init {
                 di:    v1.di,
                 ip:    v1.ip,
                 flags: v1.flags,
-            },
-            Registers::V2(v2) => MooRegisters16Init {
+            }),
+            Registers::V2(v2) => MooRegistersInit::Sixteen(MooRegisters16Init {
                 ax:    v2.ax,
                 bx:    v2.bx,
                 cx:    v2.cx,
@@ -108,7 +127,107 @@ impl From<&Registers> for MooRegisters16Init {
                 di:    v2.di,
                 ip:    v2.ip,
                 flags: v2.flags,
-            },
+            }),
+            Registers::V3A(v3a) => MooRegistersInit::ThirtyTwo(MooRegisters32Init {
+                cr0: v3a.cr0,
+                cr3: 0,
+                eax: v3a.eax,
+                ebx: v3a.ebx,
+                ecx: v3a.ecx,
+                edx: v3a.edx,
+                esi: v3a.esi,
+                edi: v3a.edi,
+                ebp: v3a.ebp,
+                esp: v3a.esp,
+                cs: v3a.cs as u32,
+                ds: v3a.ds as u32,
+                es: v3a.es as u32,
+                fs: v3a.fs as u32,
+                gs: v3a.gs as u32,
+                ss: v3a.ss as u32,
+                eip: v3a.eip,
+                dr6: v3a.dr6,
+                dr7: v3a.dr7,
+                eflags: v3a.eflags,
+            }),
+            Registers::V3B(v3b) => MooRegistersInit::ThirtyTwo(MooRegisters32Init {
+                cr0: v3b.cr0,
+                cr3: v3b.cr3,
+                eax: v3b.eax,
+                ebx: v3b.ebx,
+                ecx: v3b.ecx,
+                edx: v3b.edx,
+                esi: v3b.esi,
+                edi: v3b.edi,
+                ebp: v3b.ebp,
+                esp: v3b.esp,
+                cs: v3b.cs as u32,
+                ds: v3b.ds as u32,
+                es: v3b.es as u32,
+                fs: v3b.fs as u32,
+                gs: v3b.gs as u32,
+                ss: v3b.ss as u32,
+                eip: v3b.eip,
+                dr6: v3b.dr6,
+                dr7: v3b.dr7,
+                eflags: v3b.eflags,
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Registers> for MooRegisters32 {
+    type Error = String;
+
+    fn try_from(regs: &Registers) -> Result<Self, Self::Error> {
+        match regs {
+            Registers::V3A(v3a) => Ok((&MooRegisters32Init {
+                cr0: v3a.cr0,
+                cr3: 0,
+                eax: v3a.eax,
+                ebx: v3a.ebx,
+                ecx: v3a.ecx,
+                edx: v3a.edx,
+                esi: v3a.esi,
+                edi: v3a.edi,
+                ebp: v3a.ebp,
+                esp: v3a.esp,
+                cs: v3a.cs as u32,
+                ds: v3a.ds as u32,
+                es: v3a.es as u32,
+                fs: v3a.fs as u32,
+                gs: v3a.gs as u32,
+                ss: v3a.ss as u32,
+                eip: v3a.eip,
+                dr6: v3a.dr6,
+                dr7: v3a.dr7,
+                eflags: v3a.eflags,
+            })
+                .into()),
+            Registers::V3B(v3b) => Ok((&MooRegisters32Init {
+                cr0: v3b.cr0,
+                cr3: v3b.cr3,
+                eax: v3b.eax,
+                ebx: v3b.ebx,
+                ecx: v3b.ecx,
+                edx: v3b.edx,
+                esi: v3b.esi,
+                edi: v3b.edi,
+                ebp: v3b.ebp,
+                esp: v3b.esp,
+                cs: v3b.cs as u32,
+                ds: v3b.ds as u32,
+                es: v3b.es as u32,
+                fs: v3b.fs as u32,
+                gs: v3b.gs as u32,
+                ss: v3b.ss as u32,
+                eip: v3b.eip,
+                dr6: v3b.dr6,
+                dr7: v3b.dr7,
+                eflags: v3b.eflags,
+            })
+                .into()),
+            _ => Err("Unsupported register version for MooRegisters32 conversion".to_string()),
         }
     }
 }
@@ -120,16 +239,22 @@ impl Registers {
                 //gen_regs::randomize_v1(&self.context, &self.config.test_gen, regs);
             }
             Registers::V2(regs) => regs.randomize(opts, rand, beta),
+            Registers::V3A(regs) => regs.randomize(opts, rand, beta),
+            Registers::V3B(_) => {
+                // B registers don't need randomization as they are output
+            }
         }
     }
 
-    pub fn to_buffer<W: Write>(&self, buf: &mut W) {
+    pub fn to_buffer<WS: Write + Seek>(&self, buf: &mut WS) {
         match self {
             Registers::V1(_regs) => {
                 //gen_regs::write_v1(&mut W, regs);
                 unimplemented!("Writing V1 registers to buffer is not implemented yet");
             }
             Registers::V2(regs) => regs.to_buffer(buf),
+            Registers::V3A(regs) => _ = regs.to_buffer(buf),
+            Registers::V3B(regs) => {}
         }
     }
 
@@ -137,6 +262,8 @@ impl Registers {
         match self {
             Registers::V1(_regs) => 28,
             Registers::V2(_regs) => 102,
+            Registers::V3A(_regs) => 204,
+            Registers::V3B(_regs) => 208,
         }
     }
 
@@ -144,6 +271,8 @@ impl Registers {
         match self {
             Registers::V1(regs) => regs.calculate_code_address(),
             Registers::V2(regs) => regs.calculate_code_address(),
+            Registers::V3A(regs) => regs.calculate_code_address(),
+            Registers::V3B(regs) => regs.calculate_code_address(),
         }
     }
 
@@ -151,6 +280,8 @@ impl Registers {
         match self {
             Registers::V1(_regs) => {}
             Registers::V2(regs) => regs.normalize_descriptors(),
+            Registers::V3A(regs) => regs.normalize_descriptors(),
+            Registers::V3B(regs) => regs.normalize_descriptors(),
         }
     }
 
@@ -158,54 +289,72 @@ impl Registers {
         match self {
             Registers::V1(regs) => regs.ip,
             Registers::V2(regs) => regs.ip,
+            Registers::V3A(regs) => regs.eip as u16,
+            Registers::V3B(regs) => regs.eip as u16,
         }
     }
     pub fn cs(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.cs,
             Registers::V2(regs) => regs.cs,
+            Registers::V3A(regs) => regs.cs,
+            Registers::V3B(regs) => regs.cs,
         }
     }
     pub fn cs_base(&self) -> u32 {
         match self {
             Registers::V1(regs) => (regs.cs as u32) << 4,
             Registers::V2(regs) => regs.cs_desc.base_address(),
+            Registers::V3A(regs) => regs.cs_desc.base_address(),
+            Registers::V3B(regs) => regs.cs_desc.base_address(),
         }
     }
     pub fn ss(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.ss,
             Registers::V2(regs) => regs.ss,
+            Registers::V3A(regs) => regs.ss,
+            Registers::V3B(regs) => regs.ss,
         }
     }
     pub fn ss_base(&self) -> u32 {
         match self {
             Registers::V1(regs) => (regs.ss as u32) << 4,
             Registers::V2(regs) => regs.ss_desc.base_address(),
+            Registers::V3A(regs) => regs.ss_desc.base_address(),
+            Registers::V3B(regs) => regs.ss_desc.base_address(),
         }
     }
     pub fn cx(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.cx,
             Registers::V2(regs) => regs.cx,
+            Registers::V3A(regs) => regs.ecx as u16,
+            Registers::V3B(regs) => regs.ecx as u16,
         }
     }
     pub fn set_cx(&mut self, value: u16) {
         match self {
             Registers::V1(regs) => regs.cx = value,
             Registers::V2(regs) => regs.cx = value,
+            Registers::V3A(regs) => regs.ecx = (regs.ecx & 0xFFFF_0000) | value as u32,
+            Registers::V3B(regs) => regs.ecx = (regs.ecx & 0xFFFF_0000) | value as u32,
         }
     }
     pub fn sp(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.sp,
             Registers::V2(regs) => regs.sp,
+            Registers::V3A(regs) => regs.esp as u16,
+            Registers::V3B(regs) => regs.esp as u16,
         }
     }
     pub fn stack_address(&self) -> u32 {
         match self {
             Registers::V1(regs) => ((regs.ss as u32) << 4) + regs.sp as u32,
             Registers::V2(regs) => regs.ss_desc.base_address() + regs.sp as u32,
+            Registers::V3A(regs) => regs.ss_desc.base_address() + regs.esp,
+            Registers::V3B(regs) => regs.ss_desc.base_address() + regs.esp,
         }
     }
 }

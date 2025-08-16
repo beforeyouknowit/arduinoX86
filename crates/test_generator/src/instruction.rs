@@ -29,7 +29,7 @@ use rand::{
 };
 use rand_distr::{Beta, Distribution};
 
-use crate::{trace_log, TerminationCondition, TestContext, TestGen};
+use crate::{trace_log, InstructionSize, TerminationCondition, TestContext, TestGen};
 
 use crate::gen_regs::TestRegisters;
 use anyhow::bail;
@@ -38,6 +38,7 @@ use moo::types::MooCpuType;
 
 pub struct TestInstruction {
     name: String,
+    size: InstructionSize,
     opcode: u8,
     bytes: Vec<u8>,
     test_seed: u64,
@@ -52,11 +53,11 @@ pub struct TestInstruction {
 
 // Create a TestInstruction from a byte slice, such as the bytes chunk array - this allows us
 // to create a TestInstruction from an existing test, ie, for validation.
-impl From<&[u8]> for TestInstruction {
-    fn from(bytes: &[u8]) -> Self {
-        let iced_i = Decoder::new(16, bytes, DecoderOptions::NO_INVALID_CHECK).decode();
+impl From<(InstructionSize, &[u8])> for TestInstruction {
+    fn from(data: (InstructionSize, &[u8])) -> Self {
+        let iced_i = Decoder::new(data.0.into(), data.1, DecoderOptions::NO_INVALID_CHECK).decode();
         let instr_range = 0..iced_i.len();
-        let sequence_range = 0..bytes.len();
+        let sequence_range = 0..data.1.len();
         let prefix_range = 0..0; // Ignore prefixes for now.
         let mut mnemonic_string = String::new();
 
@@ -67,10 +68,13 @@ impl From<&[u8]> for TestInstruction {
             iced_x86::FormatMnemonicOptions::NO_PREFIXES,
         );
 
+        let opcode = iced_i.op_code().op_code() as u8;
+
         TestInstruction {
             name: iced_i.to_string(),
-            opcode: bytes[0],
-            bytes: bytes.to_vec(),
+            size: data.0,
+            opcode,
+            bytes: data.1.to_vec(),
             test_seed: 0, // No seed for static instructions
             instr_range,
             sequence_range,
@@ -88,6 +92,7 @@ impl TestInstruction {
     pub fn new(
         context: &mut TestContext,
         config: &TestGen,
+        size: InstructionSize,
         opcode: u8,
         opcode_ext: Option<u8>,
         test_registers: &TestRegisters,
@@ -141,7 +146,7 @@ impl TestInstruction {
 
         // We can do specific filters on modrm values here if needed.
         match config.cpu_type {
-            MooCpuType::Intel80286 => {
+            MooCpuType::Intel80286 | MooCpuType::Intel80386Ex => {
                 // Any modrm is fine for the 80286 as invalid forms will generate a UD exception
                 // instead of freaking out.
             }
@@ -224,7 +229,7 @@ impl TestInstruction {
         }
 
         let initial_decode_buffer = instruction_bytes.clone();
-        let mut decoder = Decoder::new(config.cpu_type.reg_bitness(), &initial_decode_buffer, decoder_opts);
+        let mut decoder = Decoder::new(16, &initial_decode_buffer, decoder_opts);
 
         let mut iced_i = decoder.decode();
         let mut instruction_byte_ct = iced_i.len();
@@ -368,6 +373,7 @@ impl TestInstruction {
 
         Ok(TestInstruction {
             name: instr_text,
+            size,
             opcode,
             bytes: instruction_bytes,
             test_seed,

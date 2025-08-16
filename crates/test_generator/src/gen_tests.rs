@@ -21,13 +21,30 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use super::{Config, TestContext};
+use super::{Config, InstructionSize, TestContext};
 use crate::{display::print_regs_v2, gen_regs::TestRegisters, registers::Registers};
 use anyhow::{anyhow, Context, Error};
-use moo::types::{MooComparison, MooException, MooFileMetadata, MooTestGenMetadata};
+use moo::types::{
+    MooComparison,
+    MooException,
+    MooFileMetadata,
+    MooRegisters,
+    MooRegisters32,
+    MooRegisters32Printer,
+    MooRegistersInit,
+    MooTestGenMetadata,
+};
 use std::{ffi::OsString, io::BufWriter, time::Instant};
 
-use arduinox86_client::{CpuWidth, MemoryStrategy, ProgramState, RemoteCpuRegistersV2, ServerCpuType, ServerFlags};
+use arduinox86_client::{
+    CpuWidth,
+    MemoryStrategy,
+    ProgramState,
+    RemoteCpuRegistersV2,
+    RemoteCpuRegistersV3B,
+    ServerCpuType,
+    ServerFlags,
+};
 
 use moo::prelude::*;
 
@@ -201,7 +218,7 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                 let instruction_bytes = tests[test_num].bytes();
 
                 let mut test_registers = TestRegisters::from(tests[test_num].initial_regs());
-                let mut test_instruction = TestInstruction::from(instruction_bytes);
+                let mut test_instruction = TestInstruction::from((InstructionSize::Sixteen, instruction_bytes));
 
                 // Write initial memory state to device.
                 let initial_mem = tests[test_num].initial_mem_state();
@@ -262,6 +279,7 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                         test_instruction = TestInstruction::new(
                             context,
                             &config.test_gen,
+                            InstructionSize::Sixteen,
                             opcode,
                             have_group_ext.then_some(opcode_ext),
                             &test_registers,
@@ -321,7 +339,19 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
     Ok(())
 }
 
-pub fn compare_registers(regs0: &MooRegisters1, regs1: &MooRegisters1) {
+pub fn compare_registers(regs0: &MooRegisters, regs1: &MooRegisters) {
+    match (regs0, regs1) {
+        (MooRegisters::Sixteen(regs0_inner), MooRegisters::Sixteen(regs1_inner)) => {
+            compare_registers16(regs0_inner, regs1_inner);
+        }
+
+        _ => {
+            println!("Incompatible register types for comparison!");
+        }
+    }
+}
+
+pub fn compare_registers16(regs0: &MooRegisters16, regs1: &MooRegisters16) {
     if regs0.ax != regs1.ax {
         println!("AX mismatch: {:04X} != {:04X}", regs0.ax, regs1.ax);
     }
@@ -439,7 +469,13 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     }
 
     // Tell ArduinoX86 to execute instructions automatically.
-    context.client.set_flags(ServerFlags::EXECUTE_AUTOMATIC)?;
+    let mut server_flags = ServerFlags::EXECUTE_AUTOMATIC;
+
+    if let MooCpuType::Intel80386Ex = config.test_gen.cpu_type {
+        server_flags |= ServerFlags::USE_SMM;
+    }
+
+    context.client.set_flags(server_flags)?;
     // Set default serial debug state.
     context.client.enable_debug(config.test_exec.serial_debug_default)?;
 
@@ -447,179 +483,182 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     let mut last_opcode = opcode_range_start;
 
     for opcode in opcode_range_start..=opcode_range_end {
-        let mut op_ext_start = 0;
-        let mut op_ext_end = 0;
-        let mut have_group_ext = false;
-        if config.test_gen.group_opcodes.contains(&opcode) {
-            have_group_ext = true;
-            (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode);
-        }
-
-        for opcode_ext in op_ext_start..=op_ext_end {
-            last_opcode = opcode;
-
-            // Reset mnemonic hashmap.
-            context.mnemonic_set.clear();
-
-            if config.test_gen.excluded_opcodes.contains(&opcode) {
-                log::debug!("Skipping excluded opcode: {:02X}", opcode);
-                continue;
-            }
-            if config.test_gen.prefixes.contains(&opcode) {
-                log::debug!("Skipping prefix: {:02X}", opcode);
-                continue;
+        for size in &config.test_gen.gen_widths {
+            let mut op_ext_start = 0;
+            let mut op_ext_end = 0;
+            let mut have_group_ext = false;
+            if config.test_gen.group_opcodes.contains(&opcode) {
+                have_group_ext = true;
+                (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode);
             }
 
-            let mut op_ext_str = "".to_string();
-            if have_group_ext {
-                // If this is a group opcode, append the extension.
-                op_ext_str = format!(".{:1X}", opcode_ext);
-            }
+            for opcode_ext in op_ext_start..=op_ext_end {
+                last_opcode = opcode;
 
-            // Create the output file path.
-            let mut file_path = config.test_gen.test_output_dir.clone();
-            let filename = OsString::from(format!("{:02X}{}.MOO", opcode, op_ext_str));
-            file_path.push(filename.clone());
+                // Reset mnemonic hashmap.
+                context.mnemonic_set.clear();
 
-            // Create the trace file.
-            let trace_filename = OsString::from(format!(
-                "{:02X}{}{}",
-                opcode,
-                op_ext_str,
-                config.test_gen.trace_file_suffix.display()
-            ));
-            let trace_file_path = config.test_gen.trace_output_dir.join(trace_filename);
-            let trace_file = std::fs::File::create(&trace_file_path)
-                .with_context(|| format!("Creating trace file: {}", trace_file_path.display()))?;
-            context.trace_log = BufWriter::new(trace_file);
+                if config.test_gen.excluded_opcodes.contains(&opcode) {
+                    log::debug!("Skipping excluded opcode: {:02X}", opcode);
+                    continue;
+                }
+                if config.test_gen.prefixes.contains(&opcode) {
+                    log::debug!("Skipping prefix: {:02X}", opcode);
+                    continue;
+                }
 
-            // Create the file seed.
-            let mut file_seed: u64 = opcode as u64;
-            if let Some(prefix_byte) = prefix_byte {
-                file_seed = file_seed | ((prefix_byte as u64) << 8);
-            }
-            file_seed <<= 3;
-            file_seed |= (opcode_ext & 0x07) as u64;
-            file_seed ^= config.test_gen.base_seed;
+                let mut op_ext_str = "".to_string();
+                if have_group_ext {
+                    // If this is a group opcode, append the extension.
+                    op_ext_str = format!(".{:1X}", opcode_ext);
+                }
 
-            context.file_seed = file_seed;
-            let mut test_start_num = 0;
+                // Create the output file path.
+                let mut file_path = config.test_gen.test_output_dir.clone();
+                let filename = OsString::from(format!("{:02X}{}.MOO", opcode, op_ext_str));
+                file_path.push(filename.clone());
 
-            let mut test_file = MooTestFile::new(
-                config.test_gen.moo_version,
-                "C286".to_string(),
-                config.test_gen.test_count,
-            );
+                // Create the trace file.
+                let trace_filename = OsString::from(format!(
+                    "{:02X}{}{}",
+                    opcode,
+                    op_ext_str,
+                    config.test_gen.trace_file_suffix.display()
+                ));
+                let trace_file_path = config.test_gen.trace_output_dir.join(trace_filename);
+                let trace_file = std::fs::File::create(&trace_file_path)
+                    .with_context(|| format!("Creating trace file: {}", trace_file_path.display()))?;
+                context.trace_log = BufWriter::new(trace_file);
 
-            let mut test_metadata = MooFileMetadata::new(
-                config.test_gen.set_version_major,
-                config.test_gen.set_version_minor,
-                config.test_gen.cpu_type.into(),
-                opcode as u32,
-            )
-            .with_file_seed(context.file_seed);
+                // Create the file seed.
+                let mut file_seed: u64 = opcode as u64;
+                if let Some(prefix_byte) = prefix_byte {
+                    file_seed = file_seed | ((prefix_byte as u64) << 8);
+                }
+                file_seed <<= 3;
+                file_seed |= (opcode_ext & 0x07) as u64;
+                file_seed ^= config.test_gen.base_seed;
 
-            // Open the file if append == true
-            if config.test_gen.append_file {
-                // Open `filename` for reading as a BufReader.
-                match std::fs::File::open(&file_path) {
-                    Ok(file) => {
-                        log::debug!("Appending to existing test file: {}", file_path.to_string_lossy());
-                        let mut file_reader = std::io::BufReader::new(file);
-                        test_file = MooTestFile::read(&mut file_reader)?;
+                context.file_seed = file_seed;
+                let mut test_start_num = 0;
 
-                        println!(
-                            "Read {} tests from existing file: {}",
-                            test_file.test_ct(),
-                            file_path.to_string_lossy()
-                        );
+                let mut test_file = MooTestFile::new(
+                    config.test_gen.moo_version,
+                    config.test_gen.moo_arch.clone(),
+                    config.test_gen.test_count,
+                );
 
-                        test_start_num = test_file.test_ct();
-                    }
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::NotFound {
-                            // If the file does not exist, we will create it later.
-                            log::debug!(
-                                "File {} not found, creating new test file.",
+                let mut test_metadata = MooFileMetadata::new(
+                    config.test_gen.set_version_major,
+                    config.test_gen.set_version_minor,
+                    config.test_gen.cpu_type.into(),
+                    opcode as u32,
+                )
+                .with_file_seed(context.file_seed);
+
+                // Open the file if append == true
+                if config.test_gen.append_file {
+                    // Open `filename` for reading as a BufReader.
+                    match std::fs::File::open(&file_path) {
+                        Ok(file) => {
+                            log::debug!("Appending to existing test file: {}", file_path.to_string_lossy());
+                            let mut file_reader = std::io::BufReader::new(file);
+                            test_file = MooTestFile::read(&mut file_reader)?;
+
+                            println!(
+                                "Read {} tests from existing file: {}",
+                                test_file.test_ct(),
                                 file_path.to_string_lossy()
                             );
+
+                            test_start_num = test_file.test_ct();
                         }
-                        else {
-                            return Err(anyhow::anyhow!("Error opening test file: {}", e));
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                // If the file does not exist, we will create it later.
+                                log::debug!(
+                                    "File {} not found, creating new test file.",
+                                    file_path.to_string_lossy()
+                                );
+                            }
+                            else {
+                                return Err(anyhow::anyhow!("Error opening test file: {}", e));
+                            }
                         }
                     }
+                };
+
+                if test_start_num >= config.test_gen.test_count {
+                    println!("Test file {} is complete. Skipping...", file_path.to_string_lossy());
+                    continue;
                 }
-            };
 
-            if test_start_num >= config.test_gen.test_count {
-                println!("Test file {} is complete. Skipping...", file_path.to_string_lossy());
-                continue;
-            }
+                let test_count = get_test_count(config, opcode);
+                for test_num in test_start_num..test_count {
+                    // Create unique instruction and initial register set for each test.
+                    // These should not change regardless of test attempt count.
 
-            let test_count = get_test_count(config, opcode);
-            for test_num in test_start_num..test_count {
-                // Create unique instruction and initial register set for each test.
-                // These should not change regardless of test attempt count.
+                    let mut test_result = generate_consistent_test(
+                        context,
+                        config,
+                        test_num,
+                        *size,
+                        opcode,
+                        have_group_ext,
+                        opcode_ext,
+                        config.test_exec.validate_count as usize,
+                    );
 
-                let mut test_result = generate_consistent_test(
-                    context,
-                    config,
-                    test_num,
-                    opcode,
-                    have_group_ext,
-                    opcode_ext,
-                    config.test_exec.validate_count as usize,
-                );
+                    if !context.dry_run {
+                        if test_result.is_err() {
+                            let err_msg = format!(
+                                "Failed to generate test for opcode {:02X} at test number {}: {}",
+                                opcode,
+                                test_num,
+                                test_result.as_ref().err().unwrap()
+                            );
+                            trace_error!(context, "{}", err_msg);
+                            return Err(anyhow::anyhow!(err_msg));
+                        }
 
-                if !context.dry_run {
-                    if test_result.is_err() {
-                        let err_msg = format!(
-                            "Failed to generate test for opcode {:02X} at test number {}: {}",
-                            opcode,
-                            test_num,
-                            test_result.as_ref().err().unwrap()
-                        );
-                        trace_error!(context, "{}", err_msg);
-                        return Err(anyhow::anyhow!(err_msg));
+                        // Add the test to the test file.
+                        let test = test_result?;
+                        test_file.add_test(test);
+                        context.gen_ct += 1;
                     }
-
-                    // Add the test to the test file.
-                    let test = test_result?;
-                    test_file.add_test(test);
-                    context.gen_ct += 1;
                 }
+                // Test generation is complete.
+
+                // Log time taken
+                context.gen_stop = Instant::now();
+                if config.test_exec.show_gen_time {
+                    let gen_duration = context.gen_stop.duration_since(context.gen_start);
+                    println!(
+                        "Generated {} tests in {:.2?} seconds ({} tests per second)",
+                        context.gen_ct,
+                        gen_duration,
+                        context.gen_ct as f64 / gen_duration.as_secs_f64()
+                    );
+                }
+
+                // Adjust final metadata with count...
+                test_metadata = test_metadata.with_test_count(context.gen_ct as u32);
+                // ... and with the most frequently seen mnemonic (to handle some tests that have invalid forms icedx86 won't decode).
+                if let Some((mnemonic, count)) = context.mnemonic_set.iter().max_by_key(|entry| entry.1) {
+                    log::debug!("Most frequent mnemonic: {} ({} times)", mnemonic, count);
+                    test_metadata = test_metadata.with_mnemonic(mnemonic.to_string());
+                }
+
+                test_file.set_metadata(test_metadata);
+
+                // Open the file as a Writer.
+                log::debug!("Writing test file: {}", file_path.to_string_lossy());
+
+                let file = std::fs::File::create(&file_path)?;
+                let mut writer = BufWriter::new(file);
+
+                test_file.write(&mut writer)?;
             }
-            // Test generation is complete.
-
-            // Log time taken
-            context.gen_stop = Instant::now();
-            if config.test_exec.show_gen_time {
-                let gen_duration = context.gen_stop.duration_since(context.gen_start);
-                println!(
-                    "Generated {} tests in {:.2?} seconds ({} tests per second)",
-                    context.gen_ct,
-                    gen_duration,
-                    context.gen_ct as f64 / gen_duration.as_secs_f64()
-                );
-            }
-
-            // Adjust final metadata with count...
-            test_metadata = test_metadata.with_test_count(context.gen_ct as u32);
-            // ... and with the most frequently seen mnemonic (to handle some tests that have invalid forms icedx86 won't decode).
-            if let Some((mnemonic, count)) = context.mnemonic_set.iter().max_by_key(|entry| entry.1) {
-                log::debug!("Most frequent mnemonic: {} ({} times)", mnemonic, count);
-                test_metadata = test_metadata.with_mnemonic(mnemonic.to_string());
-            }
-
-            test_file.set_metadata(test_metadata);
-
-            // Open the file as a Writer.
-            log::debug!("Writing test file: {}", file_path.to_string_lossy());
-
-            let file = std::fs::File::create(&file_path)?;
-            let mut writer = BufWriter::new(file);
-
-            test_file.write(&mut writer)?;
         }
     }
 
@@ -632,6 +671,7 @@ fn generate_consistent_test(
     context: &mut TestContext,
     config: &Config,
     test_num: usize,
+    size: InstructionSize,
     opcode: u8,
     have_group_ext: bool,
     opcode_ext: u8,
@@ -658,6 +698,7 @@ fn generate_consistent_test(
         let test_instruction = TestInstruction::new(
             context,
             &config.test_gen,
+            size,
             opcode,
             have_group_ext.then_some(opcode_ext),
             &test_registers,
@@ -889,18 +930,40 @@ pub fn log_instruction(
     //     test_instruction.sequence_bytes()
     // );
 
-    let moo_registers =
-        MooRegisters1::try_from(&test_registers.regs).expect("Failed to convert registers to MooRegisters1");
+    match &test_registers.regs {
+        Registers::V2(regs) => {
+            let moo_registers = MooRegisters16::try_from(regs).expect("Failed to convert registers to MooRegisters");
 
-    trace_log!(
-        context,
-        "{}",
-        MooRegisters1Printer {
-            regs: &moo_registers,
-            cpu_type: config.test_gen.cpu_type,
-            diff: None,
+            trace_log!(
+                context,
+                "{}",
+                MooRegisters16Printer {
+                    regs: &moo_registers,
+                    cpu_type: config.test_gen.cpu_type,
+                    diff: None,
+                }
+            );
         }
-    );
+        Registers::V3A(regs) => {
+            let moo_registers = MooRegisters32::try_from(regs).expect("Failed to convert registers to MooRegisters");
+
+            trace_log!(
+                context,
+                "{}",
+                MooRegisters32Printer {
+                    regs: &moo_registers,
+                    cpu_type: config.test_gen.cpu_type,
+                    diff: None,
+                }
+            );
+        }
+        _ => {
+            unimplemented!(
+                "Unsupported register set type for logging: {:?}",
+                context.register_set_type
+            );
+        }
+    }
 }
 
 pub fn generate_test(
@@ -1011,10 +1074,10 @@ pub fn generate_test(
     context.load_register_buffer.set_position(0);
     test_registers.regs.to_buffer(&mut context.load_register_buffer);
 
-    let mut load_attempt_ct = 0;
+    let mut load_attempt_ct = 1;
     log::trace!(
         "Uploading registers, attempt {}/{}",
-        load_attempt_ct + 1,
+        load_attempt_ct,
         config.test_exec.load_retry
     );
 
@@ -1027,7 +1090,7 @@ pub fn generate_test(
             load_attempt_ct += 1;
             log::trace!(
                 "Retrying register upload, attempt {}/{}",
-                load_attempt_ct + 1,
+                load_attempt_ct,
                 config.test_exec.load_retry
             );
             if context
@@ -1046,12 +1109,25 @@ pub fn generate_test(
     // Poll program state until finished with execution.
     // ---------------------------------------------------------------------------------------------
     let mut state = context.client.get_program_state()?;
+    let mut test_timeout = false;
+    let start_time = Instant::now();
     while !matches!(
         state,
         ProgramState::StoreDone | ProgramState::Shutdown | ProgramState::Error
     ) {
         // Sleep for a little bit so we're not spamming the Arduino.
         std::thread::sleep(std::time::Duration::from_millis(config.test_exec.polling_sleep.into()));
+
+        let millis = start_time.elapsed().as_millis() as u32;
+        if millis > config.test_exec.test_timeout {
+            log::error!(
+                "Test timeout reached after {} ms, program state is: {:?}",
+                millis,
+                state
+            );
+            test_timeout = true;
+            break;
+        }
         state = context.client.get_program_state()?;
     }
 
@@ -1098,6 +1174,16 @@ pub fn generate_test(
             }
             Registers::V2(regs_v2)
         }
+        0x3 => {
+            // V3B registers
+            let regs_v3b = RemoteCpuRegistersV3B::try_from(context.store_register_buffer.as_slice())
+                .map_err(|e| anyhow::anyhow!("Error parsing V3B registers: {}", e))?;
+
+            if config.test_exec.print_final_regs {
+                //print_regs_v3b(&regs_v3b, config.test_gen.cpu_type.into());
+            }
+            Registers::V3B(regs_v3b)
+        }
         _ => {
             log::error!("Unknown register set type: {}", reg_type);
             bail!("Unknown register set type: {}", reg_type);
@@ -1115,7 +1201,14 @@ pub fn generate_test(
     // Convert cycle states to MooCycleStates.
     let mut moo_cycle_states = Vec::with_capacity(cycle_states.len());
     for cycle_state in &cycle_states {
-        let my_cycle = MyServerCycleState::State286(cycle_state.clone());
+        let my_cycle = match config.test_gen.cpu_type {
+            MooCpuType::Intel80286 => MyServerCycleState::State286(cycle_state.clone()),
+            MooCpuType::Intel80386Ex => MyServerCycleState::State386Ex(cycle_state.clone()),
+            _ => unimplemented!(
+                "Unsupported CPU type for cycle state conversion: {:?}",
+                config.test_gen.cpu_type
+            ),
+        };
         my_cycle_vec.push(my_cycle.clone());
         moo_cycle_states.push(MooCycleState::from(my_cycle));
     }
@@ -1183,15 +1276,33 @@ pub fn generate_test(
 
     // Log final register state.
     // ---------------------------------------------------------------------------------------------
-    trace_log!(
-        context,
-        "{}",
-        MooRegisters1Printer {
-            regs: &MooRegisters1::try_from(&final_regs).expect("Failed to convert final registers to MooRegisters1"),
-            cpu_type: config.test_gen.cpu_type,
-            diff: None,
+    match config.test_gen.cpu_type {
+        MooCpuType::Intel80286 => {
+            trace_log!(
+                context,
+                "{}",
+                MooRegisters16Printer {
+                    regs: &MooRegisters16::try_from(&final_regs)
+                        .expect("Failed to convert final registers to MooRegisters16"),
+                    cpu_type: config.test_gen.cpu_type,
+                    diff: None,
+                }
+            );
         }
-    );
+        MooCpuType::Intel80386Ex => {
+            trace_log!(
+                context,
+                "{}",
+                MooRegisters32Printer {
+                    regs: &MooRegisters32::try_from(&final_regs)
+                        .expect("Failed to convert final registers to MooRegisters32"),
+                    cpu_type: config.test_gen.cpu_type,
+                    diff: None,
+                }
+            );
+        }
+        _ => {}
+    }
 
     // Calculate final memory state from initial state and bus operations.
     // ---------------------------------------------------------------------------------------------
@@ -1279,8 +1390,8 @@ pub fn log_cycle_states(context: &mut TestContext, cycles: &[MooCycleState]) {
 }
 
 pub fn create_state(initial_regs: &Registers, final_regs: Option<&Registers>, ram: &Vec<[u32; 2]>) -> MooTestState {
-    let initial_reg_init = MooRegisters1Init::from(initial_regs);
-    let final_reg_init = final_regs.map(MooRegisters1Init::from);
+    let initial_reg_init = MooRegistersInit::from(initial_regs);
+    let final_reg_init = final_regs.map(MooRegistersInit::from);
 
     // let state_regs = if let Some(final_regs) = final_reg_init {
     //     // If we have final regs, compute the difference.
@@ -1321,14 +1432,14 @@ pub fn create_state(initial_regs: &Registers, final_regs: Option<&Registers>, ra
 }
 
 pub fn validate_regs(registers: &Registers) -> anyhow::Result<()> {
-    let moo_registers = MooRegisters1::try_from(registers)
-        .map_err(|e| anyhow::anyhow!("Failed to convert registers to MooRegisters1: {}", e))?;
+    let moo_registers = MooRegisters::try_from(registers)
+        .map_err(|e| anyhow::anyhow!("Failed to convert registers to MooRegisters: {}", e))?;
 
     // Check for reserved bit. Flags shouldn't be 0.
-    let flags = moo_registers.flags().unwrap();
+    let flags = moo_registers.flags();
     if flags & 0x0002 == 0 {
         // Reserved bit is not set.
-        return Err(anyhow::anyhow!("Reserved bit in flags is not set: {:04X}", flags));
+        return Err(anyhow::anyhow!("Reserved bit in flags is not set: {:04X}", flags,));
     }
 
     Ok(())
@@ -1339,46 +1450,48 @@ pub fn validate_register_delta(
     initial_regs: &Registers,
     final_regs: &Registers,
 ) -> anyhow::Result<()> {
-    let moo_initial = MooRegisters1::try_from(initial_regs)
+    let moo_initial = MooRegisters::try_from(initial_regs)
         .map_err(|e| anyhow::anyhow!("Failed to convert initial registers: {}", e))?;
     let moo_final =
-        MooRegisters1::try_from(final_regs).map_err(|e| anyhow::anyhow!("Failed to convert final registers: {}", e))?;
+        MooRegisters::try_from(final_regs).map_err(|e| anyhow::anyhow!("Failed to convert final registers: {}", e))?;
 
     let mut error = false;
 
-    if !matches!(mnemonic, Mnemonic::Xchg) {
-        if (moo_initial.ax != moo_initial.cx) && (moo_final.ax == moo_initial.cx) {
-            error = true;
-        }
-        if (moo_initial.cx != moo_initial.dx) && (moo_final.cx == moo_initial.dx) {
-            error = true;
-        }
-        if (moo_initial.dx != moo_initial.bx) && (moo_final.dx == moo_initial.bx) {
-            error = true;
-        }
-        if (moo_initial.bx != moo_initial.sp) && (moo_final.bx == moo_initial.sp) {
-            error = true;
-        }
-        if (moo_initial.sp != moo_initial.bp) && (moo_final.sp == moo_initial.bp) {
-            error = true;
-        }
-        if (moo_initial.bp != moo_initial.si) && (moo_final.bp == moo_initial.si) {
-            error = true;
-        }
-        if (moo_initial.si != moo_initial.di) && (moo_final.si == moo_initial.di) {
-            error = true;
-        }
-        if (moo_initial.di != moo_initial.es) && (moo_final.di == moo_initial.es) {
-            error = true;
-        }
-        if (moo_initial.es != moo_initial.cs) && (moo_final.es == moo_initial.cs) {
-            error = true;
-        }
-        if (moo_initial.cs != moo_initial.ss) && (moo_final.cs == moo_initial.ss) {
-            error = true;
-        }
-        if (moo_initial.ss != moo_initial.ds) && (moo_final.ss == moo_initial.ds) {
-            error = true;
+    if let (MooRegisters::Sixteen(moo_initial_i), MooRegisters::Sixteen(moo_final_i)) = (moo_initial, moo_final) {
+        if !matches!(mnemonic, Mnemonic::Xchg) {
+            if (moo_initial_i.ax != moo_initial_i.cx) && (moo_final_i.ax == moo_initial_i.cx) {
+                error = true;
+            }
+            if (moo_initial_i.cx != moo_initial_i.dx) && (moo_final_i.cx == moo_initial_i.dx) {
+                error = true;
+            }
+            if (moo_initial_i.dx != moo_initial_i.bx) && (moo_final_i.dx == moo_initial_i.bx) {
+                error = true;
+            }
+            if (moo_initial_i.bx != moo_initial_i.sp) && (moo_final_i.bx == moo_initial_i.sp) {
+                error = true;
+            }
+            if (moo_initial_i.sp != moo_initial_i.bp) && (moo_final_i.sp == moo_initial_i.bp) {
+                error = true;
+            }
+            if (moo_initial_i.bp != moo_initial_i.si) && (moo_final_i.bp == moo_initial_i.si) {
+                error = true;
+            }
+            if (moo_initial_i.si != moo_initial_i.di) && (moo_final_i.si == moo_initial_i.di) {
+                error = true;
+            }
+            if (moo_initial_i.di != moo_initial_i.es) && (moo_final_i.di == moo_initial_i.es) {
+                error = true;
+            }
+            if (moo_initial_i.es != moo_initial_i.cs) && (moo_final_i.es == moo_initial_i.cs) {
+                error = true;
+            }
+            if (moo_initial_i.cs != moo_initial_i.ss) && (moo_final_i.cs == moo_initial_i.ss) {
+                error = true;
+            }
+            if (moo_initial_i.ss != moo_initial_i.ds) && (moo_final_i.ss == moo_initial_i.ds) {
+                error = true;
+            }
         }
     }
 

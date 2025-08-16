@@ -21,8 +21,15 @@
     DEALINGS IN THE SOFTWARE.
 */
 use crate::{display::print_regs, registers::Registers, Config, CpuMode, TestContext, TestGen};
-use arduinox86_client::{registers_common::RandomizeOpts, RemoteCpuRegistersV1, RemoteCpuRegistersV2};
-use moo::types::{MooCpuType, MooRegisters16};
+use arduinox86_client::{
+    registers_common::RandomizeOpts,
+    Registers32,
+    RemoteCpuRegistersV1,
+    RemoteCpuRegistersV2,
+    RemoteCpuRegistersV3A,
+    RemoteCpuRegistersV3B,
+};
+use moo::types::{MooCpuType, MooRegisters, MooRegisters16, MooRegisters32};
 use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::Beta;
 use std::ops::Range;
@@ -31,6 +38,45 @@ pub struct TestRegisters {
     pub regs: Registers,
     pub reg_seed: u64,
     pub instruction_address: u32,
+}
+
+impl From<&MooRegisters> for TestRegisters {
+    fn from(regs: &MooRegisters) -> Self {
+        match regs {
+            MooRegisters::Sixteen(regs) => TestRegisters::from(regs),
+            MooRegisters::ThirtyTwo(regs) => TestRegisters::from(regs),
+        }
+    }
+}
+
+impl From<&MooRegisters32> for TestRegisters {
+    fn from(regs: &MooRegisters32) -> Self {
+        let mut v3b = RemoteCpuRegistersV3B {
+            eax: regs.eax,
+            ebx: regs.ebx,
+            ecx: regs.ecx,
+            edx: regs.edx,
+            esp: regs.esp,
+            ebp: regs.ebp,
+            esi: regs.esi,
+            edi: regs.edi,
+            cs: regs.cs as u16,
+            ds: regs.ds as u16,
+            es: regs.es as u16,
+            fs: regs.fs as u16,
+            gs: regs.gs as u16,
+            ss: regs.ss as u16,
+            eip: regs.eip,
+            eflags: regs.eflags,
+            ..Default::default()
+        };
+        v3b.normalize_descriptors();
+        TestRegisters {
+            regs: Registers::V3B(v3b),
+            reg_seed: 0, // Seed not applicable for conversion
+            instruction_address: (regs.cs << 4) + regs.eip,
+        }
+    }
 }
 
 impl From<&MooRegisters16> for TestRegisters {
@@ -91,6 +137,14 @@ impl TestRegisters {
                     }
                     random_v2
                 }
+                MooCpuType::Intel80386Ex => {
+                    let mut random_v3a = Registers::V3A(RemoteCpuRegistersV3A::default());
+                    randomize_v3a(context, config.test_gen.clone(), opcode, &mut rng, &mut random_v3a);
+                    if config.test_exec.print_initial_regs {
+                        print_regs(&random_v3a, config.test_gen.cpu_type.into());
+                    }
+                    random_v3a
+                }
                 _ => Registers::V1(RemoteCpuRegistersV1::default()),
             };
 
@@ -138,6 +192,48 @@ pub fn randomize_v2(_context: &mut TestContext, config: TestGen, opcode: u8, rng
         randomize_general: true,
         randomize_ip: true,
         ip_mask: config.ip_mask,
+        randomize_x: false,
+        randomize_msw: false,
+        randomize_tr: false,
+        randomize_ldt: false,
+        randomize_segment_descriptors: false,
+        randomize_table_descriptors: false,
+        ..Default::default()
+    };
+
+    let mut reg_beta = Beta::new(config.register_beta[0], config.register_beta[1])
+        .expect("Couldn't create beta function for register randomization");
+
+    regs.randomize(&random_opts, rng, &mut reg_beta);
+}
+
+pub fn randomize_v3a(_context: &mut TestContext, config: TestGen, opcode: u8, rng: &mut StdRng, regs: &mut Registers) {
+    let mut sp_min = config.sp_min_value;
+    let mut sp_max = config.sp_max_value;
+
+    for sp_override in &config.sp_overrides {
+        if sp_override.opcode == opcode {
+            sp_min = sp_override.min;
+            sp_max = sp_override.max;
+            break;
+        }
+    }
+
+    let random_opts = RandomizeOpts {
+        weight_zero: config.reg_zero_chance,
+        weight_ones: config.reg_ones_chance,
+        weight_sp_odd: config.sp_odd_chance,
+        sp_min_value: sp_min,
+        sp_max_value: sp_max,
+        sp_min_value32: sp_min as u32,
+        sp_max_value32: sp_max as u32,
+        randomize_flags: true,
+        clear_trap_flag: true,
+        clear_interrupt_flag: true,
+        randomize_general: true,
+        randomize_ip: true,
+        ip_mask: config.ip_mask,
+        eip_mask: config.ip_mask as u32,
         randomize_x: false,
         randomize_msw: false,
         randomize_tr: false,

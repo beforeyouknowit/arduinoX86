@@ -114,5 +114,7 @@ pub fn print_regs(regs: &Registers, cpu_type: ServerCpuType) {
         Registers::V2(regs_v2) => {
             print_regs_v2(regs_v2, cpu_type);
         }
+        Registers::V3A(regs_v3) => {}
+        Registers::V3B(regs_v3) => {}
     }
 }

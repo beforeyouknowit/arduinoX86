@@ -139,4 +139,6 @@ pub trait Registers32 {
 
     fn set_eip(&mut self, value: u32);
     fn set_eflags(&mut self, value: u32);
+
+    fn normalize_descriptors(&mut self);
 }

@@ -105,7 +105,16 @@ pub enum ServerCommand {
     CmdSetMemoryStrategy = 0x22,
     CmdGetFlags = 0x23,
     CmdReadMemory = 0x24,
+    CmdEraseMemory = 0x25,
+    CmdGetServerStatus = 0x26,
     CmdInvalid,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ServerStatus {
+    pub state: ProgramState,
+    pub cycle_ct: u64,
+    pub address_latch: u32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -476,8 +485,9 @@ impl From<RegisterSetType> for u8 {
 }
 
 /// [ProgramState] represents the current state of the Arduino808X server.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum ProgramState {
+    #[default]
     Reset = 0,
     CpuId,
     CpuSetup,
@@ -784,9 +794,10 @@ impl CpuClient {
         let cmd: [u8; 1] = [cmd as u8];
         let mut flush_buf: [u8; 100] = [0; 100];
         let mut port = self.port.borrow_mut();
-        port.clear(ClearBuffer::Input).unwrap();
-        if port.bytes_to_read().unwrap() > 0 {
-            let _flushed_bytes = port.read(&mut flush_buf).unwrap();
+        port.clear(ClearBuffer::Input)
+            .map_err(|_| CpuClientError::WriteFailure)?;
+        if port.bytes_to_read().map_err(|_| CpuClientError::ReadFailure)? > 0 {
+            let _flushed_bytes = port.read(&mut flush_buf).map_err(|_| CpuClientError::ReadFailure)?;
         }
 
         match port.write(&cmd) {
@@ -1243,6 +1254,12 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdReadMemory)
     }
 
+    pub fn erase_memory(&mut self) -> Result<(), CpuClientError> {
+        self.send_command_byte(ServerCommand::CmdEraseMemory)?;
+        self.read_result_code(ServerCommand::CmdEraseMemory)?;
+        Ok(())
+    }
+
     pub fn enable_debug(&mut self, enable: bool) -> Result<(), CpuClientError> {
         let mut buf: [u8; 1] = [0; 1];
         buf[0] = if enable { 1 } else { 0 };
@@ -1250,5 +1267,22 @@ impl CpuClient {
         self.send_buf(&buf)?;
         self.read_result_code(ServerCommand::CmdEnableDebug)?;
         Ok(())
+    }
+
+    pub fn server_status(&mut self) -> Result<ServerStatus, CpuClientError> {
+        // 1 + 8 + 4 = 13 bytes total
+        let mut buf: [u8; 13] = [0; 13];
+        self.send_command_byte(ServerCommand::CmdGetServerStatus)?;
+        self.recv_buf(&mut buf)?;
+        self.read_result_code(ServerCommand::CmdGetServerStatus)?;
+
+        let state = ProgramState::try_from(buf[0])?;
+        let cycle_ct = u64::from_le_bytes([buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]]);
+        let address_latch = u32::from_le_bytes([buf[9], buf[10], buf[11], buf[12]]);
+        Ok(ServerStatus {
+            state,
+            cycle_ct,
+            address_latch,
+        })
     }
 }

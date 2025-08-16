@@ -20,10 +20,17 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+use crate::{Registers32, RemoteCpuRegistersV1, RemoteCpuRegistersV2, SegmentDescriptorV1};
+use std::io::{Seek, Write};
 
-use crate::Registers32;
-
-use binrw::{binrw, BinReaderExt};
+use crate::registers_common::RandomizeOpts;
+use binrw::{binrw, BinReaderExt, BinResult, BinWrite};
+use moo::{
+    prelude::MooRegisters32Init,
+    types::{MooRegisters16, MooRegisters32},
+};
+use rand::Rng;
+use rand_distr::{Beta, Distribution};
 
 macro_rules! impl_registers32 {
     ($ty:ty $(,)?) => {
@@ -219,6 +226,15 @@ macro_rules! impl_registers32 {
             fn set_ss(&mut self, value: u16) {
                 self.ss = value;
             }
+
+            fn normalize_descriptors(&mut self) {
+                self.gs_desc.address = (self.gs as u32) << 4;
+                self.fs_desc.address = (self.fs as u32) << 4;
+                self.ds_desc.address = (self.ds as u32) << 4;
+                self.ss_desc.address = (self.ss as u32) << 4;
+                self.cs_desc.address = (self.cs as u32) << 4;
+                self.es_desc.address = (self.es as u32) << 4;
+            }
         }
     };
 }
@@ -231,9 +247,9 @@ pub enum RemoteCpuRegistersV3 {
 
 // value-returning getter
 macro_rules! enum_get {
-    ($Trait:path, $method:ident -> $ret:ty, $trait_m:ident) => {
+    ($method:ident -> $ret:ty, $trait_m:ident) => {
         fn $method(&self) -> $ret {
-            use $Trait as _; // bring trait into scope without a name
+            //use $Trait as _; // bring trait into scope without a name
             match self {
                 Self::A(r) => r.$trait_m(),
                 Self::B(r) => r.$trait_m(),
@@ -244,9 +260,8 @@ macro_rules! enum_get {
 
 // &mut-returning getter
 macro_rules! enum_get_mut {
-    ($Trait:path, $method:ident -> &mut $ret:ty, $trait_m:ident) => {
+    ($method:ident -> &mut $ret:ty, $trait_m:ident) => {
         fn $method(&mut self) -> &mut $ret {
-            use $Trait as _;
             match self {
                 Self::A(r) => r.$trait_m(),
                 Self::B(r) => r.$trait_m(),
@@ -257,9 +272,8 @@ macro_rules! enum_get_mut {
 
 // setter
 macro_rules! enum_set {
-    ($Trait:path, $method:ident($arg_ty:ty) => $trait_m:ident) => {
+    ($method:ident($arg_ty:ty) => $trait_m:ident) => {
         fn $method(&mut self, value: $arg_ty) {
-            use $Trait as _;
             match self {
                 Self::A(r) => r.$trait_m(value),
                 Self::B(r) => r.$trait_m(value),
@@ -270,76 +284,83 @@ macro_rules! enum_set {
 
 impl Registers32 for RemoteCpuRegistersV3 {
     // control/debug
-    enum_get!(crate::registers::Registers32, cr0 -> u32, cr0);
-    //enum_get!(crate::registers::Registers32, cr3 -> u32, cr3);
-    enum_get!(crate::registers::Registers32, dr6 -> u32, dr6);
-    enum_get!(crate::registers::Registers32, dr7 -> u32, dr7);
+    enum_get!(cr0 -> u32, cr0);
+    //enum_get!(cr3 -> u32, cr3);
+    enum_get!(dr6 -> u32, dr6);
+    enum_get!(dr7 -> u32, dr7);
 
-    enum_get_mut!(crate::registers::Registers32, cr0_mut -> &mut u32, cr0_mut);
-    //enum_get_mut!(crate::registers::Registers32, cr3_mut -> &mut u32, cr3_mut);
-    enum_get_mut!(crate::registers::Registers32, dr6_mut -> &mut u32, dr6_mut);
-    enum_get_mut!(crate::registers::Registers32, dr7_mut -> &mut u32, dr7_mut);
+    enum_get_mut!(cr0_mut -> &mut u32, cr0_mut);
+    //enum_get_mut!(cr3_mut -> &mut u32, cr3_mut);
+    enum_get_mut!(dr6_mut -> &mut u32, dr6_mut);
+    enum_get_mut!(dr7_mut -> &mut u32, dr7_mut);
 
-    enum_set!(crate::registers::Registers32, set_cr0(u32) => set_cr0);
-    //enum_set!(crate::registers::Registers32, set_cr3(u32) => set_cr3);
-    enum_set!(crate::registers::Registers32, set_dr6(u32) => set_dr6);
-    enum_set!(crate::registers::Registers32, set_dr7(u32) => set_dr7);
+    enum_set!(set_cr0(u32) => set_cr0);
+    //enum_set!(set_cr3(u32) => set_cr3);
+    enum_set!(set_dr6(u32) => set_dr6);
+    enum_set!(set_dr7(u32) => set_dr7);
 
     // gprs / ip / flags
-    enum_get!(crate::registers::Registers32, eax -> u32, eax);
-    enum_get!(crate::registers::Registers32, ebx -> u32, ebx);
-    enum_get!(crate::registers::Registers32, ecx -> u32, ecx);
-    enum_get!(crate::registers::Registers32, edx -> u32, edx);
-    enum_get!(crate::registers::Registers32, esp -> u32, esp);
-    enum_get!(crate::registers::Registers32, ebp -> u32, ebp);
-    enum_get!(crate::registers::Registers32, esi -> u32, esi);
-    enum_get!(crate::registers::Registers32, edi -> u32, edi);
-    enum_get!(crate::registers::Registers32, eip -> u32, eip);
-    enum_get!(crate::registers::Registers32, eflags -> u32, eflags);
+    enum_get!(eax -> u32, eax);
+    enum_get!(ebx -> u32, ebx);
+    enum_get!(ecx -> u32, ecx);
+    enum_get!(edx -> u32, edx);
+    enum_get!(esp -> u32, esp);
+    enum_get!(ebp -> u32, ebp);
+    enum_get!(esi -> u32, esi);
+    enum_get!(edi -> u32, edi);
+    enum_get!(eip -> u32, eip);
+    enum_get!(eflags -> u32, eflags);
 
-    enum_get_mut!(crate::registers::Registers32, eax_mut -> &mut u32, eax_mut);
-    enum_get_mut!(crate::registers::Registers32, ebx_mut -> &mut u32, ebx_mut);
-    enum_get_mut!(crate::registers::Registers32, ecx_mut -> &mut u32, ecx_mut);
-    enum_get_mut!(crate::registers::Registers32, edx_mut -> &mut u32, edx_mut);
-    enum_get_mut!(crate::registers::Registers32, esp_mut -> &mut u32, esp_mut);
-    enum_get_mut!(crate::registers::Registers32, ebp_mut -> &mut u32, ebp_mut);
-    enum_get_mut!(crate::registers::Registers32, esi_mut -> &mut u32, esi_mut);
-    enum_get_mut!(crate::registers::Registers32, edi_mut -> &mut u32, edi_mut);
-    enum_get_mut!(crate::registers::Registers32, eip_mut -> &mut u32, eip_mut);
-    enum_get_mut!(crate::registers::Registers32, eflags_mut -> &mut u32, eflags_mut);
+    enum_get_mut!(eax_mut -> &mut u32, eax_mut);
+    enum_get_mut!(ebx_mut -> &mut u32, ebx_mut);
+    enum_get_mut!(ecx_mut -> &mut u32, ecx_mut);
+    enum_get_mut!(edx_mut -> &mut u32, edx_mut);
+    enum_get_mut!(esp_mut -> &mut u32, esp_mut);
+    enum_get_mut!(ebp_mut -> &mut u32, ebp_mut);
+    enum_get_mut!(esi_mut -> &mut u32, esi_mut);
+    enum_get_mut!(edi_mut -> &mut u32, edi_mut);
+    enum_get_mut!(eip_mut -> &mut u32, eip_mut);
+    enum_get_mut!(eflags_mut -> &mut u32, eflags_mut);
 
-    enum_set!(crate::registers::Registers32, set_eax(u32) => set_eax);
-    enum_set!(crate::registers::Registers32, set_ebx(u32) => set_ebx);
-    enum_set!(crate::registers::Registers32, set_ecx(u32) => set_ecx);
-    enum_set!(crate::registers::Registers32, set_edx(u32) => set_edx);
-    enum_set!(crate::registers::Registers32, set_esp(u32) => set_esp);
-    enum_set!(crate::registers::Registers32, set_ebp(u32) => set_ebp);
-    enum_set!(crate::registers::Registers32, set_esi(u32) => set_esi);
-    enum_set!(crate::registers::Registers32, set_edi(u32) => set_edi);
-    enum_set!(crate::registers::Registers32, set_eip(u32) => set_eip);
-    enum_set!(crate::registers::Registers32, set_eflags(u32) => set_eflags);
+    enum_set!(set_eax(u32) => set_eax);
+    enum_set!(set_ebx(u32) => set_ebx);
+    enum_set!(set_ecx(u32) => set_ecx);
+    enum_set!(set_edx(u32) => set_edx);
+    enum_set!(set_esp(u32) => set_esp);
+    enum_set!(set_ebp(u32) => set_ebp);
+    enum_set!(set_esi(u32) => set_esi);
+    enum_set!(set_edi(u32) => set_edi);
+    enum_set!(set_eip(u32) => set_eip);
+    enum_set!(set_eflags(u32) => set_eflags);
 
     // segments
-    enum_get!(crate::registers::Registers32, cs -> u16, cs);
-    enum_get!(crate::registers::Registers32, ds -> u16, ds);
-    enum_get!(crate::registers::Registers32, es -> u16, es);
-    enum_get!(crate::registers::Registers32, fs -> u16, fs);
-    enum_get!(crate::registers::Registers32, gs -> u16, gs);
-    enum_get!(crate::registers::Registers32, ss -> u16, ss);
+    enum_get!(cs -> u16, cs);
+    enum_get!(ds -> u16, ds);
+    enum_get!(es -> u16, es);
+    enum_get!(fs -> u16, fs);
+    enum_get!(gs -> u16, gs);
+    enum_get!(ss -> u16, ss);
 
-    enum_get_mut!(crate::registers::Registers32, cs_mut -> &mut u16, cs_mut);
-    enum_get_mut!(crate::registers::Registers32, ds_mut -> &mut u16, ds_mut);
-    enum_get_mut!(crate::registers::Registers32, es_mut -> &mut u16, es_mut);
-    enum_get_mut!(crate::registers::Registers32, fs_mut -> &mut u16, fs_mut);
-    enum_get_mut!(crate::registers::Registers32, gs_mut -> &mut u16, gs_mut);
-    enum_get_mut!(crate::registers::Registers32, ss_mut -> &mut u16, ss_mut);
+    enum_get_mut!(cs_mut -> &mut u16, cs_mut);
+    enum_get_mut!(ds_mut -> &mut u16, ds_mut);
+    enum_get_mut!(es_mut -> &mut u16, es_mut);
+    enum_get_mut!(fs_mut -> &mut u16, fs_mut);
+    enum_get_mut!(gs_mut -> &mut u16, gs_mut);
+    enum_get_mut!(ss_mut -> &mut u16, ss_mut);
 
-    enum_set!(crate::registers::Registers32, set_cs(u16) => set_cs);
-    enum_set!(crate::registers::Registers32, set_ds(u16) => set_ds);
-    enum_set!(crate::registers::Registers32, set_es(u16) => set_es);
-    enum_set!(crate::registers::Registers32, set_fs(u16) => set_fs);
-    enum_set!(crate::registers::Registers32, set_gs(u16) => set_gs);
-    enum_set!(crate::registers::Registers32, set_ss(u16) => set_ss);
+    enum_set!(set_cs(u16) => set_cs);
+    enum_set!(set_ds(u16) => set_ds);
+    enum_set!(set_es(u16) => set_es);
+    enum_set!(set_fs(u16) => set_fs);
+    enum_set!(set_gs(u16) => set_gs);
+    enum_set!(set_ss(u16) => set_ss);
+
+    fn normalize_descriptors(&mut self) {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.normalize_descriptors(),
+            RemoteCpuRegistersV3::B(regs) => regs.normalize_descriptors(),
+        }
+    }
 }
 
 impl Default for RemoteCpuRegistersV3 {
@@ -418,6 +439,10 @@ impl SegmentDescriptorV2 {
     pub fn from_slice(slice: &[u8], index: usize) -> Self {
         read_descriptor_v2(slice, index)
     }
+
+    pub fn base_address(&self) -> u32 {
+        self.address
+    }
 }
 
 fn read_descriptor_v2(slice: &[u8], index: usize) -> SegmentDescriptorV2 {
@@ -484,8 +509,8 @@ pub struct RemoteCpuRegistersV3A {
 impl Default for RemoteCpuRegistersV3A {
     fn default() -> Self {
         RemoteCpuRegistersV3A {
-            cr0: 0,
-            eflags: 0x00000002, // reserved bit 1 set
+            cr0: 0x7FFE_FFF0,
+            eflags: 0xFFFC_0002, // reserved bit 1 set
             eip: 0x0000_0100,
             edi: 0,
             esi: 0,
@@ -495,7 +520,7 @@ impl Default for RemoteCpuRegistersV3A {
             edx: 0,
             ecx: 0,
             eax: 0,
-            dr6: 0,
+            dr6: 0xFFFF_0FF0,
             dr7: 0,
             tr: 0,
             tr_pad: 0,
@@ -554,6 +579,9 @@ impl Default for RemoteCpuRegistersV3A {
 impl RemoteCpuRegistersV3A {
     pub const DEFAULT_CS: u16 = 0x1000;
 
+    pub const FLAGS_RESERVED_CR0: u32 = 0x7FFE_FFF0; // Reserved bits in CR0
+    pub const FLAGS_RESERVED_SET: u32 = 0xFFFC_0002; // Reserved bit 1 set
+    pub const FLAGS_RESERVED_MASK: u32 = 0xFFFF_7FD7;
     pub const FLAG_CARRY: u32 = 0b0000_0000_0000_0001;
     pub const FLAG_RESERVED1: u32 = 0b0000_0000_0000_0010;
     pub const FLAG_PARITY: u32 = 0b0000_0000_0000_0100;
@@ -571,6 +599,158 @@ impl RemoteCpuRegistersV3A {
     pub const FLAG_NT: u32 = 0b0100_0000_0000_0000; // Nested Task
     pub const FLAG_IOPL0: u32 = 0b0001_0000_0000_0000; // Nested Task
     pub const FLAG_IOPL1: u32 = 0b0010_0000_0000_0000; // Nested Task
+
+    pub fn to_buffer<WS: Write + Seek>(&self, buffer: &mut WS) -> BinResult<()> {
+        self.write_le(buffer)
+    }
+
+    pub fn clear_trap_flag(&mut self) {
+        // Clear the trap flag (bit 8) in the flags register.
+        self.eflags &= !0x0100; // Clear bit 8
+    }
+    pub fn clear_interrupt_flag(&mut self) {
+        // Clear the interrupt flag (bit 9) in the flags register.
+        self.eflags &= !0x0200; // Clear bit 9
+    }
+
+    pub fn weighted_u16(
+        weight_zero: f32,
+        weight_ones: f32,
+        rand: &mut rand::rngs::StdRng,
+        register_beta: &mut Beta<f64>,
+    ) -> u16 {
+        let random_value: f32 = rand.random();
+        if random_value < weight_zero {
+            0
+        }
+        else if random_value < weight_zero + weight_ones {
+            0xFFFF // All bits set to 1
+        }
+        else {
+            let value: u16 = (register_beta.sample(rand) * u16::MAX as f64) as u16;
+            value
+        }
+    }
+
+    pub fn weighted_u32(
+        weight_zero: f32,
+        weight_ones: f32,
+        rand: &mut rand::rngs::StdRng,
+        register_beta: &mut Beta<f64>,
+    ) -> u32 {
+        let random_value: f32 = rand.random();
+        if random_value < weight_zero {
+            0
+        }
+        else if random_value < weight_zero + weight_ones {
+            0xFFFF // All bits set to 1
+        }
+        else {
+            let value: u32 = (register_beta.sample(rand) * u32::MAX as f64) as u32;
+            value
+        }
+    }
+
+    #[rustfmt::skip]
+    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>) {
+        *self = RemoteCpuRegistersV3A::default(); // Reset all registers to default values
+
+        if opts.randomize_flags {
+            self.eflags = (rand.random::<u32>() | RemoteCpuRegistersV3A::FLAGS_RESERVED_SET) & RemoteCpuRegistersV3A::FLAGS_RESERVED_MASK; // Set reserved bit
+        }
+        if opts.clear_trap_flag {
+            self.clear_trap_flag();
+        }
+        if opts.clear_interrupt_flag {
+            self.clear_interrupt_flag();
+        }
+
+        if opts.randomize_general {
+            self.eax = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ebx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ecx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.edx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.esp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ebp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.esi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.edi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ds = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.ss = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.es = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.fs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.gs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.cs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+        }
+
+        if opts.randomize_ip {
+            self.eip = rand.random::<u32>() & opts.eip_mask;
+        }
+
+        // Set SP to even value.
+        self.esp = self.esp & !1;
+        // Use the sp_odd_chance to set it to an odd value based on the configured percentage.
+        let odd_chance = rand.random::<f32>();
+        if odd_chance < opts.weight_sp_odd {
+            self.esp |= 1; // Set the least significant bit to 1 to make it odd
+        }
+
+        // Set sp to minimum value if beneath.
+        if self.esp < opts.sp_min_value32 {
+            self.esp = opts.sp_min_value32;
+        }
+
+        // Set sp to maximum value if above.
+        if self.esp > opts.sp_max_value32 {
+            self.esp = opts.sp_max_value32;
+        }
+
+        if opts.randomize_msw {
+            self.cr0 = rand.random::<u32>() & !RemoteCpuRegistersV3A::FLAGS_RESERVED_CR0; // Keep reserved bits
+        }
+
+        if opts.randomize_tr {
+            self.tr = rand.random::<u16>();
+        }
+
+        if opts.randomize_ldt {
+            self.ldt = rand.random::<u16>();
+        }
+
+        if opts.randomize_segment_descriptors {
+            let mut base_address: u32 = (rand.random::<u32>()) << 4;
+            let limit: u32 = 0x0000_FFFF;
+
+            // Randomize segment descriptors
+            self.es_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+
+            base_address = (rand.random::<u32>()) << 4;
+            self.cs_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+
+            base_address = (rand.random::<u32>()) << 4;
+            self.ss_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+
+            base_address = (rand.random::<u32>()) << 4;
+            self.ds_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+
+            base_address = (rand.random::<u32>()) << 4;
+            self.es_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+
+            base_address = (rand.random::<u32>()) << 4;
+            self.fs_desc = SegmentDescriptorV2::default()
+                .with_base_address(base_address)
+                .with_limit(limit);
+        }
+    }
 
     /// Calculate the code address based on CS descriptor and EIP
     pub fn calculate_code_address(&self) -> u32 {
@@ -849,3 +1029,75 @@ fn parse_v3b(buf: &[u8]) -> Result<RemoteCpuRegistersV3B, &'static str> {
 
 impl_registers32!(RemoteCpuRegistersV3A);
 impl_registers32!(RemoteCpuRegistersV3B);
+
+#[cfg(feature = "use_moo")]
+impl From<RemoteCpuRegistersV3A> for MooRegisters32 {
+    fn from(regs: RemoteCpuRegistersV3A) -> MooRegisters32 {
+        MooRegisters32::from(&regs)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&RemoteCpuRegistersV3A> for MooRegisters32 {
+    fn from(regs: &RemoteCpuRegistersV3A) -> MooRegisters32 {
+        (&(MooRegisters32Init {
+            cr0: regs.cr0,
+            cr3: 0,
+            eax: regs.eax,
+            ebx: regs.ebx,
+            ecx: regs.ecx,
+            edx: regs.edx,
+            esp: regs.esp,
+            ebp: regs.ebp,
+            esi: regs.esi,
+            edi: regs.edi,
+            eip: regs.eip,
+            dr6: regs.dr6,
+            dr7: regs.dr7,
+            eflags: regs.eflags,
+            cs: regs.cs as u32,
+            ds: regs.ds as u32,
+            es: regs.es as u32,
+            fs: regs.fs as u32,
+            gs: regs.gs as u32,
+            ss: regs.ss as u32,
+        }))
+            .into()
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<RemoteCpuRegistersV3B> for MooRegisters32 {
+    fn from(regs: RemoteCpuRegistersV3B) -> MooRegisters32 {
+        MooRegisters32::from(&regs)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&RemoteCpuRegistersV3B> for MooRegisters32 {
+    fn from(regs: &RemoteCpuRegistersV3B) -> MooRegisters32 {
+        (&(MooRegisters32Init {
+            cr0: regs.cr0,
+            cr3: regs.cr3,
+            eax: regs.eax,
+            ebx: regs.ebx,
+            ecx: regs.ecx,
+            edx: regs.edx,
+            esp: regs.esp,
+            ebp: regs.ebp,
+            esi: regs.esi,
+            edi: regs.edi,
+            eip: regs.eip,
+            dr6: regs.dr6,
+            dr7: regs.dr7,
+            eflags: regs.eflags,
+            cs: regs.cs as u32,
+            ds: regs.ds as u32,
+            es: regs.es as u32,
+            fs: regs.fs as u32,
+            gs: regs.gs as u32,
+            ss: regs.ss as u32,
+        }))
+            .into()
+    }
+}

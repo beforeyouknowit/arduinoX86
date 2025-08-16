@@ -48,14 +48,29 @@ use std::{
     time::Instant,
 };
 
-#[derive(Copy, Clone, Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum InstructionSize {
+    Sixteen,
+    ThirtyTwo,
+}
+
+impl From<InstructionSize> for u32 {
+    fn from(size: InstructionSize) -> Self {
+        match size {
+            InstructionSize::Sixteen => 16,
+            InstructionSize::ThirtyTwo => 32,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub enum CpuMode {
     Real,
     Unreal,
     Protected,
 }
 
-#[derive(Copy, Clone, Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub enum TerminationCondition {
     Queue,
     Halt,
@@ -123,10 +138,12 @@ pub struct TestExec {
     max_gen: u32,
     test_retry: u32,
     load_retry: u32,
+    test_timeout: u32,
     print_instruction: bool,
     print_initial_regs: bool,
     print_final_regs: bool,
     show_gen_time: bool,
+    serial_timeout: u32,
     serial_debug_default: bool,
     serial_debug_test: Option<usize>,
 }
@@ -145,6 +162,7 @@ pub struct TestGen {
     trace_file_suffix: PathBuf,
     moo_version: u8,
     moo_arch: String,
+    gen_widths: Vec<InstructionSize>,
 
     address_mask: u32,
     ip_mask: u16,
@@ -262,7 +280,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize the random number generator
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(cli.com_port.clone(), Some(2000)) {
+    let mut cpu_client = match CpuClient::init(cli.com_port.clone(), Some(config.test_exec.serial_timeout as u64)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -300,10 +318,19 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("Creating trace log file: {}", trace_log_path.display()))?;
     let trace_log = BufWriter::new(trace_log_file);
 
+    let (load_register_buffer, store_register_buffer) = match config.test_gen.cpu_type {
+        MooCpuType::Intel80286 => (Cursor::new(vec![0; 102]), vec![0; 102]),
+        MooCpuType::Intel80386Ex => (Cursor::new(vec![0; 204]), vec![0; 208]),
+        _ => {
+            eprintln!("Unsupported CPU type: {:?}", config.test_gen.cpu_type);
+            std::process::exit(1);
+        }
+    };
+
     let mut context = TestContext {
         client: cpu_client,
-        load_register_buffer: Cursor::new(vec![0; 102]),
-        store_register_buffer: vec![0; 102],
+        load_register_buffer,
+        store_register_buffer,
         server_cpu,
         register_set_type: RegisterSetType::from(server_cpu),
         file_seed: 0,

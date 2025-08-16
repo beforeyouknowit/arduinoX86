@@ -43,7 +43,7 @@ impl From<&[MyServerCycleState]> for BusOps {
         let mut latched_bus_op = None;
         for cycle_state in cycle_states {
             if let Ok(bus_op) = BusOp::try_from(cycle_state) {
-                //log::trace!("Collected bus op: {:?}", bus_op);
+                log::trace!("Collected bus op: {:X?}", bus_op);
                 latched_bus_op = Some(bus_op);
             }
             else {
