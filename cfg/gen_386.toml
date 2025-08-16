@@ -1,7 +1,7 @@
 [test_gen]
 set_version_major = 1
 set_version_minor = 0
-cpu_type = "Intel80386"
+cpu_type = "Intel80386Ex"
 # Execution mode - Real, Unreal, Protected
 cpu_mode = "Real"
 base_seed = 0xDEADBEEF
@@ -12,7 +12,8 @@ trace_output_dir = "e:/test_output_386/trace/"
 verify_trace_output_dir = "e:/test_output_386/verify_trace/"
 trace_file_suffix = "_trace.log"
 moo_version = 1
-moo_arch = "C286"
+moo_arch = "386E"
+gen_widths = ["Sixteen"] # 386 has 16-bit and 32-bit modes
 
 address_mask = 0xFFFFFF # 24-bit address mask for 386EX
 ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
@@ -34,7 +35,7 @@ excluded_opcodes = [
 ]
 exclude_esc_opcodes = true
 
-test_count = 5000
+test_count = 100
 append_file = true
 
 # shift/rotate mask
@@ -221,13 +222,15 @@ count_overrides = [
 
 # Arduino control stuff
 [test_exec]
+serial_timeout = 5000
 serial_debug_default = false
-#serial_debug_test = 2443
+serial_debug_test = 9
 validate_count = 2 # Number of identical tests required to accept test
 max_gen = 10 # Maximum number of times to regenerate a failed instruction.
 test_retry = 5 # Number of retries per single test generation.
 load_retry = 5 # Number of retries for LOADALL.
 polling_sleep = 10 # Polling rate in milliseconds per poll
+test_timeout = 2000 # Timeout for a single test in milliseconds
 print_instruction = true
 print_initial_regs = false
 print_final_regs = false
@@ -1260,6 +1263,10 @@ arch = "86"
 status = "normal"
 arch = "86"
 
+[metadata.opcodes.0F00]
+status = "normal"
+arch = "286"
+
 [metadata.opcodes.0F00.reg.0]
 status = "normal"
 mode = "protected"
@@ -1290,6 +1297,10 @@ status = "normal"
 mode = "protected"
 arch = "286"
 
+[metadata.opcodes.0F01]
+status = "normal"
+arch = "286"
+
 [metadata.opcodes.0F01.reg.0]
 status = "normal"
 mode = "protected"
@@ -1305,7 +1316,7 @@ status = "normal"
 mode = "protected"
 arch = "286"
 
-[metadata.opcodes.0F01reg.3]
+[metadata.opcodes.0F01.reg.3]
 status = "normal"
 mode = "protected"
 arch = "286"

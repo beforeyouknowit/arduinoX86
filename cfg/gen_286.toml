@@ -13,6 +13,7 @@ verify_trace_output_dir = "e:/test_output_286/verify_trace/"
 trace_file_suffix = "_trace.log"
 moo_version = 1
 moo_arch = "C286"
+gen_widths = ["Sixteen"] # 16-bit only
 
 address_mask = 0xFFFFFF # 24-bit address mask for 286
 ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
@@ -216,6 +217,7 @@ count_overrides = [
 
 # Arduino control stuff
 [test_exec]
+serial_timeout = 2000
 serial_debug_default = false
 #serial_debug_test = 2443
 validate_count = 2 # Number of identical tests required to accept test
@@ -223,6 +225,7 @@ max_gen = 10 # Maximum number of times to regenerate a failed instruction.
 test_retry = 5 # Number of retries per single test generation.
 load_retry = 5 # Number of retries for LOADALL.
 polling_sleep = 10 # Polling rate in milliseconds per poll
+test_timeout = 100 # Timeout for a single test in milliseconds
 print_instruction = true
 print_initial_regs = false
 print_final_regs = false
