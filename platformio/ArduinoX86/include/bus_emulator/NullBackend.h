@@ -45,6 +45,7 @@ public:
   void     io_write_u8(uint16_t, uint8_t) override {}
   void     io_write_u16(uint16_t, uint16_t) override {}
   void     set_memory(uint32_t, const uint8_t*, size_t) override {}
+  void     erase_memory() override {}
   void     set_strategy(DefaultStrategy, uint32_t, uint32_t) override {}
   void     randomize_memory(uint32_t) override {}
   void     debug_mem(uint32_t, size_t) override {}

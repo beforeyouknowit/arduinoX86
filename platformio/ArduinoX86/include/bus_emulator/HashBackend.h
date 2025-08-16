@@ -134,6 +134,11 @@ public:
     }
   }
 
+  void erase_memory() override {
+    mem_table_.clear();
+    DEBUG_SERIAL.println("## HASH_BACKEND: Memory erased");
+  }
+
   void randomize_memory(uint32_t seed) override {
     base_seed_ = seed;
     mem_table_.clear();

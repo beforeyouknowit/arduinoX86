@@ -60,6 +60,7 @@ public:
   virtual void     io_write_u16(uint16_t port, uint16_t value) = 0;
   virtual void     io_write_bus(uint16_t port, uint16_t value, bool bhe) = 0;
   virtual void     set_memory(uint32_t address, const uint8_t* buffer, size_t length) = 0;
+  virtual void     erase_memory() = 0;
   virtual void     set_strategy(DefaultStrategy strategy, uint32_t start, uint32_t end) = 0;
   virtual void     randomize_memory(uint32_t seed) = 0;
   virtual void     debug_mem(uint32_t address, size_t length) = 0;

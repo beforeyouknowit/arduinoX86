@@ -205,6 +205,8 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
       case ServerCommand::CmdSetMemoryStrategy: return "CmdSetMemoryStrategy";
       case ServerCommand::CmdGetFlags: return "CmdGetFlags";
       case ServerCommand::CmdReadMemory: return "CmdReadMemory";
+      case ServerCommand::CmdEraseMemory: return "CmdEraseMemory";
+      case ServerCommand::CmdServerStatus: return "CmdServerStatus";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -342,6 +344,10 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_get_flags();
     case ServerCommand::CmdReadMemory:
         return cmd_read_memory();
+    case ServerCommand::CmdEraseMemory:
+        return cmd_erase_memory();
+    case ServerCommand::CmdServerStatus:
+        return cmd_server_status();
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -413,6 +419,8 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
         case ServerCommand::CmdSetMemoryStrategy: return 9; // Parameters: Strategy (1 byte), start_addr (4 bytes), end_addr (4 bytes).
         case ServerCommand::CmdGetFlags: return 0;
         case ServerCommand::CmdReadMemory: return 8; // Parameters: address (4 bytes) and size (4 bytes).
+        case ServerCommand::CmdEraseMemory: return 0;
+        case ServerCommand::CmdServerStatus: return 0;
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -658,7 +666,6 @@ bool CommandServer<BoardType, HatType>::cmd_cycle() {
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_load() {
 
-  //DEBUG_SERIAL.println(">> Got load!");
   clear_error();
   volatile uint8_t *read_p = nullptr;
   uint8_t reg_type = commandBuffer_[0];
@@ -735,6 +742,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
       break;
   }
 
+  ArduinoX86::Server.change_state(ServerState::Reset);
   CpuResetResult result = Controller.resetCpu();
   CPU.reset(result, true);
   if (!result.success) {
@@ -742,7 +750,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
     Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
     return false;
   }
-
+  Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Successfully reset CPU...");
   CPU.have_queue_status = result.queueStatus;
 
 #if USE_SETUP_PROGRAM
@@ -759,6 +767,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
     if (load_timeout > LOAD_TIMEOUT) {
       // Something went wrong in load program
+      Controller.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_load(): Load timeout!  Address latch: %08X\n\r", CPU.address_latch() );
       set_error("Load timeout");
       return false;
     }
@@ -767,6 +776,8 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 #if LOAD_INDICATOR
   DEBUG_SERIAL.print(".");
 #endif
+
+  Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Load done!");
   debug_proto("LOAD DONE");
   return true;
 }
@@ -775,9 +786,9 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 // Read back the contents of the address latch as a sequence of 3 bytes (little-endian)
 template<typename BoardType, typename HatType>
 bool CommandServer<BoardType, HatType>::cmd_read_address_latch() {
-  INBAND_SERIAL.write((uint8_t)(CPU.address_latch & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 8) & 0xFF));
-  INBAND_SERIAL.write((uint8_t)((CPU.address_latch >> 16) & 0xFF));
+  INBAND_SERIAL.write((uint8_t)(CPU.address_latch() & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_latch() >> 8) & 0xFF));
+  INBAND_SERIAL.write((uint8_t)((CPU.address_latch() >> 16) & 0xFF));
   return true;
 }
 
@@ -878,7 +889,7 @@ bool CommandServer<BoardType, HatType>::cmd_prefetch_store() {
 #endif
 
     CPU.prefetching_store = true;
-    CPU.data_bus = EMU_EXIT_PROGRAM.read(CPU.address_latch, CPU.data_width);
+    CPU.data_bus = EMU_EXIT_PROGRAM.read(CPU.address_latch(), CPU.data_width);
     CPU.data_type = QueueDataType::ProgramEnd;
   } else {
     // Prefetch the Store program
@@ -892,14 +903,14 @@ bool CommandServer<BoardType, HatType>::cmd_prefetch_store() {
 #endif
 
     CPU.prefetching_store = true;
-    CPU.data_bus = STORE_PROGRAM_INLINE.read(CPU.address_latch, CPU.data_width);
+    CPU.data_bus = STORE_PROGRAM_INLINE.read(CPU.address_latch(), CPU.data_width);
     CPU.data_type = QueueDataType::ProgramEnd;
   }
 
 #if DEBUG_STORE
   debugPrintColor(ansi::yellow, CPU.s_pc);
   debugPrintColor(ansi::yellow, " addr: ");
-  debugPrintColor(ansi::yellow, CPU.address_latch, 16);
+  debugPrintColor(ansi::yellow, CPU.address_latch(), 16);
   debugPrintColor(ansi::yellow, " data: ");
   debugPrintlnColor(ansi::yellow, CPU.data_bus, 16);
 #endif
@@ -1005,6 +1016,7 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
             INBAND_SERIAL.write((uint8_t)3);
             // Write the registers in the V3B format.
             SmmDump386 smm386 = ArduinoX86::Bus->smm_dump386_regs();
+            smm386.normalize_flags();
             write_len = INBAND_SERIAL.write((uint8_t *)&smm386, sizeof(SmmDump386));
             controller_.getBoard().debugPrintf(
               DebugType::STORE, 
@@ -1533,6 +1545,26 @@ bool CommandServer<BoardType, HatType>::cmd_read_memory() {
 
   controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
   proto_write(ptr, size);
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_erase_memory() {
+  ArduinoX86::Bus->erase_memory();
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_server_status() {
+  // Returns the current server status as:
+  // 1 byte: Server state (ServerState enum)
+  // 8 bytes: Current cycle count (uint64_t)
+  // 4 bytes: Current address latch (uint32_t)
+  INBAND_SERIAL.write((uint8_t)state_);
+  uint64_t cycle_count = CPU.cycle_ct();
+  INBAND_SERIAL.write((uint8_t *)&cycle_count, sizeof(cycle_count));
+  uint32_t address_latch = CPU.address_latch();
+  INBAND_SERIAL.write((uint8_t *)&address_latch, sizeof(address_latch));
   return true;
 }
 

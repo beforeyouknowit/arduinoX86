@@ -130,6 +130,9 @@ struct __attribute__((packed)) Loadall286 {
 
 #define LOADALL286_ADDRESS 0x800
 
+#define FLAGS_SET_386 0xFFFC0002
+#define FLAGS_CLEAR_386 0xFFFF7FD7
+
 struct __attribute__((packed)) Store386 {
   uint32_t eax;
   uint32_t ebx;
@@ -154,7 +157,6 @@ struct __attribute__((packed)) Store386 {
   uint32_t esi;
   uint32_t edi;
 };
-
 
 struct __attribute__((packed)) Loadall386 {
   uint32_t cr0;
@@ -286,6 +288,11 @@ struct __attribute__((packed)) SmmDump386 {
   SegmentDescriptor386 ss_desc;
   SegmentDescriptor386 cs_desc;
   SegmentDescriptor386 es_desc;
+
+  void normalize_flags() {
+    eflags &= FLAGS_CLEAR_386;
+    eflags |= FLAGS_SET_386;
+  }
 };
 
 /// The SMRAM address is fixed on the 386EX from 0x3FE00 to 0x3FFFF.

@@ -47,7 +47,7 @@ public:
   uint32_t state_begin_time;
   uint32_t last_address_bus;
   uint32_t address_bus;
-  uint32_t address_latch;
+  
   BusStatus bus_state_latched; // Bus state latched on T1 and valid for entire bus cycle (immediate bus state goes PASV on T3)
   BusStatus bus_state; // Bus state is current status of S0-S2 at given cycle (may not be valid)
   TCycle last_bus_cycle;
@@ -102,7 +102,25 @@ public:
     use_smm_ = use_smm;
   }
 
+  uint64_t cycle_ct() const {
+    return cycle_ct_;
+  }
+
+  void tick() {
+    cycle_ct_++;
+  }
+
+  uint32_t address_latch() const {
+    return address_latch_;
+  }
+
+  void latch_address(uint32_t address) {
+    // Latch the address bus value on ALE/ADS
+    address_latch_ = address;
+  }
+
 private:
   bool use_smm_ = false; // Use SMM for register readout on 386/486 CPUs
-
+  uint64_t cycle_ct_ = 0; // Number of cycles executed since reset.
+  uint32_t address_latch_ = 0; // Value of address bus as of ALE/ADS.
 };

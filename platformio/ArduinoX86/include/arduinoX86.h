@@ -219,7 +219,6 @@ uint16_t data_bus_read(ActiveBusWidth width);
 uint16_t data_bus_peek(CpuBusWidth width);
 void read_address();
 uint32_t peek_address();
-void latch_address();
 bool a0();
 uint32_t read_address_pins(bool peek);
 

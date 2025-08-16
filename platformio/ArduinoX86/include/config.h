@@ -60,9 +60,9 @@
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
 #define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
-#define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
-#define TRACE_VECTOR    ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
-#define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
+#define TRACE_SETUP     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
+#define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
+#define TRACE_LOAD      ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.
 #define TRACE_EMU_ENTER ((0 | TRACE_ALL) & ~TRACE_NONE)
@@ -80,7 +80,7 @@
 #define DEBUG_SETUP     ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about the CPU setup routine, if applicable
 #define DEBUG_VECTOR    ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about jump vector program execution
 #define DEBUG_ID        ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about CPU identification
-#define DEBUG_LOAD      ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
+#define DEBUG_LOAD      ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD state
 #define DEBUG_LOAD_DONE ((0 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during LOAD_DONE state
 #define DEBUG_EXECUTE   ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during EXECUTE state
 #define DEBUG_STORE     ((1 | DEBUG_ALL) & ~DEBUG_NONE) // Info about events during STORE state

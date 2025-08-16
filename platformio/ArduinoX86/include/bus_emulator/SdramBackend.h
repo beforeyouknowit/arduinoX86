@@ -167,6 +167,15 @@ public:
     memcpy(mem_ + (address & mask_), buffer, length);
   };
 
+  void erase_memory() override {
+    if (!mem_) {
+      DEBUG_SERIAL.println("## SDRAM: Memory not initialized");
+      return;
+    }
+    memset(mem_, 0, size_); // Clear memory
+    DEBUG_SERIAL.println("## SDRAM: Memory erased");
+  };
+
   void debug_mem(uint32_t address, size_t length) {
     char buf[64];
     if (!mem_) {

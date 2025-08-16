@@ -283,6 +283,10 @@ public:
     backend_->set_memory(address, buffer, length);
   }
 
+  void erase_memory() {
+    backend_->erase_memory();
+  }
+
   void debug_memory(uint32_t address, size_t length) {
     backend_->debug_mem(address, length);
   }

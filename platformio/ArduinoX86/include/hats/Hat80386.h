@@ -50,7 +50,7 @@ void cycle();
 #define ADDRESS_SPACE_MASK 0x3FFFFF // 4MB address space for 80286
 #define WRITE_CYCLE T2
 #define STORE_TIMEOUT 3000
-#define LOAD_TIMEOUT 3000
+#define LOAD_TIMEOUT 5000
 
 // ------------------------- CPU Control pins ---------------------------------
 #define CLK_PIN 4
@@ -208,6 +208,18 @@ void cycle();
 #define RESET_ASSERT 1
 // What logic level RESET is when deasserted
 #define RESET_DEASSERT 0
+
+#define LOOP_COUNT 20
+
+#define SPIN_LOOP(count)                          \
+  do {                                            \
+    for (volatile unsigned int _spin_i = 0;       \
+         _spin_i < (count);                      \
+         ++_spin_i) {                             \
+      /* prevent the compiler from discarding the loop */ \
+      __asm__ __volatile__ ("" ::: "memory");    \
+    }                                             \
+  } while (0)
 
 class Hat80386 : public HatBase<Hat80386> {
 
@@ -377,21 +389,21 @@ public:
   /// For 386, this is two external clock cycles per CPU clock cycle.
   static void tickCpuImpl() {
     WRITE_PIN_D04(1);
-    if (ClockHighDelay > 0) {
-      delayMicroseconds(ClockHighDelay);
-    }
+    // if (ClockHighDelay > 0) {
+    //   delayMicroseconds(ClockHighDelay);
+    // }
     WRITE_PIN_D04(0);
-    if (ClockLowDelay > 0) {
-      delayMicroseconds(ClockLowDelay);
-    }
+    // if (ClockLowDelay > 0) {
+    //   delayMicroseconds(ClockLowDelay);
+    // }
     WRITE_PIN_D04(1);
-    if (ClockHighDelay > 0) {
-      delayMicroseconds(ClockHighDelay);
-    }
+    // if (ClockHighDelay > 0) {
+    //   delayMicroseconds(ClockHighDelay);
+    // }
     WRITE_PIN_D04(0);
-    if (ClockLowDelay > 0) {
-      delayMicroseconds(ClockLowDelay);
-    }
+    // if (ClockLowDelay > 0) {
+    //   delayMicroseconds(ClockLowDelay);
+    // }
   }
 
   uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
@@ -547,7 +559,7 @@ public:
     result.success = false;
     result.queueStatus = false;
     result.busWidth = BusWidth::Sixteen; // We're using a 386EX, so 16-bit bus width
-    
+    setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
     digitalWrite(INTR_PIN, LOW); // INTR must be low or CPU will immediately interrupt.
     digitalWrite(NMI_PIN, LOW); // NMI must be low or CPU will immediately interrupt.
     digitalWrite(HOLD_PIN, LOW); // HOLD must be low or CPU will not reset.

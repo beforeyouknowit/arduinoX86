@@ -35,6 +35,7 @@ void Cpu::reset(CpuResetResult reset_result, bool preserve_bus_state, bool reset
     width = CpuBusWidth::Sixteen;
     queue = InstructionQueue(6, BusWidth::Sixteen);
   }
+  cycle_ct_ = 0;
   doing_reset = false;
   doing_id = false;
   //do_emulation = false;
@@ -47,7 +48,7 @@ void Cpu::reset(CpuResetResult reset_result, bool preserve_bus_state, bool reset
   if (!preserve_bus_state) {
     last_address_bus = 0;
     address_bus = 0;
-    address_latch = 0;
+    address_latch_ = 0;
     bus_state_latched = BusStatus::PASV;
     bus_state = BusStatus::PASV;
     last_bus_cycle = TCycle::TI;

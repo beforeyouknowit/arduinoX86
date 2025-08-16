@@ -105,6 +105,8 @@ public:
     CmdSetMemoryStrategy = 0x22,
     CmdGetFlags        = 0x23,
     CmdReadMemory      = 0x24,
+    CmdEraseMemory     = 0x25,
+    CmdServerStatus    = 0x26,
     CmdInvalid
   };
 
@@ -259,5 +261,7 @@ private:
   bool cmd_set_memory_strategy(void);
   bool cmd_get_flags(void);
   bool cmd_read_memory(void);
+  bool cmd_erase_memory(void);
+  bool cmd_server_status(void);
   bool cmd_null(void);
 };
