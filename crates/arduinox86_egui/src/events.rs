@@ -25,8 +25,11 @@ use std::path::PathBuf;
 
 pub enum GuiEvent {
     LoadRegisters,
+    EraseMemory,
     ReadMemory { address: u32, size: u32 },
     RunProgram,
+    AssembleProgram { program_name: String },
+    PollStatus,
 }
 
 #[derive(Default)]

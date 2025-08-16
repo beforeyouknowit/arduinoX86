@@ -29,8 +29,7 @@
     Implement an O(log n) range checker for detecting if a value is within a range.
 */
 
-#[derive(Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RangeChecker {
     events: Vec<(usize, i32, usize)>, // (value, type), where type is +1 for start, -1 for end
 }

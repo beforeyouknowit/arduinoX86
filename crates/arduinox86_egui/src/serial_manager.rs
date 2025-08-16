@@ -58,7 +58,6 @@ impl SerialManager {
                 SerialPortType::Unknown => {
                     format!("{} (Unknown)", port.port_name)
                 }
-                _ => port.port_name.clone(),
             })
             .collect()
     }

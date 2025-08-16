@@ -34,11 +34,14 @@ strum_macros = "0.27"
 moo-rs = { git = "https://github.com/dbalsom/moo", default-features = false, features = ["serde"] }
 crossbeam-channel = "0.5"
 pollster = "0.2"
+tempfile = "3.20"
+uuid = "1.18.0"
+egui-phosphor = { version = "0.10", features = ["fill"] }
 
 [workspace.dependencies.iced-x86]
 version = "1.21"
 default-features = false
 # See below for all features
-features = ["std", "encoder", "decoder", "nasm", "instr_info", "serde"]
+features = ["std", "encoder", "decoder", "op_code_info", "nasm", "instr_info", "serde"]
 
 #serialport = { git = "https://github.com/dbalsom/serialport-rs", branch = "arduino-fix" }

@@ -20,13 +20,13 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{client::ClientContext, events::GuiEventQueue, structs::BinaryBlob, windows::BinaryView};
+use crate::{structs::BinaryBlob, windows::BinaryView};
+
 use anyhow::Result;
 
 #[derive(Default)]
 pub struct ResourceManager {
     blobs: Vec<BinaryBlob>,
-    blob_windows: Vec<BinaryView>,
 }
 
 impl ResourceManager {
@@ -34,17 +34,14 @@ impl ResourceManager {
         self.blobs.iter().any(|b| b.name == blob_name)
     }
 
-    pub fn add_blob(&mut self, blob: BinaryBlob) -> Result<()> {
+    pub fn add_blob(&mut self, blob: BinaryBlob) -> Result<BinaryView> {
         if self.blob_exists(&blob.name) {
             return Err(anyhow::anyhow!("Blob with name '{}' already exists.", blob.name));
         }
         self.blobs.push(blob.clone());
         let mut view = BinaryView::new(&blob.name);
-
         view.set_data(&blob.data);
-
-        self.blob_windows.push(view);
-        Ok(())
+        Ok(view)
     }
 
     pub fn remove_blob(&mut self, blob_name: &str) -> Result<()> {
@@ -53,15 +50,16 @@ impl ResourceManager {
         }
         if let Some(index) = self.blobs.iter().position(|b| b.name == blob_name) {
             self.blobs.remove(index);
-            self.blob_windows.remove(index);
         }
         Ok(())
     }
 
-    pub fn show(&mut self, e_ctx: &egui::Context, c_ctx: &mut ClientContext, events: &mut GuiEventQueue) {
-        for window in &mut self.blob_windows {
-            window.show(e_ctx, c_ctx, events);
-        }
+    pub fn blob(&self, blob_name: &str) -> Option<&BinaryBlob> {
+        self.blobs.iter().find(|b| b.name == blob_name)
+    }
+
+    pub fn blob_mut(&mut self, blob_name: &str) -> Option<&mut BinaryBlob> {
+        self.blobs.iter_mut().find(|b| b.name == blob_name)
     }
 
     pub fn blobs(&self) -> &[BinaryBlob] {

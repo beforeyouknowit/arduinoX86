@@ -23,6 +23,7 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 mod app;
+mod assembler;
 mod async_exec;
 mod character_encoding;
 mod client;
@@ -34,10 +35,13 @@ mod file_dialogs;
 mod range_check;
 mod register_state;
 mod resource_manager;
+mod scheduler;
 mod serial_manager;
 mod structs;
+mod style;
 mod thread_event;
 mod widgets;
+mod window_manager;
 mod windows;
 
 pub use app::App;

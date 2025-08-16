@@ -20,11 +20,20 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{client::ClientContext, controls::data_table::DataTableWidget, events::GuiEventQueue};
+use crate::{
+    client::ClientContext,
+    controls::data_table::DataTableWidget,
+    enums::MountAddress,
+    events::GuiEventQueue,
+    structs::BinaryBlob,
+    widgets::mount_address_widget::MountAddressWidget,
+};
 
 pub struct BinaryView {
     pub name: String,
     pub icon_size: f32,
+    pub mount_addr: MountAddress,
+    pub mount_str: String,
     pub dt: DataTableWidget,
 }
 
@@ -33,6 +42,8 @@ impl Default for BinaryView {
         Self {
             name: "Program".into(),
             icon_size: 18.0,
+            mount_addr: MountAddress::CsIp,
+            mount_str: "0".to_string(),
             dt: DataTableWidget::default(),
         }
     }
@@ -46,16 +57,26 @@ impl BinaryView {
         }
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn set_data(&mut self, data: &[u8]) {
         self.dt.set_data(data);
     }
 
-    pub fn show(&mut self, e_ctx: &egui::Context, c_ctx: &mut ClientContext, events: &mut GuiEventQueue) {
-        egui::Window::new(format!("Binary View: {}", self.name))
-            .default_width(800.0)
-            .default_height(600.0)
-            .show(e_ctx, |ui| {
-                self.dt.show(ui);
-            });
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        blob: &mut BinaryBlob,
+        _c_ctx: &mut ClientContext,
+        _events: &mut GuiEventQueue,
+    ) {
+        ui.vertical(|ui| {
+            ui.add(MountAddressWidget::new(&mut self.mount_addr, &mut self.mount_str));
+            blob.set_mount_address(self.mount_addr.clone());
+            ui.separator();
+            self.dt.show(ui);
+        });
     }
 }

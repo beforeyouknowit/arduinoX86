@@ -145,7 +145,7 @@ impl FlagStringState {
     pub const FLAG_DIRECTION: u32 = 0b0000_0100_0000_0000;
     pub const FLAG_OVERFLOW: u32 = 0b0000_1000_0000_0000;
 
-    pub fn new(flags_raw: u32, cpu_type: ServerCpuType) -> Self {
+    pub fn new(flags_raw: u32, _cpu_type: ServerCpuType) -> Self {
         FlagStringState {
             c_fl: {
                 let fl = flags_raw & Self::FLAG_CARRY > 0;

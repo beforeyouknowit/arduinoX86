@@ -85,7 +85,16 @@ pub enum BinaryBlobType {
 #[derive(Copy, Clone, serde::Serialize, serde::Deserialize, Debug)]
 pub enum MountAddress {
     CsIp,
-    FixedAddress(u32),
+    FlatAddress(u32),
+}
+
+impl MountAddress {
+    pub fn flat_address(&self) -> Option<u32> {
+        match self {
+            MountAddress::CsIp => None,
+            MountAddress::FlatAddress(addr) => Some(*addr),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -94,4 +103,10 @@ pub enum ClientControlState {
     Setup,
     Running,
     Error,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ScheduleType {
+    OneShot,
+    Repeat,
 }

@@ -20,35 +20,47 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+
+use std::{
+    default::Default,
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
 use crate::{
+    assembler::Assembler,
     client::ClientContext,
-    enums::CpuStateType,
-    events::{GuiEvent, GuiEventQueue},
-    serial_manager::SerialManager,
-    windows::{ClientWindow, CodeEditor, RegisterWindow},
-};
-
-use crate::config::ConfigFile;
-use arduinox86_client::{RegisterSetType, RemoteCpuRegisters, ServerFlags};
-use std::{fs, io::Cursor, path::PathBuf, time::Duration};
-
-use crate::{
-    enums::{BinaryBlobType, ClientControlState, MountAddress},
-    events::FrontendThreadEvent,
+    config::ConfigFile,
+    enums::{BinaryBlobType, ClientControlState, CpuStateType, MountAddress, ScheduleType},
+    events::{FrontendThreadEvent, GuiEvent, GuiEventQueue},
     resource_manager::ResourceManager,
-    structs::BinaryBlob,
-    windows::MemoryViewer,
+    scheduler::Scheduler,
+    serial_manager::SerialManager,
+    structs::{BinaryBlob, ScheduledEvent},
+    style::custom_style,
+    window_manager::WindowManager,
+    windows::{ClientWindow, MemoryViewer, RegisterWindow},
 };
+use anyhow::{bail, Result};
+use arduinox86_client::{RegisterSetType, RemoteCpuRegisters, ServerFlags};
 use clap::Parser;
 use egui::{
     containers::menu::{MenuButton, MenuConfig},
     PopupCloseBehavior,
 };
+use egui_extras::syntax_highlighting::SyntectSettings;
 use egui_notify::Toasts;
+use syntect::parsing::{SyntaxSet, SyntaxSetBuilder};
+use tempfile::NamedTempFile;
 
 pub const SHORT_NOTIFICATION_TIME: Option<Duration> = Some(Duration::from_secs(2));
 pub const NORMAL_NOTIFICATION_TIME: Option<Duration> = Some(Duration::from_secs(5));
 pub const LONG_NOTIFICATION_TIME: Option<Duration> = Some(Duration::from_secs(8));
+
+pub const SERVER_UPDATE_RATE: u64 = 1;
+pub const SERVER_UPDATE_MS: u64 = 1000 / SERVER_UPDATE_RATE;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -61,6 +73,7 @@ struct Cli {
 #[derive(Default)]
 pub struct TransientAppState {
     ctx_init: bool,
+    app_init: bool,
     config: ConfigFile,
     serial_manager: SerialManager,
     resource_manager: ResourceManager,
@@ -69,18 +82,31 @@ pub struct TransientAppState {
 
     client_ctx: Option<ClientContext>,
     client_window: ClientWindow,
+    window_manager: WindowManager,
     initial_register_window: RegisterWindow,
-    code_editor_window: CodeEditor,
     memory_viewer_window: MemoryViewer,
-
+    scheduler: Scheduler,
     event_queue: GuiEventQueue,
-    error_msg:   Option<String>,
+    error_msg: Option<String>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct GuiState {
     #[serde(skip)]
     toasts: Toasts,
+    pub(crate) syntax_set: SyntaxSet,
+    #[serde(skip)]
+    pub(crate) syntect_settings: SyntectSettings,
+}
+
+impl Default for GuiState {
+    fn default() -> Self {
+        Self {
+            toasts: Toasts::new().with_anchor(egui_notify::Anchor::BottomRight),
+            syntax_set: SyntaxSet::load_defaults_newlines(),
+            syntect_settings: SyntectSettings::default(),
+        }
+    }
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -100,16 +126,25 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         let (thread_sender, thread_receiver) = crossbeam_channel::unbounded();
-        Self {
-            gs: GuiState {
-                toasts: Toasts::new().with_anchor(egui_notify::Anchor::BottomRight),
-            },
+
+        let new_app = Self {
+            gs: Default::default(),
             ts: TransientAppState {
                 ..TransientAppState::default()
             },
             thread_sender,
             thread_receiver,
+        };
+
+        let mut syntaxes_found = 0;
+        for syntax in new_app.gs.syntax_set.syntaxes() {
+            log::debug!("Have App::default() syntaxes: {}", syntax.name);
+            syntaxes_found += 1;
         }
+
+        log::debug!("Found {} show syntaxes in App::default()", syntaxes_found);
+
+        new_app
     }
 }
 
@@ -118,7 +153,31 @@ impl App {
     /// Tried doing this in new() but it didn't take effect.
     pub fn ctx_init(&mut self, ctx: &egui::Context) {
         ctx.set_visuals(egui::Visuals::dark());
+
+        let mut custom_style = custom_style();
+
+        // Make header smaller.
+        use egui::{FontFamily::Proportional, FontId, TextStyle::*};
+
+        custom_style.text_styles.entry(Heading).and_modify(|text_style| {
+            *text_style = FontId::new(14.0, Proportional);
+        });
+        custom_style.spacing.window_margin = egui::Margin::from(4);
+
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        ctx.set_fonts(fonts);
+
+        ctx.set_style(custom_style);
+
         self.ts.ctx_init = true;
+    }
+
+    pub fn app_init(&mut self) {
+        self.ts.serial_manager.refresh();
+        let event = ScheduledEvent::new(ScheduleType::Repeat, GuiEvent::PollStatus, SERVER_UPDATE_MS);
+        self.ts.scheduler.add_event(event);
+        self.ts.app_init = true;
     }
 
     /// Called once before the first frame.
@@ -161,12 +220,43 @@ impl App {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            let mut restored_app: App = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            // Recreate SyntectSettings
+            restored_app.gs.syntect_settings = SyntectSettings {
+                ps: restored_app.gs.syntax_set.clone(),
+                ts: syntect::highlighting::ThemeSet::load_defaults(),
+            };
+
+            return restored_app;
         }
 
-        App {
+        let mut ss_builder = SyntaxSetBuilder::new();
+
+        ss_builder
+            .add_from_folder("./syntax", true)
+            .expect("failed to load syntax definitions");
+
+        for syntax in ss_builder.syntaxes() {
+            log::debug!("Loaded syntax: {}", syntax.name);
+        }
+
+        let syntax_set = ss_builder.build();
+
+        let mut syntaxes_found = 0;
+        for syntax in syntax_set.syntaxes() {
+            log::debug!("Have original syntax: {}", syntax.name);
+            syntaxes_found += 1;
+        }
+        log::debug!("Found {} original syntaxes in GuiState::SyntaxSet", syntaxes_found);
+
+        let new_app = App {
             gs: GuiState {
                 toasts: Toasts::new().with_anchor(egui_notify::Anchor::BottomRight),
+                syntax_set: syntax_set.clone(),
+                syntect_settings: SyntectSettings {
+                    ps: syntax_set,
+                    ts: syntect::highlighting::ThemeSet::load_defaults(),
+                },
             },
             ts: TransientAppState {
                 config,
@@ -174,7 +264,17 @@ impl App {
                 ..Default::default()
             },
             ..Default::default()
+        };
+
+        let mut syntaxes_found = 0;
+        for syntax in new_app.gs.syntax_set.syntaxes() {
+            log::debug!("Have App::new() syntaxes: {}", syntax.name);
+            syntaxes_found += 1;
         }
+
+        log::warn!("Found {} show syntaxes in App::new()", syntaxes_found);
+
+        new_app
     }
 }
 
@@ -183,40 +283,92 @@ impl eframe::App for App {
         if !self.ts.ctx_init {
             self.ctx_init(ctx);
         }
+        if !self.ts.app_init {
+            self.app_init();
+        }
 
         self.gs.toasts.show(ctx);
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    ui.horizontal(|ui| {
-                        if let Some(c_ctx) = &mut self.ts.client_ctx {
-                            if c_ctx.control_state() == ClientControlState::Setup {
-                                if ui.button("Load Program Binary").clicked() {
+                    if let Some(c_ctx) = &mut self.ts.client_ctx {
+                        if c_ctx.control_state() == ClientControlState::Setup {
+                            ui.horizontal(|ui| {
+                                if ui.button("New Assembly Listing").clicked() {
+                                    self.ts.window_manager.new_code_window("Program", None);
+                                    log::debug!("New assembly listing created.");
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                if ui.button("Load Assembly Listing...").clicked() {
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .add_filter("Assembly Files", &["asm", "nasm"])
+                                        .pick_file()
+                                    {
+                                        log::debug!("Loading Assembly file: {}", path.display());
+
+                                        match self.load_asm(path) {
+                                            Ok(()) => {
+                                                self.gs
+                                                    .toasts
+                                                    .success("Assembly file loaded successfully!")
+                                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                                log::debug!("Assembly file loaded successfully.");
+                                            }
+                                            Err(e) => {
+                                                log::error!("Failed to load assembly file: {}", e);
+                                                self.ts.error_msg =
+                                                    Some(format!("Failed to load assembly file: {}", e));
+                                                self.gs
+                                                    .toasts
+                                                    .error(format!("Failed to load assembly file: {}", e))
+                                                    .duration(LONG_NOTIFICATION_TIME);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+
+                            ui.separator();
+
+                            ui.horizontal(|ui| {
+                                if ui.button("Load Binary...").clicked() {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("Binary Files", &["bin", "hex"])
                                         .pick_file()
                                     {
                                         match BinaryBlob::from_path(
-                                            "Program",
+                                            &*path
+                                                .file_name()
+                                                .map(|f| f.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "Program".to_string()),
                                             MountAddress::CsIp,
                                             BinaryBlobType::Program,
                                             &path,
                                         ) {
-                                            Ok(blob) => {
-                                                if let Err(e) = self.ts.resource_manager.add_blob(blob) {
-                                                    log::error!("Failed to load program binary: {}", e);
-                                                    self.ts.error_msg =
-                                                        Some(format!("Failed to load program binary: {}", e));
-                                                }
-                                                else {
+                                            Ok(blob) => match self.ts.resource_manager.add_blob(blob) {
+                                                Ok(binary_view) => {
+                                                    self.ts
+                                                        .window_manager
+                                                        .add_blob(binary_view.name().to_string(), binary_view);
                                                     self.gs
                                                         .toasts
                                                         .info("Program binary loaded successfully!")
                                                         .duration(NORMAL_NOTIFICATION_TIME);
                                                     log::info!("Program binary loaded successfully.");
                                                 }
-                                            }
+                                                Err(e) => {
+                                                    log::error!("Failed to add program binary: {}", e);
+                                                    self.gs
+                                                        .toasts
+                                                        .error(format!("Failed to add program binary: {}", e))
+                                                        .duration(LONG_NOTIFICATION_TIME);
+                                                    self.ts.error_msg =
+                                                        Some(format!("Failed to add program binary: {}", e));
+                                                }
+                                            },
                                             Err(e) => {
                                                 log::error!("Failed to create program blob: {}", e);
                                                 self.ts.error_msg = Some(format!("Failed to load program: {}", e));
@@ -224,9 +376,9 @@ impl eframe::App for App {
                                         }
                                     }
                                 }
-                            }
+                            });
                         }
-                    });
+                    }
 
                     ui.separator();
                     if ui.button("Quit").clicked() {
@@ -284,7 +436,9 @@ impl eframe::App for App {
                     match ClientContext::new(self.ts.selected_serial_port, &mut self.ts.serial_manager) {
                         Ok(client_ctx) => {
                             self.ts.error_msg = None;
+                            self.ts.client_window.init(&client_ctx);
                             self.ts.client_ctx = Some(client_ctx);
+
                             log::debug!(
                                 "Connected to ArduinoX86 server on port: {}",
                                 self.ts.selected_serial_port
@@ -328,12 +482,8 @@ impl eframe::App for App {
                 *self.ts.initial_register_window.open_mut() = true;
             }
 
-            if !self.ts.code_editor_window.open() {
-                *self.ts.code_editor_window.open_mut() = true;
-            }
-
             match &initial_state.regs {
-                RemoteCpuRegisters::V3(regs) => {
+                RemoteCpuRegisters::V3(_regs) => {
                     self.ts.initial_register_window.show(
                         ctx,
                         CpuStateType::Initial,
@@ -358,11 +508,19 @@ impl eframe::App for App {
                 }
             }
 
-            self.ts.code_editor_window.show(ctx);
-            self.ts.resource_manager.show(ctx, client_ctx, &mut self.ts.event_queue);
+            //self.ts.code_editor_window.show(ctx, &mut self.ts.event_queue);
+            self.ts.window_manager.show(
+                ctx,
+                client_ctx,
+                &mut self.ts.resource_manager,
+                &self.gs.syntect_settings,
+                &mut self.ts.event_queue,
+            );
             self.ts
                 .memory_viewer_window
                 .show(ctx, client_ctx, &mut self.ts.event_queue);
+
+            self.ts.scheduler.run(&mut self.ts.event_queue);
 
             if update_state {
                 client_ctx.set_initial_state(&new_state);
@@ -371,6 +529,8 @@ impl eframe::App for App {
 
         // Handle events.
         self.handle_events(ctx);
+
+        ctx.request_repaint();
     }
 
     /// Called by the framework to save state before shutdown.
@@ -399,12 +559,37 @@ impl App {
                             .load_registers_from_buf(RegisterSetType::from(&initial_state.regs), buf.get_ref())
                         {
                             log::error!("Failed to load registers: {}", e);
+                            self.gs
+                                .toasts
+                                .error(format!("Failed to load registers: {}", e))
+                                .duration(LONG_NOTIFICATION_TIME);
                             self.ts.error_msg = Some(format!("Failed to load registers: {}", e));
                         }
                         else {
                             log::debug!("Registers loaded successfully.");
+                            self.gs
+                                .toasts
+                                .success("Registers loaded successfully!")
+                                .duration(NORMAL_NOTIFICATION_TIME);
                         }
                     }
+                    GuiEvent::EraseMemory => match client_ctx.erase_memory() {
+                        Ok(_) => {
+                            log::debug!("Memory erased successfully.");
+                            self.gs
+                                .toasts
+                                .success("Memory erased successfully!")
+                                .duration(NORMAL_NOTIFICATION_TIME);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to erase memory: {}", e);
+                            self.gs
+                                .toasts
+                                .error(format!("Failed to erase memory: {}", e))
+                                .duration(LONG_NOTIFICATION_TIME);
+                            self.ts.error_msg = Some(format!("Failed to erase memory: {}", e));
+                        }
+                    },
                     GuiEvent::ReadMemory { address, size } => match client_ctx.read_memory(address, size) {
                         Ok(data) => {
                             self.ts.memory_viewer_window.set_data(data);
@@ -423,13 +608,19 @@ impl App {
                         // Load the binary resources into memory.
                         for blob in self.ts.resource_manager.blobs() {
                             let resolved_mount_address = match blob.mount_address {
-                                MountAddress::FixedAddress(addr) => addr,
+                                MountAddress::FlatAddress(addr) => addr,
                                 MountAddress::CsIp => self
                                     .ts
                                     .initial_register_window
                                     .regs(RegisterSetType::Intel386)
                                     .code_address(),
                             };
+
+                            log::debug!(
+                                "Loading binary blob: {} at address {:08x}",
+                                blob.name,
+                                resolved_mount_address
+                            );
 
                             if let Err(e) = client_ctx.client.set_memory(resolved_mount_address, &blob.data) {
                                 self.gs
@@ -472,9 +663,11 @@ impl App {
                         }
 
                         // Load registers.
-                        let initial_state = client_ctx.initial_state();
+                        let mut initial_state = client_ctx.initial_state().clone();
+                        initial_state.regs.normalize();
 
                         let mut buf = Cursor::new(Vec::<u8>::new());
+
                         initial_state
                             .regs
                             .write(&mut buf)
@@ -499,8 +692,105 @@ impl App {
                             log::debug!("Registers loaded successfully.");
                         }
                     }
+                    GuiEvent::AssembleProgram { program_name } => {
+                        let mut new_blob = None;
+                        if let Some(code_editor) = self.ts.window_manager.code_window_mut(&program_name) {
+                            let mut assembler = Assembler::default();
+
+                            match NamedTempFile::with_suffix(".bin") {
+                                Ok(file) => match assembler.assemble_str(code_editor.code(), &file.path()) {
+                                    Ok(binary) => {
+                                        log::debug!("Assembly successful for code editor: {}", program_name);
+
+                                        if self.ts.resource_manager.blob_exists(&program_name) {
+                                            log::warn!("Blob with name {} already exists, overwriting.", program_name);
+                                        }
+                                        else {
+                                            new_blob = Some(binary);
+                                        }
+
+                                        self.gs
+                                            .toasts
+                                            .success(format!("Assembly successful for {}!", program_name))
+                                            .duration(NORMAL_NOTIFICATION_TIME);
+                                        code_editor.set_assembler_output(assembler.stdout());
+                                    }
+                                    Err(e) => {
+                                        let stderr = assembler.stderr();
+                                        log::error!(
+                                            "Assembly failed for code editor {}: {}: {}",
+                                            program_name,
+                                            e,
+                                            stderr
+                                        );
+                                        self.gs
+                                            .toasts
+                                            .error(format!("Assembly failed: {}", e))
+                                            .duration(LONG_NOTIFICATION_TIME);
+
+                                        code_editor.set_assembler_output(assembler.stderr());
+                                    }
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to create temporary file for assembly: {}", e);
+                                    self.ts.error_msg = Some(format!("Failed to create temporary file: {}", e));
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if let Some(binary) = new_blob {
+                            match self.ts.resource_manager.add_blob(BinaryBlob::new(
+                                program_name.clone(),
+                                MountAddress::CsIp,
+                                BinaryBlobType::Program,
+                                binary,
+                            )) {
+                                Ok(binary_view) => {
+                                    log::debug!("Binary blob {} added successfully", program_name);
+                                    self.ts.window_manager.add_blob(program_name.clone(), binary_view);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to add binary blob {}: {}", program_name, e);
+                                    self.gs
+                                        .toasts
+                                        .error(format!("Failed to add binary blob {}: {}", program_name, e))
+                                        .duration(LONG_NOTIFICATION_TIME);
+                                }
+                            }
+                        }
+                    }
+                    GuiEvent::PollStatus => {
+                        // Get the server status. This event is scheduled automatically.
+                        match client_ctx.client.server_status() {
+                            Ok(status) => {
+                                log::debug!("Server status: {:?}", status);
+                                self.ts.client_window.set_server_status(client_ctx, status);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to get server status: {}", e);
+                                self.ts.error_msg = Some(format!("Failed to get server status: {}", e));
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    fn load_asm(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        match fs::read_to_string(&path) {
+            Ok(code) => {
+                self.ts.window_manager.new_code_window(
+                    path.as_ref()
+                        .file_name()
+                        .map_or("Program", |f| f.to_str().unwrap_or("Program")),
+                    Some(code),
+                );
+
+                Ok(())
+            }
+            Err(e) => bail!("Failed to read assembly file {}: {}", path.as_ref().display(), e),
         }
     }
 }

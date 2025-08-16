@@ -20,18 +20,55 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{events::FrontendThreadEvent, App};
 
-impl App {
-    pub fn handle_thread_event(&mut self, _ctx: &egui::Context) {
-        while let Ok(event) = self.thread_receiver.try_recv() {
-            match event {
-                FrontendThreadEvent::FileOpenDialogComplete {
-                    context,
-                    path,
-                    contents,
-                } => {}
-                _ => {}
+use std::{collections::LinkedList, time::Instant};
+
+use crate::{
+    events::{GuiEvent, GuiEventQueue},
+    structs::ScheduledEvent,
+};
+
+pub struct Scheduler {
+    last_run: Instant,
+    events:   LinkedList<ScheduledEvent>,
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Scheduler {
+    pub fn new() -> Self {
+        Self {
+            last_run: Instant::now(),
+            events:   LinkedList::new(),
+        }
+    }
+
+    pub fn add_event(&mut self, event: ScheduledEvent) {
+        self.events.push_back(event);
+    }
+
+    pub fn run(&mut self, events: &mut GuiEventQueue) {
+        let elapsed = self.last_run.elapsed();
+        self.last_run = Instant::now();
+
+        let duration_millis = elapsed.as_millis() as u64;
+
+        for event in self.events.iter_mut() {
+            event.ms_accum += duration_millis;
+
+            if event.ms_accum >= event.time {
+                event.ms_accum -= event.time;
+
+                match event.event {
+                    GuiEvent::PollStatus => {
+                        events.push(GuiEvent::PollStatus);
+                    }
+                    _ => {}
+                }
             }
         }
     }

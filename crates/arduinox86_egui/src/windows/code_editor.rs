@@ -20,48 +20,29 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+use crate::events::{GuiEvent, GuiEventQueue};
 use egui::TextBuffer;
 use egui_extras::syntax_highlighting::SyntectSettings;
-use syntect::parsing::{SyntaxSet, SyntaxSetBuilder};
 
 pub struct CodeEditor {
+    icon_size: f32,
+    program_name: String,
     language: String,
     code: String,
     open: bool,
-    syntect_settings: SyntectSettings,
-}
 
-impl Default for CodeEditor {
-    fn default() -> Self {
-        CodeEditor::new()
-    }
+    assembler_output: String,
 }
 
 impl CodeEditor {
-    pub fn new() -> Self {
-        let mut ss_builder = SyntaxSetBuilder::new();
-        ss_builder
-            .add_from_folder("./syntax", true)
-            .expect("failed to load syntax definitions");
-
-        for syntax in ss_builder.syntaxes() {
-            log::debug!("Loaded syntax: {}", syntax.name);
-        }
-
-        let syntax_set = ss_builder.build();
-
+    pub fn new(program_name: &str) -> Self {
         Self {
+            icon_size: 24.0,
+            program_name: program_name.to_string(),
             language: "asm".to_string(),
-            code: "\
-                nop\n\
-                mov ax, 0x1234\n\
-                hlt\n"
-                .to_string(),
+            code: "hlt\n".to_string(),
             open: false,
-            syntect_settings: SyntectSettings {
-                ps: syntax_set,
-                ts: syntect::highlighting::ThemeSet::load_defaults(),
-            },
+            assembler_output: "".to_string(),
         }
     }
 
@@ -73,14 +54,54 @@ impl CodeEditor {
         &mut self.open
     }
 
-    pub fn show(&mut self, e_ctx: &egui::Context) {
+    pub fn program_name(&self) -> &str {
+        &self.program_name
+    }
+
+    pub fn set_assembler_output(&mut self, output: &str) {
+        self.assembler_output = output.to_string();
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn set_code(&mut self, code: String) {
+        self.code = code;
+    }
+
+    pub fn show(&mut self, e_ctx: &egui::Context, syntect_settings: &SyntectSettings, events: &mut GuiEventQueue) {
         if !self.open {
             return;
         }
-        egui::Window::new("Code Editor")
+        egui::Window::new(format!("Code Editor: {}", self.program_name))
             .default_width(400.0)
             .default_height(300.0)
             .show(e_ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button(
+                                egui::RichText::new(format!("{}", egui_phosphor::regular::CALCULATOR))
+                                    .size(self.icon_size),
+                            )
+                            .on_hover_text("Assemble")
+                            .clicked()
+                        {
+                            events.push(GuiEvent::AssembleProgram {
+                                program_name: self.program_name.clone(),
+                            });
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Program Name:");
+                        ui.text_edit_singleline(&mut self.program_name);
+                    });
+
+                    ui.separator();
+                });
+
                 let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
 
                 let mut layouter = |ui: &egui::Ui, buf: &dyn TextBuffer, wrap_width: f32| {
@@ -90,23 +111,66 @@ impl CodeEditor {
                         &theme,
                         buf.as_str(),
                         &self.language,
-                        &self.syntect_settings,
+                        syntect_settings,
                     );
                     layout_job.wrap.max_width = wrap_width;
                     ui.fonts(|f| f.layout_job(layout_job))
                 };
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.code)
-                            .font(egui::TextStyle::Monospace) // for cursor height
-                            .code_editor()
-                            .desired_rows(10)
-                            .lock_focus(true)
-                            .desired_width(f32::INFINITY)
-                            .layouter(&mut layouter),
-                    );
-                });
+                let mut max_scroll_height = ui.available_rect_before_wrap().height();
+                if !self.assembler_output.is_empty() {
+                    max_scroll_height -= 200.0; // Reserve space for assembler output
+                }
+
+                egui::ScrollArea::vertical()
+                    .max_height(max_scroll_height)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.code)
+                                .font(egui::TextStyle::Monospace) // for cursor height
+                                .code_editor()
+                                .desired_rows(40)
+                                .lock_focus(true)
+                                .desired_width(f32::INFINITY)
+                                .layouter(&mut layouter),
+                        );
+                    });
+
+                if !self.assembler_output.is_empty() {
+                    ui.separator();
+
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Assembler Output:");
+                        });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            if ui
+                                .button(egui::RichText::new("❌").size(18.0))
+                                .on_hover_text("Clear")
+                                .clicked()
+                            {
+                                self.assembler_output = "".to_string();
+                            }
+                        });
+                    });
+
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("error")
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.assembler_output.as_str())
+                                    .font(egui::TextStyle::Monospace) // for cursor height
+                                    .code_editor()
+                                    .desired_rows(20)
+                                    .lock_focus(true)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                }
             });
     }
 }

@@ -29,7 +29,7 @@
 
 */
 
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct TabGroup {
     tab_labels:   Vec<String>,
     selected_tab: usize,

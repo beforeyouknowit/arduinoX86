@@ -45,6 +45,7 @@ pub struct ClientContext {
     pub(crate) client_state: ClientControlState,
     pub(crate) client: CpuClient,
     pub(crate) cpu_type: ServerCpuType,
+    server_flags: u32,
     pub(crate) queue_status: bool,
     pub(crate) program_state: ProgramState,
 
@@ -76,12 +77,14 @@ impl ClientContext {
         let initial_state = RemoteCpuState { regs: initial_regs };
 
         let program_state = client.get_program_state()?;
+        let server_flags = client.get_flags()?;
 
         Ok(Self {
             port_name,
             client_state: ClientControlState::Setup,
             client,
             cpu_type,
+            server_flags,
             queue_status,
             program_state,
             initial_state,
@@ -115,6 +118,11 @@ impl ClientContext {
         Ok(writer.into_inner())
     }
 
+    pub fn erase_memory(&mut self) -> Result<()> {
+        self.client.erase_memory().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn set_flag_state(&mut self, flag: u32, state: bool) -> Result<bool> {
         let mut flags = self.client.get_flags()?;
         if state {
@@ -124,6 +132,15 @@ impl ClientContext {
             flags &= !flag;
         }
         self.client.set_flags(flags)?;
+        self.server_flags = flags;
         Ok(state)
+    }
+
+    pub fn cached_flag_state(&self, flag: u32) -> bool {
+        self.server_flags & flag != 0
+    }
+
+    pub fn cached_flags(&self) -> u32 {
+        self.server_flags
     }
 }

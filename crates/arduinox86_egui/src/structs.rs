@@ -20,7 +20,10 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::enums::{BinaryBlobType, MountAddress};
+use crate::{
+    enums::{BinaryBlobType, MountAddress, ScheduleType},
+    events::GuiEvent,
+};
 use std::path::Path;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
@@ -71,5 +74,26 @@ impl BinaryBlob {
 
     pub fn mount_address(&self) -> MountAddress {
         self.mount_address
+    }
+    pub fn set_mount_address(&mut self, mount_address: MountAddress) {
+        self.mount_address = mount_address;
+    }
+}
+
+pub struct ScheduledEvent {
+    pub s_type: ScheduleType,
+    pub event: GuiEvent,
+    pub time: u64,     // time to trigger in milliseconds
+    pub ms_accum: u64, // accumulated time in milliseconds
+}
+
+impl ScheduledEvent {
+    pub fn new(s_type: ScheduleType, event: GuiEvent, time: u64) -> Self {
+        Self {
+            s_type,
+            event,
+            time,
+            ms_accum: 0,
+        }
     }
 }
