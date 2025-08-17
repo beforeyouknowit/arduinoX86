@@ -767,7 +767,14 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
     if (load_timeout > LOAD_TIMEOUT) {
       // Something went wrong in load program
-      Controller.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_load(): Load timeout!  Address latch: %08X\n\r", CPU.address_latch() );
+      Controller.getBoard().debugPrintf(
+        DebugType::ERROR, 
+        false, 
+        "## cmd_load(): Load timeout after %d cycles!  Address latch: %08X\n\r", 
+        LOAD_TIMEOUT, 
+        CPU.address_latch()
+      );
+      change_state(ServerState::Error);
       set_error("Load timeout");
       return false;
     }
@@ -777,7 +784,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
   DEBUG_SERIAL.print(".");
 #endif
 
-  Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Load done!");
+  Controller.getBoard().debugPrintf(DebugType::LOAD, false, "## cmd_load(): Load done after %d cycles!\n\r", load_timeout);
   debug_proto("LOAD DONE");
   return true;
 }

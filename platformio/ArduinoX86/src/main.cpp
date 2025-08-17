@@ -1227,9 +1227,7 @@ void cycle() {
       break;
 
     case ServerState::Error:
-      if (CPU.error_cycle_ct < MAX_ERROR_CYCLES) {
-        print_cpu_state();
-      }
+      print_cpu_state();
       break;
   }
 
@@ -2528,4 +2526,11 @@ void loop() {
     //   ArduinoX86::Server.change_state(ServerState::Error);
     // }
   }
+  else if ((ArduinoX86::Server.get_state() == ServerState::Error) && (CPU.error_cycle_ct < MAX_ERROR_CYCLES)) {
+    // If we are in error state, we still want to cycle the CPU to allow it to
+    // process the error.
+    CPU.error_cycle_ct++;
+    cycle();
+  }
+
 }

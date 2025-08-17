@@ -50,7 +50,7 @@ void cycle();
 #define ADDRESS_SPACE_MASK 0x3FFFFF // 4MB address space for 80286
 #define WRITE_CYCLE T2
 #define STORE_TIMEOUT 3000
-#define LOAD_TIMEOUT 5000
+#define LOAD_TIMEOUT 25000
 
 // ------------------------- CPU Control pins ---------------------------------
 #define CLK_PIN 4
