@@ -1,0 +1,21 @@
+     1                                  ; cpu_setup_386ex.asm
+     2                                  cpu	386
+     3                                  org	0h
+     4                                  
+     5                                  start:
+     6 00000000 E9(00FF)                    jmp   -100h
+     7 00000003 90<rep 8h>                  times 8 nop
+     8 0000000B B80080                      mov   ax, 08000H    ; Enable expanded I/O space
+     9 0000000E E623                        out   23H, al       ; unlock the re-map bits
+    10 00000010 86C4                        xchg  al, ah
+    11 00000012 E622                        out   22H, al       ; Knock on the port
+    12 00000014 E722                        out   22H, ax       ; Knock again with 16-bits to set
+    13 00000016 BA38F4                      mov   dx, 0F438h
+    14 00000019 B88003                      mov   ax, 0380h
+    15 0000001C EF                          out   dx, ax
+    16 0000001D BA3EF4                      mov   dx, 0F43Eh
+    17 00000020 B80000                      mov   ax, 0
+    18 00000023 EF                          out   dx, ax
+    19 00000024 B80100                      mov   ax, 1
+    20 00000027 BA3CF4                      mov   dx, 0F43Ch
+    21 0000002A EF                          out   dx, ax
