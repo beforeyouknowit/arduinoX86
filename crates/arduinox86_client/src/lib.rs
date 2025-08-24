@@ -1238,6 +1238,10 @@ impl CpuClient {
         let cycle_count = u32::from_le_bytes([param_buf[0], param_buf[1], param_buf[2], param_buf[3]]);
         let data_size = u32::from_le_bytes([param_buf[4], param_buf[5], param_buf[6], param_buf[7]]);
 
+        if cycle_count == 0 {
+            return Ok(Vec::new());
+        }
+
         let struct_size = data_size / cycle_count;
         let mut receive_buf = vec![0; data_size as usize];
         self.recv_buf(&mut receive_buf)?;
