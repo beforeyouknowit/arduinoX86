@@ -726,7 +726,7 @@ void cycle() {
 
   // Resolve data bus from last cycle.
   if (!CPU.data_bus_resolved && (!Controller.readMRDCPin() || !Controller.readIORCPin())) {
-    Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
+    //Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);
   }
 
@@ -744,7 +744,7 @@ void cycle() {
   // Save last address bus value for skipped bus cycle detection.
   CPU.last_address_bus = CPU.address_bus;
   CPU.address_bus = Controller.readAddressBus(false);
-  CPU.data_bus = Controller.readDataBus(CPU.data_width, true);
+  //CPU.data_bus = Controller.readDataBus(CPU.data_width, true);
 
   CycleState cycle_state;
   
@@ -777,7 +777,7 @@ void cycle() {
   // reference the address of the bus cycle later, we must latch it.
   if (Controller.readALEPin()) {
     // ALE signals start of bus cycle, so set cycle to t1.
-    Controller.getBoard().debugPrintln(DebugType::TSTATE, "## ALE is high, setting T-cycle to T1 ##");
+    //Controller.getBoard().debugPrintln(DebugType::TSTATE, "## ALE is high, setting T-cycle to T1 ##");
     
     CPU.bus_cycle = T1;
     // Address lines are only valid when ALE is high, so latch address now.
@@ -1258,7 +1258,7 @@ void cycle() {
   // Tc.
   if (Controller.readALEPin() && CPU.wait_states > 0) {
     // Lower READY line on ALE.
-    Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state requested ##");
+    //Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state requested ##");
     Controller.writePin(OutputPin::Ready, false);
     CPU.wait_state_ct = 0;
   }
