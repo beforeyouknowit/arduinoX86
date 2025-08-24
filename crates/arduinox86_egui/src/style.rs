@@ -110,7 +110,7 @@ pub fn custom_style() -> Style {
                 },
                 hovered: WidgetVisuals {
                     bg_fill: Color32::from_rgba_premultiplied(70, 70, 70, 255),
-                    weak_bg_fill: Color32::from_rgba_premultiplied(70, 70, 70, 255),
+                    weak_bg_fill: Color32::from_rgba_premultiplied(104, 104, 104, 255),
                     bg_stroke: Stroke {
                         width: 1.0,
                         color: Color32::from_rgba_premultiplied(150, 150, 150, 255),

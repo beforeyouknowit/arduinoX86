@@ -73,6 +73,11 @@ InlineProgram LOAD_PROGRAM_386("LOAD_386", {
   0x0F, 0x07, // LOADALL 386
 });
 
+InlineProgram LOAD_PROGRAM_SMM_386("LOAD_SMM_386", {
+  0x0F, 0xAA, // RSM 
+  0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // NOPS to fill prefetch queue
+});
+
 // CPU/FPU ID program.
 // FPU detection is performed by issuing a `fnstcw` instruction followed by wait.
 // If a write of 0x03FF is detected, then a FPU is present.

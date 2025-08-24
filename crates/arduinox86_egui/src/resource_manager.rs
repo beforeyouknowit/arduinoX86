@@ -44,6 +44,16 @@ impl ResourceManager {
         Ok(view)
     }
 
+    pub fn update_blob(&mut self, blob_name: &str, new_data: &[u8]) -> Result<()> {
+        if !self.blob_exists(blob_name) {
+            return Err(anyhow::anyhow!("Blob with name '{}' does not exist.", blob_name));
+        }
+        if let Some(blob) = self.blobs.iter_mut().find(|b| b.name == blob_name) {
+            blob.data = new_data.to_vec();
+        }
+        Ok(())
+    }
+
     pub fn remove_blob(&mut self, blob_name: &str) -> Result<()> {
         if !self.blob_exists(blob_name) {
             return Err(anyhow::anyhow!("Blob with name '{}' does not exist.", blob_name));

@@ -46,6 +46,8 @@
 #define MEMORY_SIZE (0x10000) // 64KB for other boards
 #endif
 
+#define SMRAM_SIZE 512
+
 // Maximum number of bus operations to record
 static const size_t BUS_LOGGER_MAX_OPS = 256;
 
@@ -180,14 +182,29 @@ public:
     //logger_.log({isFetch ? BusOperationType::CodeFetch16 : BusOperationType::MemRead16, address, val});
     return val;
   }
-  uint16_t mem_read_bus(uint32_t address, bool bhe, bool isFetch) {
-    uint16_t val = backend_->read_bus(address, bhe);
+  uint16_t mem_read_bus(uint32_t address, bool bhe, bool isFetch, bool smi_act = false) {
+    uint16_t val;
+    if (smi_act && (address >= (SMRAM_END - sizeof (SmmDump386))) && (address < SMRAM_END)) {
+      // Read from SMRAM.
+      size_t offset = (SMRAM_END - 4) - (address & ~0x03); // Align to 4-byte aligned dwords, decreasing addresses from SMRAM_END
+      size_t sub_offset = ((address & 0x03) != 0) ? 1 : 0; // Adjust for stack order for "high" words
+      if (offset < sizeof(SmmDump386)) {
+        uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&smm_dump386_) + (offset / 2) + sub_offset;
+        val = *reg_ptr;
+      }
+    }
+    else {
+      // Normal read
+      val = backend_->read_bus(address, bhe);
+    }
+    
     logger_.log({
       isFetch ? BusOperationType::CodeFetch16 : BusOperationType::MemRead16, 
       bus_width(address, bhe), 
       address, 
       val
     });
+
     return val;
   }
   uint8_t *get_ptr(uint32_t address) {
@@ -202,11 +219,12 @@ public:
     backend_->write_u16(address, value);
     //logger_.log({BusOperationType::MemWrite16, address, value});
   }
-  void mem_write_bus(uint32_t address, uint16_t value, bool bhe) {
-    backend_->write_bus(address, value, bhe);
+  void mem_write_bus(uint32_t address, uint16_t value, bool bhe, bool smi_act = false) {
+    
     logger_.log({BusOperationType::MemWrite16, bus_width(address, bhe), address, value});
 
   #if defined(CPU_286)
+    backend_->write_bus(address, value, bhe);
     // Write to loadall286 registers if address matches
     if ((address >= LOADALL_286_ADDRESS) && (address < (LOADALL_286_ADDRESS + sizeof(Loadall286) - 1))) {
       size_t offset = address - LOADALL_286_ADDRESS;
@@ -219,14 +237,21 @@ public:
     // Write to SmmDump386 registers if address matches
     // The SMM dump is written in stack order (decreasing addresses). So we need a little bit of 
     // logic to write the structure in forward order.
-    if ((address >= (SMRAM_END - sizeof (SmmDump386))) && (address < SMRAM_END)) {
+    if (smi_act && (address >= (SMRAM_END - sizeof (SmmDump386))) && (address < SMRAM_END)) {
       size_t offset = (SMRAM_END - 4) - (address & ~0x03); // Align to 4-byte aligned dwords, decreasing addresses from SMRAM_END
       size_t sub_offset = ((address & 0x03) != 0) ? 1 : 0; // Adjust for stack order for "high" words
       if (offset < sizeof(SmmDump386)) {
+        DEBUG_SERIAL.println("## BusEmulator: Writing to SmmDump386 register");
         uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&smm_dump386_) + (offset / 2) + sub_offset;
         *reg_ptr = value;
       }
     }
+    else {
+      // Normal write
+      backend_->write_bus(address, value, bhe);
+    }
+  #else 
+    backend_->write_bus(address, value, bhe);
   #endif
   }
 
@@ -267,7 +292,6 @@ public:
         *reg_ptr = value;
       }
     }
-
   }
 
   void halt(uint32_t address) {
@@ -337,9 +361,9 @@ public:
   }
 
 private:
-  IBusBackend* backend_;
-  BusLogger   logger_;
-  CpuType cpu_type_ = CpuType::Undetected; // Default CPU type
+  IBusBackend*  backend_;
+  BusLogger     logger_;
+  CpuType       cpu_type_ = CpuType::Undetected; // Default CPU type
 
   // Keep a shadow of Loadall registers.
   Loadall286 loadall286_regs_;

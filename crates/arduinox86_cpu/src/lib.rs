@@ -980,7 +980,7 @@ impl RemoteCpu<'_> {
             }
 
             // MRDC status is active-low.
-            if ((self.command_status & COMMAND_MRDC_BIT) == 0) && (self.t_state == TState::T2) {
+            if ((self.command_status & ServerCycleState::COMMAND_MRDC_BIT) == 0) && (self.t_state == TState::T2) {
                 let mut write_store = false;
                 let a0 = self.a0();
 
@@ -1059,7 +1059,7 @@ impl RemoteCpu<'_> {
             }
 
             // MWTC status is active-low.
-            if (self.command_status & COMMAND_MWTC_BIT) == 0 {
+            if (self.command_status & ServerCycleState::COMMAND_MWTC_BIT) == 0 {
                 // CPU is writing to memory. Get data bus from CPU and write to host memory.
                 self.data_bus = self.client.read_data_bus().expect("Failed to read data bus.");
 
@@ -1067,7 +1067,7 @@ impl RemoteCpu<'_> {
             }
 
             // IOWC status is active-low.
-            if (self.command_status & COMMAND_IOWC_BIT) == 0 {
+            if (self.command_status & ServerCycleState::COMMAND_IOWC_BIT) == 0 {
                 // CPU is writing to IO address.
 
                 self.data_bus = self.client.read_data_bus().expect("Failed to read data bus.");
@@ -1234,7 +1234,7 @@ impl RemoteCpu<'_> {
     }
 
     pub fn ale(&self) -> bool {
-        self.control_status & CONTROL_ALE_BIT == 1
+        self.control_status & ServerCycleState::CONTROL_ALE_BIT == 1
     }
 
     /// Return whether the BHE signal is asserted (active-low)
@@ -1304,7 +1304,7 @@ impl RemoteCpu<'_> {
         };
 
         let intr_chr = if self.intr { 'R' } else { '.' };
-        let inta_chr = if self.command_status & COMMAND_INTA_BIT == 0 {
+        let inta_chr = if self.command_status & ServerCycleState::COMMAND_INTA_BIT == 0 {
             'A'
         }
         else {
@@ -1539,10 +1539,11 @@ impl RemoteCpu<'_> {
         // Reset the CPU state
         use ProgramState::*;
         let mut state = self.client.get_program_state().map_err(|e| e.to_string())?;
-        while !matches!(state, StoreDone | Shutdown | Error) {
+        while !matches!(state, StoreDone | StoreDoneSmm | Shutdown | Error) {
             // Sleep for a little bit so we're not spamming the Arduino.
             std::thread::sleep(std::time::Duration::from_millis(self.run_opts.polling_sleep.into()));
             state = self.client.get_program_state().map_err(|e| e.to_string())?;
+            log::debug!("Program state: {:?}", state);
         }
 
         if matches!(state, Shutdown | Error) {

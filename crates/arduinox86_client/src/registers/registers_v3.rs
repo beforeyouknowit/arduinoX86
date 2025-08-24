@@ -20,7 +20,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{Registers32, RemoteCpuRegistersV1, RemoteCpuRegistersV2, SegmentDescriptorV1};
+use crate::Registers32;
 use std::io::{Seek, Write};
 
 use crate::registers_common::RandomizeOpts;
@@ -241,7 +241,7 @@ macro_rules! impl_registers32 {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum RemoteCpuRegistersV3 {
     A(RemoteCpuRegistersV3A),
     B(RemoteCpuRegistersV3B),
@@ -417,7 +417,7 @@ impl RemoteCpuRegistersV3 {
 
 #[binrw]
 #[brw(little)]
-#[derive(Clone, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct SegmentDescriptorV2 {
     pub access:  u32,
     pub address: u32,
@@ -465,7 +465,7 @@ fn read_descriptor_v2(slice: &[u8], index: usize) -> SegmentDescriptorV2 {
 /// This structure is loaded via the LOADALL instruction, 0F 05.
 #[binrw]
 #[brw(little)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RemoteCpuRegistersV3A {
     pub cr0: u32,    // +00
     pub eflags: u32, // +04
@@ -834,7 +834,7 @@ fn parse_v3a(buf: &[u8]) -> Result<RemoteCpuRegistersV3A, &'static str> {
 /// This structure is loaded via the LOADALL instruction, 0F 05.
 #[binrw]
 #[brw(little)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RemoteCpuRegistersV3B {
     pub cr0: u32,
     pub cr3: u32,
@@ -955,6 +955,54 @@ impl RemoteCpuRegistersV3B {
     /// Calculate the code address based on CS descriptor and EIP
     pub fn calculate_code_address(&self) -> u32 {
         self.cs_desc.address + self.eip
+    }
+}
+
+impl From<&RemoteCpuRegistersV3A> for RemoteCpuRegistersV3B {
+    fn from(regs: &RemoteCpuRegistersV3A) -> RemoteCpuRegistersV3B {
+        RemoteCpuRegistersV3B {
+            cr0: regs.cr0,
+            cr3: 0,
+            eflags: regs.eflags,
+            eip: regs.eip,
+            edi: regs.edi,
+            esi: regs.esi,
+            ebp: regs.ebp,
+            esp: regs.esp,
+            ebx: regs.ebx,
+            edx: regs.edx,
+            ecx: regs.ecx,
+            eax: regs.eax,
+            dr6: regs.dr6,
+            dr7: regs.dr7,
+            tr: regs.tr,
+            tr_pad: regs.tr_pad,
+            ldt: regs.ldt,
+            ldt_pad: regs.ldt_pad,
+            gs: regs.gs,
+            gs_pad: regs.gs_pad,
+            fs: regs.fs,
+            fs_pad: regs.fs_pad,
+            ds: regs.ds,
+            ds_pad: regs.ds_pad,
+            ss: regs.ss,
+            ss_pad: regs.ss_pad,
+            cs: regs.cs,
+            cs_pad: regs.cs_pad,
+            es: regs.es,
+            es_pad: regs.es_pad,
+
+            tss_desc: regs.tss_desc,
+            idt_desc: regs.idt_desc,
+            gdt_desc: regs.gdt_desc,
+            ldt_desc: regs.ldt_desc,
+            gs_desc:  regs.gs_desc,
+            fs_desc:  regs.fs_desc,
+            ds_desc:  regs.ds_desc,
+            ss_desc:  regs.ss_desc,
+            cs_desc:  regs.cs_desc,
+            es_desc:  regs.es_desc,
+        }
     }
 }
 

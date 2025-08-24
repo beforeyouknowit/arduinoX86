@@ -48,10 +48,13 @@ impl RegisterWindow {
         &mut self.open
     }
 
-    pub fn set_regs(&mut self, registers: &RemoteCpuRegisters) {
-        match registers {
-            RemoteCpuRegisters::V3(regs_v3) => {
-                self.control_v3.set_regs(regs_v3);
+    pub fn set_regs(&mut self, initial_regs: &RemoteCpuRegisters, final_regs: Option<&RemoteCpuRegisters>) {
+        match (initial_regs, final_regs) {
+            (RemoteCpuRegisters::V3(initial_regs_v3), Some(RemoteCpuRegisters::V3(final_regs_v3))) => {
+                self.control_v3.set_regs(initial_regs_v3, Some(final_regs_v3));
+            }
+            (RemoteCpuRegisters::V3(initial_regs_v3), None) => {
+                self.control_v3.set_regs(initial_regs_v3, None);
             }
             _ => {
                 log::warn!("Unsupported register type for setting.");

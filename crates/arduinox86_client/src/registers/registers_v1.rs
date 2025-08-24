@@ -21,10 +21,13 @@
     DEALINGS IN THE SOFTWARE.
 */
 use crate::RemoteCpuRegistersV2;
+use binrw::binrw;
 
 #[cfg(feature = "use_moo")]
 use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
 
+#[binrw]
+#[brw(little)]
 #[derive(Clone, Default, Debug)]
 pub struct RemoteCpuRegistersV1 {
     pub ax:    u16,

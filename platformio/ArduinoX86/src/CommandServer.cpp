@@ -45,7 +45,17 @@ template<typename BoardType, typename HatType>
 CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatType>& controller_)
   : controller_(controller_)
 {
+
   useSmm_ = USE_SMI;
+  if (useSmm_) {
+    flags_ |= FLAG_USE_SMM;
+    CPU.set_use_smm(useSmm_);
+  }
+  
+
+  if (controller_.getBoard().isDebugEnabled()) {
+    flags_ |= FLAG_DEBUG_ENABLED;
+  }
 }
 
 
@@ -81,13 +91,15 @@ void CommandServer<BoardType,HatType>::run()
 
         // Valid command, enter ReadingCommand state
         cmd_ = static_cast<ServerCommand>(cmd_byte);
-        controller_.getBoard().debugPrintf(
-          DebugType::CMD, 
-          false, 
-          "## CMD: Received command byte: %02X (%s)\n\r", 
-          cmd_byte, 
-          get_command_name(cmd_)
-        );
+        if (cmd_ != ServerCommand::CmdServerStatus) {
+          controller_.getBoard().debugPrintf(
+            DebugType::CMD, 
+            false, 
+            "## CMD: Received command byte: %02X (%s)\n\r", 
+            cmd_byte, 
+            get_command_name(cmd_)
+          );
+        }
 
         size_t command_bytes = get_command_input_bytes(cmd_);
 
@@ -207,6 +219,7 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
       case ServerCommand::CmdReadMemory: return "CmdReadMemory";
       case ServerCommand::CmdEraseMemory: return "CmdEraseMemory";
       case ServerCommand::CmdServerStatus: return "CmdServerStatus";
+      case ServerCommand::CmdClearCycleLog: return "CmdClearCycleLog";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -220,6 +233,7 @@ const char* CommandServer<BoardType, HatType>::get_state_string(ServerState stat
       case ServerState::CpuSetup: return "CpuSetup";
       case ServerState::JumpVector: return "JumpVector";
       case ServerState::Load: return "Load";
+      case ServerState::LoadSmm: return "LoadSmm";
       case ServerState::LoadDone: return "LoadDone";
       case ServerState::EmuEnter: return "EmuEnter";
       case ServerState::Prefetch: return "Prefetch";
@@ -229,6 +243,7 @@ const char* CommandServer<BoardType, HatType>::get_state_string(ServerState stat
       case ServerState::EmuExit: return "EmuExit";
       case ServerState::Store: return "Store";
       case ServerState::StoreDone: return "StoreDone";
+      case ServerState::StoreDoneSmm: return "StoreDoneSmm";
       case ServerState::Done: return "Done";
       case ServerState::StoreAll: return "StoreAll";
       case ServerState::Shutdown: return "Shutdown";
@@ -245,6 +260,7 @@ char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
       case ServerState::CpuSetup: return 'C';
       case ServerState::JumpVector: return 'J';
       case ServerState::Load: return 'L';
+      case ServerState::LoadSmm: return 'L';
       case ServerState::LoadDone: return 'M';
       case ServerState::EmuEnter: return '8';
       case ServerState::Prefetch: return 'P';
@@ -348,6 +364,8 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
         return cmd_erase_memory();
     case ServerCommand::CmdServerStatus:
         return cmd_server_status();
+    case ServerCommand::CmdClearCycleLog:
+        return cmd_clear_cycle_log();
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -421,6 +439,7 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
         case ServerCommand::CmdReadMemory: return 8; // Parameters: address (4 bytes) and size (4 bytes).
         case ServerCommand::CmdEraseMemory: return 0;
         case ServerCommand::CmdServerStatus: return 0;
+        case ServerCommand::CmdClearCycleLog: return 0; // No parameters needed to clear cycle log
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -490,6 +509,17 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       else {
         CPU.program = &LOAD_PROGRAM;
         CPU.program->set_pc(2); // Set pc to 2 to skip flag bytes
+      }
+      break;
+    case ServerState::LoadSmm:
+      CPU.loadall_checkpoint = 0;
+      if (CPU.cpu_type == CpuType::i80386) {
+        // Use LOADALL instead of load program on 386.
+        CPU.program = &LOAD_PROGRAM_SMM_386;
+        CPU.program->reset();
+      }
+      else {
+        controller_.getBoard().debugPrintln(DebugType::ERROR, "LoadSmm state invalid for this CPU.");
       }
       break;
     case ServerState::LoadDone:
@@ -566,6 +596,8 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
       break;
     case ServerState::StoreDone:
       break;  
+    case ServerState::StoreDoneSmm:
+      break;
     case ServerState::Done:
       break;
     case ServerState::Shutdown:
@@ -670,7 +702,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
   volatile uint8_t *read_p = nullptr;
   uint8_t reg_type = commandBuffer_[0];
   bool read_result = false;
-
+  bool reset_cpu = true;
   switch (reg_type) {
     case 0:
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 8088-80186");
@@ -696,7 +728,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
       CPU.load_regs.flags &= CPU_FLAG_DEFAULT_CLEAR_8086;
       CPU.load_regs.flags |= CPU_FLAG_DEFAULT_SET_8086;
-    break;
+      break;
 
     case 1:
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 80286 (LOADALL)");
@@ -715,7 +747,7 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
       CPU.loadall_regs_286.flags &= CPU_FLAG_DEFAULT_CLEAR_286;
       CPU.loadall_regs_286.flags |= CPU_FLAG_DEFAULT_SET_286;
-    break;
+      break;
 
     case 2:
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Reading register struct type: 80386 (LOADALL)");
@@ -734,34 +766,69 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
       CPU.loadall_regs_386.eflags &= CPU_FLAG_DEFAULT_CLEAR_386;
       CPU.loadall_regs_386.eflags |= CPU_FLAG_DEFAULT_SET_386;
-    break;
+      break;
 
+    case 3:
+      {
+        // SMM register load for 386. We must be in StoreDoneSmm state!
+        if (state_ != ServerState::StoreDoneSmm) {
+          ArduinoX86::Server.change_state(ServerState::Error);
+          set_error("SMM register load requires StoreDoneSmm state");
+          return false;
+        }
+
+        Controller.getBoard().debugPrintf(
+          DebugType::LOAD, 
+          false, 
+          "## cmd_load(): Reading register struct type: 80386 (SMM), size: %ld\n\r", 
+          sizeof(SmmDump386)
+        );
+        read_result = readParameterBytes(commandBuffer_, sizeof(commandBuffer_), sizeof(SmmDump386));
+        if (!read_result) {
+          Controller.getBoard().debugPrintln(DebugType::ERROR, "## cmd_load(): Timed out reading parameter bytes");
+          set_error("Failed to read parameter bytes");
+          return false;
+        }
+
+        SmmDump386* smm_dump = &ArduinoX86::Bus->smm_dump386_regs();
+
+        // Write raw command bytes over register struct.
+        memcpy((void *)smm_dump, (void*)commandBuffer_, sizeof(SmmDump386));
+
+        // Unlike other register loads, we do not reset the CPU when leaving SMM.
+        reset_cpu = false;
+        ArduinoX86::Server.change_state(ServerState::LoadSmm);
+      }
+      break;
+      
     default:
       set_error("Invalid register type");
       return false;
       break;
   }
 
-  ArduinoX86::Server.change_state(ServerState::Reset);
-  CpuResetResult result = Controller.resetCpu();
-  CPU.reset(result, true);
-  if (!result.success) {
-    //set_error("Failed to reset CPU");
-    Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
-    return false;
-  }
-  Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Successfully reset CPU...");
-  CPU.have_queue_status = result.queueStatus;
+  if (reset_cpu) {
+    ArduinoX86::Server.change_state(ServerState::Reset);
+    CpuResetResult result = Controller.resetCpu();
+    CPU.reset(result, true);
+    if (!result.success) {
+      //set_error("Failed to reset CPU");
+      Controller.getBoard().debugPrintln(DebugType::ERROR, "Failed to reset CPU!");
+      return false;
+    }
+    Controller.getBoard().debugPrintln(DebugType::LOAD, "## cmd_load(): Successfully reset CPU...");
+    CPU.have_queue_status = result.queueStatus;
 
 #if USE_SETUP_PROGRAM
-  change_state(ServerState::CpuSetup);
+    change_state(ServerState::CpuSetup);
 #else
-  change_state(ServerState::JumpVector);
+    change_state(ServerState::JumpVector);
 #endif
+  }
 
   // Run CPU and wait for load to finish
   int load_timeout = 0;
-  while (state_ != ServerState::Execute) {
+  while ((state_ != ServerState::Execute) && (state_ != ServerState::Error)) {
     cycle();
     load_timeout++;
 
@@ -873,6 +940,7 @@ bool CommandServer<BoardType, HatType>::cmd_write_data_bus() {
   CPU.data_type = QueueDataType::Program;
 
   Controller.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_write_data_bus(): Writing to data bus: %04X\n\r", CPU.data_bus);
+  Controller.writeDataBus(CPU.data_bus, ActiveBusWidth::Sixteen);
   return true;
 }
 
@@ -991,7 +1059,7 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
 
   if (flags_ & FLAG_EXECUTE_AUTOMATIC) {
     // In automatic mode, Store command is only valid in StoreDone state.
-    if (state_ != ServerState::StoreDone) {
+    if ((state_ != ServerState::StoreDone) && (state_ != ServerState::StoreDoneSmm)) {
       controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: Wrong state: %s", get_state_string(state_));
       set_error("## STORE: Wrong state: %s", get_state_string(state_));
       return false;
@@ -1023,6 +1091,7 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
             INBAND_SERIAL.write((uint8_t)3);
             // Write the registers in the V3B format.
             SmmDump386 smm386 = ArduinoX86::Bus->smm_dump386_regs();
+            controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: AX is %04X\n\r", smm386.eax & 0xFFFF);
             smm386.normalize_flags();
             write_len = INBAND_SERIAL.write((uint8_t *)&smm386, sizeof(SmmDump386));
             controller_.getBoard().debugPrintf(
@@ -1041,7 +1110,7 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
             controller_.getBoard().debugPrintf(
               DebugType::STORE, 
               false, 
-              "## STORE: Wrote %d bytes of registers in V3 format.\n\r", 
+              "## STORE: Wrote %d bytes of registers in V3A format.\n\r", 
               write_len
             );
           }
@@ -1504,6 +1573,7 @@ bool CommandServer<BoardType, HatType>::cmd_set_memory_strategy() {
   if (strategy < IBusBackend::DefaultStrategy::Invalid) {
     ArduinoX86::Bus->set_memory_strategy(strategy, start_address, end_address);
     controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_set_memory_strategy(): Set memory strategy to: %d: %06lX %06lX\n\r", strategy, start_address, end_address);
+    set_error("No error");
     return true;
   } else {
     controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_set_memory_strategy(): Invalid memory strategy: %d\n\r", strategy);
@@ -1551,6 +1621,11 @@ bool CommandServer<BoardType, HatType>::cmd_read_memory() {
   }
 
   controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
+  set_error("No error");
+
+  // Send an initial success byte, so that the client knows we are sending data.
+  // Otherwise it doesn't know if the command failed and will have to time out.
+  proto_write((uint8_t *)"\x01", 1);
   proto_write(ptr, size);
   return true;
 }
@@ -1572,6 +1647,13 @@ bool CommandServer<BoardType, HatType>::cmd_server_status() {
   INBAND_SERIAL.write((uint8_t *)&cycle_count, sizeof(cycle_count));
   uint32_t address_latch = CPU.address_latch();
   INBAND_SERIAL.write((uint8_t *)&address_latch, sizeof(address_latch));
+  return true;
+}
+
+template<typename BoardType, typename HatType>
+bool CommandServer<BoardType, HatType>::cmd_clear_cycle_log(){
+  ArduinoX86::CycleLogger->reset();
+  controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_clear_cycle_log(): Cycle log cleared.");
   return true;
 }
 

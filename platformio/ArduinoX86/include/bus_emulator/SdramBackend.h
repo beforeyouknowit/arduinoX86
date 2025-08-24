@@ -29,6 +29,8 @@
 #include <bus_emulator/IBusBackend.h>
 #include <serial_config.h>
 
+#define SMRAM_SIZE 512
+
 class SdramBackend : public IBusBackend {
 public:
   SdramBackend(size_t size, size_t mask)
@@ -227,6 +229,7 @@ private:
   size_t   size_;
   size_t   mask_;
   uint8_t* mem_;
+  uint8_t* smram_;
   uint32_t base_seed_;
   uint32_t strategy_start_ = 0x1024; // Address below which to ignore strategy.
   uint32_t strategy_end_ = 0xFFFFFF; // Address above which to ignore strategy.

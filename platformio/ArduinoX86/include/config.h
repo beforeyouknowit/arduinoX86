@@ -59,10 +59,10 @@
 
 // These defines control tracing and debugging output for each state.
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
-#define TRACE_RESET     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
-#define TRACE_SETUP     ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
+#define TRACE_RESET     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
+#define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
 #define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
-#define TRACE_LOAD      ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
+#define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.
 #define TRACE_EMU_ENTER ((0 | TRACE_ALL) & ~TRACE_NONE)

@@ -96,6 +96,11 @@ impl ClientContext {
         self.client_state
     }
 
+    pub fn program_state(&mut self) -> Result<ProgramState> {
+        self.program_state = self.client.get_program_state()?;
+        Ok(self.program_state)
+    }
+
     pub fn initial_state(&self) -> &RemoteCpuState {
         &self.initial_state
     }

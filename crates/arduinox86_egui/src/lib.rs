@@ -45,3 +45,7 @@ mod window_manager;
 mod windows;
 
 pub use app::App;
+use eframe::epaint::Color32;
+
+pub const DEFAULT_FONT_SIZE: f32 = 14.0;
+pub const TEXT_COLOR: Color32 = Color32::from_rgba_premultiplied(0xda, 0xda, 0xda, 0xff);

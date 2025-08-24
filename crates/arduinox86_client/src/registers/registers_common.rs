@@ -38,7 +38,7 @@ use crate::{
     RemoteCpuRegistersV3B,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum RemoteCpuRegisters {
     V1(RemoteCpuRegistersV1),
     V2(RemoteCpuRegistersV2),
@@ -79,6 +79,16 @@ impl Default for RemoteCpuRegisters {
 }
 
 impl RemoteCpuRegisters {
+    pub fn to_b(&self) -> Option<RemoteCpuRegisters> {
+        match self {
+            RemoteCpuRegisters::V3(RemoteCpuRegistersV3::A(regs_a)) => Some(RemoteCpuRegisters::V3(
+                RemoteCpuRegistersV3::B(RemoteCpuRegistersV3B::from(regs_a)),
+            )),
+            RemoteCpuRegisters::V3(RemoteCpuRegistersV3::B(_)) => Some(self.clone()),
+            _ => None,
+        }
+    }
+
     pub fn set_cs(&mut self, cs: u16) {
         match self {
             RemoteCpuRegisters::V1(regs) => regs.cs = cs,

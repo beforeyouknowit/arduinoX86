@@ -30,12 +30,31 @@ pub struct SerialManager {
 impl SerialManager {
     pub fn new() -> Self {
         SerialManager {
-            ports: serialport::available_ports().unwrap_or_else(|_| vec![]),
+            ports: Self::enumerate_and_filter_ports(),
         }
     }
 
     pub fn refresh(&mut self) {
-        self.ports = serialport::available_ports().unwrap_or_else(|_| vec![]);
+        self.ports = Self::enumerate_and_filter_ports();
+    }
+
+    fn enumerate_and_filter_ports() -> Vec<SerialPortInfo> {
+        serialport::available_ports()
+            .unwrap_or_else(|_| vec![])
+            .into_iter()
+            .filter_map(|p| {
+                // Filter port names containing "USB-to-Serial"
+                if let SerialPortType::UsbPort(info) = &p.port_type {
+                    if let Some(product) = &info.product {
+                        if product.contains("USB-to-Serial") {
+                            return None;
+                        }
+                    }
+                }
+
+                Some(p)
+            })
+            .collect()
     }
 
     pub fn port_display_names(&self) -> Vec<String> {

@@ -44,7 +44,7 @@ use crate::{
     windows::{ClientWindow, MemoryViewer, RegisterWindow},
 };
 use anyhow::{bail, Result};
-use arduinox86_client::{RegisterSetType, RemoteCpuRegisters, ServerFlags};
+use arduinox86_client::{ProgramState, RegisterSetType, RemoteCpuRegisters, ServerFlags, ServerStatus};
 use clap::Parser;
 use egui::{
     containers::menu::{MenuButton, MenuConfig},
@@ -77,13 +77,14 @@ pub struct TransientAppState {
     config: ConfigFile,
     serial_manager: SerialManager,
     resource_manager: ResourceManager,
-
+    last_program_state: Option<ProgramState>,
     selected_serial_port: usize,
 
     client_ctx: Option<ClientContext>,
     client_window: ClientWindow,
     window_manager: WindowManager,
     initial_register_window: RegisterWindow,
+    final_register_window: RegisterWindow,
     memory_viewer_window: MemoryViewer,
     scheduler: Scheduler,
     event_queue: GuiEventQueue,
@@ -478,7 +479,7 @@ impl eframe::App for App {
             let mut new_state = initial_state.clone();
 
             if !self.ts.initial_register_window.open() {
-                self.ts.initial_register_window.set_regs(&initial_state.regs);
+                self.ts.initial_register_window.set_regs(&initial_state.regs, None);
                 *self.ts.initial_register_window.open_mut() = true;
             }
 
@@ -507,6 +508,13 @@ impl eframe::App for App {
                     self.ts.error_msg = Some("Unsupported register type".to_string());
                 }
             }
+
+            self.ts.final_register_window.show(
+                ctx,
+                CpuStateType::Final,
+                RegisterSetType::Intel386,
+                &mut self.ts.event_queue,
+            );
 
             //self.ts.code_editor_window.show(ctx, &mut self.ts.event_queue);
             self.ts.window_manager.show(
@@ -545,32 +553,88 @@ impl App {
         if let Some(client_ctx) = &mut self.ts.client_ctx {
             while let Some(event) = self.ts.event_queue.pop() {
                 match event {
+                    GuiEvent::ResetState => {
+                        self.ts.last_program_state = None;
+                    }
                     GuiEvent::LoadRegisters => {
+                        let program_state = client_ctx.program_state();
+
+                        // Clear automatic execution flag
+                        match client_ctx.set_flag_state(ServerFlags::EXECUTE_AUTOMATIC, false) {
+                            Ok(_) => {
+                                self.gs
+                                    .toasts
+                                    .success("Automatic execution flag cleared.")
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!("Automatic execution flag cleared.");
+                            }
+                            Err(e) => {
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to clear automatic execution flag: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+                                log::error!("Failed to clear automatic execution flag: {}", e);
+                            }
+                        }
+
                         let initial_state = client_ctx.initial_state();
 
                         let mut buf = Cursor::new(Vec::<u8>::new());
 
-                        initial_state.regs.write(&mut buf).unwrap_or_else(|e| {
+                        let mut regs = &initial_state.regs;
+                        let regs_b;
+
+                        if let Ok(ProgramState::StoreDoneSmm) = program_state {
+                            // Try to convert regs to V3B for SMM loading.
+                            log::debug!("Converting registers to V3B for SMM loading.");
+                            if let Some(regs_converted) = regs.to_b() {
+                                regs_b = regs_converted;
+                                regs = &regs_b;
+                            }
+                            else {
+                                log::error!("Failed to convert registers to V3B for SMM loading!");
+                            }
+                        }
+
+                        regs.write(&mut buf).unwrap_or_else(|e| {
                             log::error!("Failed to write registers: {}", e);
                         });
 
-                        if let Err(e) = client_ctx
+                        log::debug!("Wrote {} bytes of register data to buffer.", buf.get_ref().len());
+
+                        match client_ctx
                             .client
-                            .load_registers_from_buf(RegisterSetType::from(&initial_state.regs), buf.get_ref())
+                            .load_registers_from_buf(RegisterSetType::from(regs), buf.get_ref())
                         {
-                            log::error!("Failed to load registers: {}", e);
-                            self.gs
-                                .toasts
-                                .error(format!("Failed to load registers: {}", e))
-                                .duration(LONG_NOTIFICATION_TIME);
-                            self.ts.error_msg = Some(format!("Failed to load registers: {}", e));
+                            Ok(_) => {
+                                log::debug!("Registers loaded successfully.");
+                                self.gs
+                                    .toasts
+                                    .success("Registers loaded successfully!")
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load registers: {}", e);
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to load registers: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+                                self.ts.error_msg = Some(format!("Failed to load registers: {}", e));
+                            }
                         }
-                        else {
-                            log::debug!("Registers loaded successfully.");
-                            self.gs
-                                .toasts
-                                .success("Registers loaded successfully!")
-                                .duration(NORMAL_NOTIFICATION_TIME);
+
+                        match self.ts.client_window.push_cycle(client_ctx, false) {
+                            Ok(_) => {
+                                log::debug!("Pushed CPU cycle successfully.");
+                            }
+                            Err(e) => {
+                                log::error!("Failed to push CPU cycle: {}", e);
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to push CPU cycle: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+                                self.ts.error_msg = Some(format!("Failed to push CPU cycle: {}", e));
+                            }
                         }
                     }
                     GuiEvent::EraseMemory => match client_ctx.erase_memory() {
@@ -694,6 +758,7 @@ impl App {
                     }
                     GuiEvent::AssembleProgram { program_name } => {
                         let mut new_blob = None;
+                        let mut update_blob = None;
                         if let Some(code_editor) = self.ts.window_manager.code_window_mut(&program_name) {
                             let mut assembler = Assembler::default();
 
@@ -704,6 +769,10 @@ impl App {
 
                                         if self.ts.resource_manager.blob_exists(&program_name) {
                                             log::warn!("Blob with name {} already exists, overwriting.", program_name);
+                                            if let Ok(()) = self.ts.resource_manager.update_blob(&program_name, &binary)
+                                            {
+                                                update_blob = Some(binary);
+                                            }
                                         }
                                         else {
                                             new_blob = Some(binary);
@@ -759,6 +828,12 @@ impl App {
                                 }
                             }
                         }
+
+                        if let Some(binary) = update_blob {
+                            if let Some(window) = self.ts.window_manager.blob_window_mut(&program_name) {
+                                window.set_data(&binary);
+                            }
+                        }
                     }
                     GuiEvent::PollStatus => {
                         // Get the server status. This event is scheduled automatically.
@@ -766,6 +841,50 @@ impl App {
                             Ok(status) => {
                                 log::debug!("Server status: {:?}", status);
                                 self.ts.client_window.set_server_status(client_ctx, status);
+
+                                if self.ts.last_program_state.is_none()
+                                    || (Some(status.state) != self.ts.last_program_state)
+                                {
+                                    log::info!("Program state changed: {:?}", status.state);
+
+                                    match status.state {
+                                        ProgramState::StoreDone | ProgramState::StoreDoneSmm => {
+                                            // Get the register file.
+
+                                            match client_ctx.client.store_registers() {
+                                                Ok(final_regs) => {
+                                                    let state = client_ctx.initial_state();
+
+                                                    self.ts
+                                                        .final_register_window
+                                                        .set_regs(&state.regs, Some(&final_regs));
+                                                    *self.ts.final_register_window.open_mut() = true;
+                                                    log::debug!(
+                                                        "Registers updated after program completion: {:?}",
+                                                        final_regs
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    log::error!(
+                                                        "Failed to get registers after program completion: {}",
+                                                        e
+                                                    );
+                                                    self.gs
+                                                        .toasts
+                                                        .error(format!("Failed to get final registers: {}", e))
+                                                        .duration(LONG_NOTIFICATION_TIME);
+                                                    self.ts.error_msg =
+                                                        Some(format!("Failed to get final registers: {}", e));
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // Do other states
+                                        }
+                                    }
+
+                                    self.ts.last_program_state = Some(status.state);
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to get server status: {}", e);
@@ -773,6 +892,23 @@ impl App {
                             }
                         }
                     }
+                    GuiEvent::ClearCycleLog => match client_ctx.client.clear_cycle_log() {
+                        Ok(_) => {
+                            log::debug!("Cycle log cleared successfully.");
+                            self.gs
+                                .toasts
+                                .success("Cycle log cleared successfully!")
+                                .duration(NORMAL_NOTIFICATION_TIME);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to clear cycle log: {}", e);
+                            self.gs
+                                .toasts
+                                .error(format!("Failed to clear cycle log: {}", e))
+                                .duration(LONG_NOTIFICATION_TIME);
+                            self.ts.error_msg = Some(format!("Failed to clear cycle log: {}", e));
+                        }
+                    },
                 }
             }
         }

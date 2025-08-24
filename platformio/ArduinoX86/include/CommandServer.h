@@ -31,23 +31,25 @@
 #include <config.h>
 
 enum class ServerState: uint8_t {
-  Reset = 0x00,
-  CpuId = 0x01,
-  CpuSetup = 0x02,
-  JumpVector = 0x03,
-  Load = 0x04,
-  LoadDone = 0x05,
-  EmuEnter = 0x06,
-  Prefetch = 0x07,
-  Execute = 0x08,
-  ExecuteFinalize = 0x09,
-  ExecuteDone = 0x0A,
-  EmuExit = 0x0B,
-  Store = 0x0C,
-  StoreDone = 0x0D,
-  Done = 0x0E,
-  StoreAll = 0x0F,
-  Shutdown = 0x10,
+  Reset           = 0x00, // The CPU is being reset. Also used as initial state.
+  CpuId           = 0x01, // The CPU ID routine is being executed. 
+  CpuSetup        = 0x02, // The CPU setup routine is being executed. This is used for 186/386EX. 
+  JumpVector      = 0x03, // The Jump Vector routine is being executed. This is used to avoid address wrap during Load.
+  Load            = 0x04, // The register load routine is being executed. 
+  LoadSmm         = 0x05, // The register load routine is being executed via SMM (386EX)
+  LoadDone        = 0x06,
+  EmuEnter        = 0x07,
+  Prefetch        = 0x08,
+  Execute         = 0x09,
+  ExecuteFinalize = 0x0A,
+  ExecuteDone     = 0x0B,
+  EmuExit         = 0x0C,
+  Store           = 0x0D,
+  StoreDone       = 0x0E, // Store has completed. The CPU may need to be reset at this point if STOREALL was executed.
+  StoreDoneSmm    = 0x0F, // Store has completed with SMM enabled. We remain in SMM and can Load registers as we exit.
+  Done            = 0x10,
+  StoreAll        = 0x11, // STOREALL (or SMM on 386) is in progress.
+  Shutdown        = 0x12, // The CPU has shutdown (286/386). The CPU will need to be reset to continue.
   Error
 };
 
@@ -65,7 +67,7 @@ public:
   static constexpr uint32_t FLAG_HALT_AFTER_JUMP    = 0x00000008; // Halt after flow control instruction.
   static constexpr uint32_t FLAG_USE_SDRAM_BACKEND  = 0x00000010; // Use SDRAM as memory backend (requires GIGA)
   static constexpr uint32_t FLAG_USE_SMM            = 0x00000020; // Use SMM for register readout on 386/486 CPUs
-  static constexpr uint32_t FLAG_DEBUG_ENABLED       = 0x00000040; // Enable debug mode
+  static constexpr uint32_t FLAG_DEBUG_ENABLED      = 0x00000040; // Enable debug mode
 
   enum class ServerCommand {
     CmdNone            = 0x00,
@@ -107,6 +109,7 @@ public:
     CmdReadMemory      = 0x24,
     CmdEraseMemory     = 0x25,
     CmdServerStatus    = 0x26,
+    CmdClearCycleLog   = 0x27,
     CmdInvalid
   };
 
@@ -263,5 +266,6 @@ private:
   bool cmd_read_memory(void);
   bool cmd_erase_memory(void);
   bool cmd_server_status(void);
+  bool cmd_clear_cycle_log(void);
   bool cmd_null(void);
 };

@@ -154,6 +154,28 @@ impl WindowManager {
         name
     }
 
+    pub fn blob_window(&self, name: &str) -> Option<&BinaryView> {
+        self.blob_windows.get(name).map(|w| {
+            if let Window::BinaryView { window, .. } = w {
+                window
+            }
+            else {
+                panic!("Expected BinaryView window type");
+            }
+        })
+    }
+
+    pub fn blob_window_mut(&mut self, name: &str) -> Option<&mut BinaryView> {
+        self.blob_windows.get_mut(name).map(|w| {
+            if let Window::BinaryView { window, .. } = w {
+                window
+            }
+            else {
+                panic!("Expected BinaryView window type");
+            }
+        })
+    }
+
     pub fn code_window(&self, name: &str) -> Option<&CodeEditor> {
         self.code_windows.get(name).map(|w| {
             if let Window::CodeEditor { window, .. } = w {

@@ -21,4 +21,5 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+pub mod cycle_display;
 pub mod mount_address_widget;

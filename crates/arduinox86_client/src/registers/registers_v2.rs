@@ -28,7 +28,7 @@ use crate::registers_common::RandomizeOpts;
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
-use binrw::BinReaderExt;
+use binrw::{binrw, BinRead, BinReaderExt, BinWrite};
 use modular_bitfield::{
     bitfield,
     prelude::{B1, B16, B2, B24, B4},
@@ -47,7 +47,10 @@ pub struct SegmentDescriptorAccessByte {
 }
 
 #[bitfield]
-#[derive(Clone, Debug)]
+#[derive(BinRead, BinWrite)]
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[derive(Copy, Clone, Debug)]
 pub struct SegmentDescriptorV1 {
     pub base_address: B24,
     pub d_type: B4,
@@ -79,6 +82,8 @@ impl SegmentDescriptorV1 {
 
 /// [RemoteCpuRegistersV2] is the full set of registers for the Intel 80286.
 /// This structure is loaded via the LOADALL instruction, 0F 05.
+#[binrw]
+#[brw(little)]
 #[derive(Clone, Debug)]
 pub struct RemoteCpuRegistersV2 {
     pub x0: u16,

@@ -22,9 +22,15 @@
 */
 #![allow(dead_code, unused_variables)]
 
+mod cycle_state;
 mod registers;
 
+use binrw::BinReaderExt;
 use log;
+#[cfg(feature = "use_moo")]
+use moo::prelude::MooIvtOrder;
+#[cfg(feature = "use_moo")]
+use moo::types::MooCpuType;
 use std::{
     cell::RefCell,
     fmt::Display,
@@ -33,15 +39,11 @@ use std::{
     str,
 };
 
-#[cfg(feature = "use_moo")]
-use moo::prelude::MooIvtOrder;
-#[cfg(feature = "use_moo")]
-use moo::types::MooCpuType;
-
 use serialport::{ClearBuffer, SerialPort};
 use thiserror::Error;
 
 pub const ARDUINO_BAUD: u32 = 1000000;
+pub use cycle_state::*;
 pub use register_printer::*;
 pub use registers::*;
 
@@ -107,6 +109,7 @@ pub enum ServerCommand {
     CmdReadMemory = 0x24,
     CmdEraseMemory = 0x25,
     CmdGetServerStatus = 0x26,
+    CmdClearCycleLog = 0x27,
     CmdInvalid,
 }
 
@@ -237,7 +240,7 @@ impl ServerCpuType {
 
     pub fn tstate_to_string(&self, state: TState) -> String {
         match self {
-            ServerCpuType::Intel80286 | ServerCpuType::Intel80386 => match state {
+            ServerCpuType::Intel80286 => match state {
                 TState::Ti => "Ti".to_string(),
                 TState::T1 => "Ts".to_string(),
                 TState::T2 => "Tc".to_string(),
@@ -271,6 +274,14 @@ impl ServerCpuType {
             Intel80286 => 6,
             Intel80386 => 6,
             _ => 5,
+        }
+    }
+
+    pub fn data_chr_width(&self) -> usize {
+        use ServerCpuType::*;
+        match self {
+            Intel8088 | NecV20 => 2,
+            _ => 4,
         }
     }
 
@@ -441,6 +452,7 @@ pub enum RegisterSetType {
     Intel8088,
     Intel286,
     Intel386,
+    Intel386Smm,
 }
 
 impl From<&RemoteCpuRegisters> for RegisterSetType {
@@ -448,7 +460,10 @@ impl From<&RemoteCpuRegisters> for RegisterSetType {
         match value {
             RemoteCpuRegisters::V1(_) => RegisterSetType::Intel8088,
             RemoteCpuRegisters::V2(_) => RegisterSetType::Intel286,
-            RemoteCpuRegisters::V3(_) => RegisterSetType::Intel386,
+            RemoteCpuRegisters::V3(v3regs) => match v3regs {
+                RemoteCpuRegistersV3::A(_) => RegisterSetType::Intel386,
+                RemoteCpuRegistersV3::B(_) => RegisterSetType::Intel386Smm,
+            },
         }
     }
 }
@@ -480,6 +495,7 @@ impl From<RegisterSetType> for u8 {
             RegisterSetType::Intel8088 => 0,
             RegisterSetType::Intel286 => 1,
             RegisterSetType::Intel386 => 2,
+            RegisterSetType::Intel386Smm => 3,
         }
     }
 }
@@ -493,6 +509,7 @@ pub enum ProgramState {
     CpuSetup,
     JumpVector,
     Load,
+    LoadSmm,
     LoadDone,
     EmuEnter,
     Prefetch,
@@ -502,6 +519,7 @@ pub enum ProgramState {
     EmuExit,
     Store,
     StoreDone,
+    StoreDoneSmm,
     Done,
     StoreAll,
     Shutdown,
@@ -518,31 +536,44 @@ impl TryFrom<u8> for ProgramState {
             0x02 => Ok(ProgramState::CpuSetup),
             0x03 => Ok(ProgramState::JumpVector),
             0x04 => Ok(ProgramState::Load),
-            0x05 => Ok(ProgramState::LoadDone),
-            0x06 => Ok(ProgramState::EmuEnter),
-            0x07 => Ok(ProgramState::Prefetch),
-            0x08 => Ok(ProgramState::Execute),
-            0x09 => Ok(ProgramState::ExecuteFinalize),
-            0x0A => Ok(ProgramState::ExecuteDone),
-            0x0B => Ok(ProgramState::EmuExit),
-            0x0C => Ok(ProgramState::Store),
-            0x0D => Ok(ProgramState::StoreDone),
-            0x0E => Ok(ProgramState::Done),
-            0x0F => Ok(ProgramState::StoreAll),
-            0x10 => Ok(ProgramState::Shutdown),
-            0x11 => Ok(ProgramState::Error),
+            0x05 => Ok(ProgramState::LoadSmm),
+            0x06 => Ok(ProgramState::LoadDone),
+            0x07 => Ok(ProgramState::EmuEnter),
+            0x08 => Ok(ProgramState::Prefetch),
+            0x09 => Ok(ProgramState::Execute),
+            0x0A => Ok(ProgramState::ExecuteFinalize),
+            0x0B => Ok(ProgramState::ExecuteDone),
+            0x0C => Ok(ProgramState::EmuExit),
+            0x0D => Ok(ProgramState::Store),
+            0x0E => Ok(ProgramState::StoreDone),
+            0x0F => Ok(ProgramState::StoreDoneSmm),
+            0x10 => Ok(ProgramState::Done),
+            0x11 => Ok(ProgramState::StoreAll),
+            0x12 => Ok(ProgramState::Shutdown),
+            0x13 => Ok(ProgramState::Error),
             _ => Err(CpuClientError::TypeConversionError),
         }
     }
 }
 
 /// [Segment] represents the segment registers in the CPU.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, strum_macros::Display, Debug, PartialEq)]
 pub enum Segment {
     ES = 0,
     SS,
     CS,
     DS,
+}
+
+impl From<u8> for Segment {
+    fn from(value: u8) -> Self {
+        match value & 0x03 {
+            0 => Segment::ES,
+            1 => Segment::SS,
+            2 => Segment::CS,
+            _ => Segment::DS,
+        }
+    }
 }
 
 /// [QueueOp] represents the operation performed on the instruction queue on the last cycle.
@@ -567,6 +598,21 @@ pub enum BusState {
     PASV = 7, // Passive
 }
 
+impl Display for BusState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BusState::INTA => write!(f, "INTA"),
+            BusState::IOR => write!(f, "IOR "),
+            BusState::IOW => write!(f, "IOW "),
+            BusState::HALT => write!(f, "HALT"),
+            BusState::CODE => write!(f, "CODE"),
+            BusState::MEMR => write!(f, "MEMR"),
+            BusState::MEMW => write!(f, "MEMW"),
+            BusState::PASV => write!(f, "PASV"),
+        }
+    }
+}
+
 /// [CpuPin] represents the miscellaneous CPU pins that can be read or written to.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum CpuPin {
@@ -576,32 +622,7 @@ pub enum CpuPin {
     NMI,
 }
 
-#[derive(Clone, Debug)]
-pub struct ServerCycleState {
-    pub program_state: ProgramState,
-    pub cpu_state_bits: u8,
-    pub cpu_status_bits: u8,
-    pub bus_control_bits: u8,
-    pub bus_command_bits: u8,
-    pub address_bus: u32,
-    pub data_bus: u16,
-    pub pins: u16,
-}
-
 pub const REQUIRED_PROTOCOL_VER: u8 = 3;
-
-pub const CONTROL_ALE_BIT: u8 = 0b0000_0001;
-
-pub const COMMAND_MRDC_BIT: u8 = 0b0000_0001;
-pub const COMMAND_AMWC_BIT: u8 = 0b0000_0010;
-pub const COMMAND_MWTC_BIT: u8 = 0b0000_0100;
-pub const COMMAND_IORC_BIT: u8 = 0b0000_1000;
-pub const COMMAND_AIOWC_BIT: u8 = 0b0001_0000;
-pub const COMMAND_IOWC_BIT: u8 = 0b0010_0000;
-pub const COMMAND_INTA_BIT: u8 = 0b0100_0000;
-pub const COMMAND_BHE_BIT: u8 = 0b1000_0000;
-
-pub const STATUS_SEG_BITS: u8 = 0b0001_1000;
 
 #[macro_export]
 macro_rules! get_segment {
@@ -889,6 +910,52 @@ impl CpuClient {
     pub fn begin_store(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdBeginStore)?;
         self.read_result_code(ServerCommand::CmdBeginStore)
+    }
+
+    pub fn store_registers(&mut self) -> Result<RemoteCpuRegisters, CpuClientError> {
+        let (cpu_type, _) = self.cpu_type()?;
+        let program_state = self.get_program_state()?;
+
+        let mut buf = match (cpu_type, program_state) {
+            (
+                ServerCpuType::Intel8088
+                | ServerCpuType::Intel8086
+                | ServerCpuType::NecV20
+                | ServerCpuType::NecV30
+                | ServerCpuType::Intel80188(_)
+                | ServerCpuType::Intel80186(_),
+                _,
+            ) => {
+                vec![0; 28]
+            }
+            (ServerCpuType::Intel80286, _) => vec![0; 102],
+            (ServerCpuType::Intel80386, ProgramState::StoreDone) => vec![0; 204],
+            (ServerCpuType::Intel80386, ProgramState::StoreDoneSmm) => vec![0; 208],
+            _ => {
+                return Err(CpuClientError::BadParameter(format!(
+                    "Unsupported CPU type ({}) and program state ({:?}) for store_registers",
+                    cpu_type, program_state
+                )))
+            }
+        };
+
+        let reg_set_type = self.store_registers_to_buf(&mut buf)?;
+
+        let mut cursor = std::io::Cursor::new(buf);
+
+        let regs = match reg_set_type {
+            0 => RemoteCpuRegisters::V1(cursor.read_le().map_err(|_| CpuClientError::TypeConversionError)?),
+            1 => RemoteCpuRegisters::V2(cursor.read_le().map_err(|_| CpuClientError::TypeConversionError)?),
+            2 => RemoteCpuRegisters::V3(RemoteCpuRegistersV3::A(
+                cursor.read_le().map_err(|_| CpuClientError::TypeConversionError)?,
+            )),
+            3 => RemoteCpuRegisters::V3(RemoteCpuRegistersV3::B(
+                cursor.read_le().map_err(|_| CpuClientError::TypeConversionError)?,
+            )),
+            _ => return Err(CpuClientError::TypeConversionError),
+        };
+
+        Ok(regs)
     }
 
     pub fn store_registers_to_buf(&mut self, reg_data: &mut [u8]) -> Result<u8, CpuClientError> {
@@ -1219,6 +1286,13 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdSetMemoryStrategy)
     }
 
+    /// Request a block of memory from the server.
+    /// The server will respond with an initial result code - if this is a failure, it is the only
+    /// response.
+    /// If it is a success, the server will send the requested memory, which we read in chunks.
+    /// Finally, the server will send a final result code to indicate success or failure of the
+    /// entire operation. There is currently nothing that will trigger secondary result code failure
+    /// if the initial result code was success.
     pub fn read_memory<W: Write>(&mut self, start: u32, size: u32, writer: &mut W) -> Result<bool, CpuClientError> {
         const READ_BUFFER_SIZE: usize = 1024;
         let mut read_buf: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
@@ -1236,6 +1310,11 @@ impl CpuClient {
         buf[0..4].copy_from_slice(&size.to_le_bytes());
         self.send_buf(&buf)?;
 
+        // Read the initial result code
+        self.read_result_code(ServerCommand::CmdReadMemory)?;
+
+        // If initial code was success, proceed to read data
+
         while bytes_left > 0 {
             let read_size = if bytes_left < READ_BUFFER_SIZE as u32 {
                 bytes_left as usize
@@ -1251,9 +1330,14 @@ impl CpuClient {
 
             bytes_left -= read_size as u32;
         }
+
+        // Command terminates with final result code
         self.read_result_code(ServerCommand::CmdReadMemory)
     }
 
+    /// Command the server to erase all memory (set to 0x00). If the current memory backend is
+    /// SDRAM, the SDRAM will be memset to 0. If the backend is a hash table, the hash table will
+    /// be cleared and any memory strategy reset.
     pub fn erase_memory(&mut self) -> Result<(), CpuClientError> {
         self.send_command_byte(ServerCommand::CmdEraseMemory)?;
         self.read_result_code(ServerCommand::CmdEraseMemory)?;
@@ -1284,5 +1368,10 @@ impl CpuClient {
             cycle_ct,
             address_latch,
         })
+    }
+
+    pub fn clear_cycle_log(&mut self) -> Result<bool, CpuClientError> {
+        self.send_command_byte(ServerCommand::CmdClearCycleLog)?;
+        self.read_result_code(ServerCommand::CmdClearCycleLog)
     }
 }

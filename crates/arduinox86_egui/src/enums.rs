@@ -110,3 +110,10 @@ pub enum ScheduleType {
     OneShot,
     Repeat,
 }
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ClientExecuteState {
+    SingleCycleStep,
+    SingleInstructionStep,
+    Run,
+}

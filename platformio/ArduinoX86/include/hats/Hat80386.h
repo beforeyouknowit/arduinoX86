@@ -248,16 +248,18 @@ private:
 
   // All input pins, used to set pin direction on setup
   static constexpr std::array<int,35> INPUT_PINS = {{
-    13, 12, 11, 10, 9, 8, 7, // (7) Various signal pins
+    13, 12, 11, 10, 9, 8, 7, 3, // (8) Various signal pins
     80, 81, 82, // (3) R, W, RW
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Address pins - Bottom half of double-row header
-    21, 20, 17, 16, 15, 14, 3, 1, 0, // (6) Address pins - Top row of GPIO pins
+    21, 20, 17, 16, 15, 14, 1, 0, // (8) Address pins - Top row of GPIO pins
   }};
   
   bool _emulate_bus_controller = false;
 
 protected:
   static constexpr unsigned ClockDivisor = 2;
+  static constexpr unsigned ClockHighDelay = 2;
+  static constexpr unsigned ClockLowDelay = 1;
   size_t addressBusWidth = 22; // Default address bus width is 22 bits
   
 public:
@@ -389,17 +391,17 @@ public:
   /// For 386, this is two external clock cycles per CPU clock cycle.
   static void tickCpuImpl() {
     WRITE_PIN_D04(1);
-    // if (ClockHighDelay > 0) {
-    //   delayMicroseconds(ClockHighDelay);
-    // }
+    if (ClockHighDelay > 0) {
+      delayMicroseconds(ClockHighDelay);
+    }
     WRITE_PIN_D04(0);
-    // if (ClockLowDelay > 0) {
-    //   delayMicroseconds(ClockLowDelay);
-    // }
+    if (ClockLowDelay > 0) {
+      delayMicroseconds(ClockLowDelay);
+    }
     WRITE_PIN_D04(1);
-    // if (ClockHighDelay > 0) {
-    //   delayMicroseconds(ClockHighDelay);
-    // }
+    if (ClockHighDelay > 0) {
+      delayMicroseconds(ClockHighDelay);
+    }
     WRITE_PIN_D04(0);
     // if (ClockLowDelay > 0) {
     //   delayMicroseconds(ClockLowDelay);
@@ -413,7 +415,7 @@ public:
 
     uint16_t data = 0;
 
-    if ((width == ActiveBusWidth::EightLow) || (width == ActiveBusWidth::Sixteen)) {
+    if (peek || (width == ActiveBusWidth::EightLow) || (width == ActiveBusWidth::Sixteen)) {
       // Read data from bus pins
       if (READ_DBUS_00) data |= 0x0001;
       if (READ_DBUS_01) data |= 0x0002;
@@ -424,7 +426,7 @@ public:
       if (READ_DBUS_06) data |= 0x0040;
       if (READ_DBUS_07) data |= 0x0080;
     }
-    if ((width == ActiveBusWidth::EightHigh) || (width == ActiveBusWidth::Sixteen)) {
+    if (peek || (width == ActiveBusWidth::EightHigh) || (width == ActiveBusWidth::Sixteen)) {
       if (READ_DBUS_08) data |= 0x0100;
       if (READ_DBUS_09) data |= 0x0200;
       if (READ_DBUS_10) data |= 0x0400;

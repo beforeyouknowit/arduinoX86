@@ -20,25 +20,29 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+use std::time::Instant;
+
 use crate::{
     client::ClientContext,
     controls::cycle_table::CycleTable,
     events::{GuiEvent, GuiEventQueue},
 };
+use anyhow::{anyhow, Result};
 use arduinox86_client::{ProgramState, ServerFlags, ServerStatus};
 use egui_notify::Toasts;
-use std::time::Instant;
 
 pub struct ClientWindow {
     icon_size: f32,
     use_sdram_backend: bool,
+    use_smm: bool,
     debug_enabled: bool,
     last_status_time: Option<Instant>,
     last_cycle_ct: u64,
     last_program_state: ProgramState,
-    server_status: ServerStatus,
+    server_status: Option<ServerStatus>,
     effective_mhz: f32,
     cycle_table: CycleTable,
+    have_current_cycles: bool,
 }
 
 impl Default for ClientWindow {
@@ -46,13 +50,15 @@ impl Default for ClientWindow {
         Self {
             icon_size: 24.0,
             use_sdram_backend: false,
+            use_smm: false,
             debug_enabled: false,
             last_status_time: None,
             last_cycle_ct: 0,
             last_program_state: ProgramState::default(),
-            server_status: Default::default(),
+            server_status: None,
             effective_mhz: 0.0,
             cycle_table: Default::default(),
+            have_current_cycles: false,
         }
     }
 }
@@ -65,6 +71,7 @@ impl ClientWindow {
     pub fn init(&mut self, c_ctx: &ClientContext) {
         // Initialize the window with the current flags from the client context
         self.sync_flags(c_ctx);
+        self.cycle_table.set_arch(c_ctx.cpu_type);
     }
 
     pub fn sync_flags(&mut self, c_ctx: &ClientContext) {
@@ -72,6 +79,7 @@ impl ClientWindow {
 
         self.use_sdram_backend = flags & ServerFlags::USE_SDRAM_BACKEND != 0;
         self.debug_enabled = flags & ServerFlags::ENABLE_DEBUG != 0;
+        self.use_smm = flags & ServerFlags::USE_SMM != 0;
     }
 
     pub fn set_server_status(&mut self, c_ctx: &mut ClientContext, server_status: ServerStatus) {
@@ -96,19 +104,22 @@ impl ClientWindow {
             self.change_state(c_ctx, server_status.state);
         }
 
-        self.last_program_state = self.server_status.state;
-        self.server_status = server_status;
+        if let Some(existing_status) = &self.server_status {
+            self.last_program_state = existing_status.state;
+            self.last_cycle_ct = existing_status.cycle_ct;
+        }
 
-        self.last_cycle_ct = self.server_status.cycle_ct;
+        self.server_status = Some(server_status);
         self.last_status_time = Some(update_time);
     }
 
     pub fn change_state(&mut self, c_ctx: &mut ClientContext, new_state: ProgramState) {
         match new_state {
-            ProgramState::StoreDone => {
+            ProgramState::StoreDone | ProgramState::StoreDoneSmm => {
                 // Get the cycle states from the server.
                 if let Ok(cycles) = c_ctx.client.get_cycle_states() {
                     self.cycle_table.set_cycles(cycles);
+                    self.have_current_cycles = true;
                 }
                 else {
                     log::error!("Failed to retrieve cycles from server.");
@@ -116,6 +127,24 @@ impl ClientWindow {
             }
             _ => {}
         }
+    }
+
+    pub fn reset_state(&mut self) {
+        self.last_program_state = ProgramState::default();
+        self.server_status = None;
+        self.cycle_table.clear();
+    }
+
+    pub fn push_cycle(&mut self, c_ctx: &mut ClientContext, step: bool) -> Result<()> {
+        let cycle = c_ctx.client.get_cycle_state(step).map_err(|e| {
+            let err_str = format!("Failed to get cycle state: {}", e);
+            log::error!("{}", err_str);
+            anyhow!(err_str)
+        })?;
+
+        self.cycle_table.push_cycle(cycle);
+
+        Ok(())
     }
 
     pub fn show(
@@ -173,6 +202,27 @@ impl ClientWindow {
                                     }
                                 }
                             }
+
+                            if ui.checkbox(&mut self.use_smm, "Use SMM").changed() {
+                                match c_ctx.set_flag_state(ServerFlags::USE_SMM, self.use_smm) {
+                                    Ok(true) => {
+                                        let toggle_str = "SMM enabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Ok(false) => {
+                                        let toggle_str = "SMM disabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Err(e) => {
+                                        let toggle_str = format!("Failed to set SMM control state: {}", e);
+                                        log::error!("{}", toggle_str);
+                                        toasts.error(toggle_str);
+                                        self.sync_flags(c_ctx);
+                                    }
+                                }
+                            }
                         });
                     });
 
@@ -185,7 +235,8 @@ impl ClientWindow {
                             .on_hover_text("Load registers")
                             .clicked()
                         {
-                            // Do disconnect
+                            self.reset_state();
+                            events.push(GuiEvent::ResetState);
                             events.push(GuiEvent::LoadRegisters);
                         }
 
@@ -211,6 +262,7 @@ impl ClientWindow {
                             .clicked()
                         {
                             // Do step
+                            _ = self.push_cycle(c_ctx, true);
                         }
 
                         if ui
@@ -218,6 +270,8 @@ impl ClientWindow {
                             .on_hover_text("Run Autonomously")
                             .clicked()
                         {
+                            self.reset_state();
+                            events.push(GuiEvent::ResetState);
                             events.push(GuiEvent::RunProgram);
                         }
 
@@ -247,6 +301,7 @@ impl ClientWindow {
                             .on_hover_text("Disconnect")
                             .clicked()
                         {
+                            self.reset_state();
                             // Do disconnect
                         }
                     });
@@ -261,21 +316,53 @@ impl ClientWindow {
 
                     ui.horizontal(|ui| {
                         ui.label("Server state:");
-                        ui.label(format!("{:?}", self.server_status.state));
+                        if let Some(server_status) = &self.server_status {
+                            ui.label(format!("{:?}", server_status.state));
+                        }
+                        else {
+                            ui.label("Uninitialized");
+                        }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Cycle count:");
-                        ui.label(self.server_status.cycle_ct.to_string());
+                        if let Some(server_status) = &self.server_status {
+                            ui.label(server_status.cycle_ct.to_string());
+                        }
+                        else {
+                            ui.label("0");
+                        }
+
                         ui.separator();
                         ui.label(format!("Effective MHz: {:.2}", self.effective_mhz));
                     });
                     ui.horizontal(|ui| {
                         ui.label("Address latch:");
-                        ui.label(format!("{:08X}", self.server_status.address_latch));
+                        if let Some(server_status) = &self.server_status {
+                            ui.label(format!("{:08X}", server_status.address_latch));
+                        }
+                        else {
+                            ui.label("0");
+                        }
                     });
                 });
 
-                self.cycle_table.show(ui);
+                ui.separator();
+                if let Some(response) = self.cycle_table.show(ui, events) {
+                    if response.changed() {
+                        if let Ok(value) = u16::from_str_radix(self.cycle_table.data_bus_str(), 16) {
+                            match c_ctx.client.write_data_bus(value) {
+                                Ok(_) => {
+                                    log::debug!("Wrote data bus value: {:04X}", value);
+                                }
+                                Err(e) => {
+                                    let err_str = format!("Failed to write data bus value {:04X}: {}", value, e);
+                                    log::error!("{}", err_str);
+                                    toasts.error(err_str);
+                                }
+                            }
+                        }
+                    }
+                }
             });
     }
 }

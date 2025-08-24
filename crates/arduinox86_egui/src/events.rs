@@ -24,12 +24,14 @@ use crate::enums::{FileOpenContext, FileSaveContext};
 use std::path::PathBuf;
 
 pub enum GuiEvent {
+    ResetState,
     LoadRegisters,
     EraseMemory,
     ReadMemory { address: u32, size: u32 },
     RunProgram,
     AssembleProgram { program_name: String },
     PollStatus,
+    ClearCycleLog,
 }
 
 #[derive(Default)]

@@ -20,21 +20,51 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use arduinox86_client::ServerCycleState;
-use egui_extras::{Column, TableBuilder};
+use crate::{
+    events::{GuiEvent, GuiEventQueue},
+    widgets::cycle_display::CycleDisplay,
+};
+use arduinox86_client::{ServerCpuType, ServerCycleLogPrinter, ServerCycleState};
+use egui::{Color32, Margin, Response};
 
 #[derive(Default)]
 pub struct CycleTable {
+    arch: ServerCpuType,
     cycles: Vec<ServerCycleState>,
+    data_bus_str: String,
 }
 
 impl CycleTable {
-    pub fn new() -> Self {
-        CycleTable { cycles: Vec::new() }
+    pub fn new(arch: ServerCpuType) -> Self {
+        CycleTable {
+            arch,
+            cycles: Vec::new(),
+            data_bus_str: String::new(),
+        }
+    }
+
+    pub fn set_arch(&mut self, arch: ServerCpuType) {
+        self.arch = arch;
+    }
+
+    pub fn data_bus_str(&self) -> &str {
+        &self.data_bus_str
     }
 
     pub fn set_cycles(&mut self, cycles: Vec<ServerCycleState>) {
+        if cycles.is_empty() {
+            self.data_bus_str.clear();
+        }
+        else {
+            let last_cycle = cycles.last().unwrap();
+            self.data_bus_str = format!("{:04X}", last_cycle.data_bus);
+        }
         self.cycles = cycles;
+    }
+
+    pub fn push_cycle(&mut self, cycle: ServerCycleState) {
+        self.data_bus_str = format!("{:04X}", cycle.data_bus);
+        self.cycles.push(cycle);
     }
 
     pub fn cycles(&self) -> &[ServerCycleState] {
@@ -45,10 +75,10 @@ impl CycleTable {
         self.cycles.clear();
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ui: &mut egui::Ui, events: &mut GuiEventQueue) -> Option<Response> {
         if self.cycles.is_empty() {
             ui.label("No cycles available");
-            return;
+            return None;
         }
 
         let available_height = ui.available_height();
@@ -58,41 +88,70 @@ impl CycleTable {
             .size
             .max(ui.spacing().interact_size.y);
 
-        let mut table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(Column::remainder())
-            .column(Column::remainder())
-            .min_scrolled_height(0.0)
-            .max_scroll_height(available_height);
+        let bg: Color32 = ui.visuals().code_bg_color;
+        let max_scroll_height = 400.0;
 
-        table
-            .header(20.0, |mut header| {
-                header.col(|ui| {
-                    ui.strong("ALE");
-                });
-                header.col(|ui| {
-                    ui.strong("Address Bus");
-                });
-                header.col(|ui| {
-                    ui.strong("Data Bus");
-                });
-            })
-            .body(|mut body| {
-                body.rows(text_height, num_rows, |mut row| {
-                    let idx = row.index();
-                    row.col(|ui| {
-                        ui.label(egui::RichText::new("A:").monospace());
-                    });
-                    row.col(|ui| {
-                        ui.label(egui::RichText::new(format!("{:08X}", self.cycles[idx].address_bus)).monospace());
-                    });
-                    row.col(|ui| {
-                        ui.label(egui::RichText::new(format!("{:04X}", self.cycles[idx].data_bus)).monospace());
-                    });
-                });
+        //let rect = ui.max_rect();
+        //ui.painter().rect_filled(rect, 0.0, bg);
+
+        let mut inner_response = None;
+
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Cycle Output:");
             });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                if ui
+                    .button(egui::RichText::new(format!("{}", egui_phosphor::regular::X)).size(18.0))
+                    .on_hover_text("Clear")
+                    .clicked()
+                {
+                    events.push(GuiEvent::ClearCycleLog);
+                    self.cycles.clear();
+                }
+                if ui
+                    .button(egui::RichText::new(format!("{}", egui_phosphor::regular::CLIPBOARD_TEXT)).size(18.0))
+                    .on_hover_text("Copy")
+                    .clicked()
+                {
+                    let printer = ServerCycleLogPrinter::new(self.arch, &self.cycles);
+                    ui.ctx().copy_text(printer.to_string());
+                }
+            });
+        });
+
+        egui::Frame::new()
+            .fill(bg)
+            .inner_margin(Margin::same(6))
+            .outer_margin(Margin::ZERO)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(max_scroll_height)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        let num_cycles = self.cycles.len();
+                        for (i, cycle) in self.cycles.iter().enumerate() {
+                            let mut data_str_opt = None;
+                            // If is last cycle
+                            if i == num_cycles - 1 {
+                                data_str_opt = Some(&mut self.data_bus_str);
+                            }
+
+                            let cycle_display = CycleDisplay::new(self.arch, cycle.clone(), data_str_opt);
+
+                            inner_response = Some(ui.add(cycle_display));
+                        }
+                    });
+            });
+
+        if let Some(resp) = inner_response.as_ref() {
+            if resp.changed() {
+                log::debug!("ClientWindow::show(): Response: {:?}", resp);
+            }
+        }
+
+        inner_response
     }
 }

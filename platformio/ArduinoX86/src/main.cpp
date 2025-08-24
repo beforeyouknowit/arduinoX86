@@ -947,7 +947,11 @@ void cycle() {
       else {
         handle_load_state(q);
       }
-      
+      break;
+
+    case ServerState::LoadSmm:
+
+      handle_smm_load_386();
       break;
 
     case ServerState::LoadDone:
@@ -1141,13 +1145,14 @@ void cycle() {
       if (CPU.cpu_type == CpuType::i80286) {
         handle_storeall_286();
       } else if (CPU.cpu_type == CpuType::i80386) {
-        handle_storeall_386();
+        handle_smm_store_386();
       } else {
         ArduinoX86::Server.change_state(ServerState::Error);
         set_error("StoreAll not implemented for this CPU type!");
       }
       break;
 
+    case ServerState::StoreDoneSmm: // FALLTHROUGH
     case ServerState::StoreDone:
       // We are done with the Store program.
       break;
@@ -1186,6 +1191,7 @@ void cycle() {
 #endif
       break;
     case ServerState::Load:  // FALLTHROUGH
+    case ServerState::LoadSmm: // FALLTHROUGH
     case ServerState::LoadDone:
 #if TRACE_LOAD
       print_cpu_state();
@@ -1568,6 +1574,64 @@ void handle_loadall_386() {
   }
 }
 
+void handle_smm_load_386() {
+  if (!Controller.readMRDCPin()) {
+    // CPU is reading (MRDC active-low)
+    if (CPU.bus_state_latched == CODE && !CPU.data_bus_resolved) {
+      // We are reading a code byte
+      if (CPU.address_latch() >= SMM_HANDLER_START_ADDRESS && CPU.address_latch() < SMM_HANDLER_END_ADDRESS) {
+        // We are fetching the SMM handler program.
+        if (CPU.program->has_remaining()) {
+          // Feed load program to CPU
+          CPU.data_bus = CPU.program->read(CPU.address_latch(), CPU.data_width);
+          CPU.data_type = QueueDataType::Program;
+        } else {
+          CPU.data_bus = OPCODE_DOUBLENOP;
+          CPU.data_type = QueueDataType::ProgramEnd;
+        }
+        CPU.program->debug_print(Controller.getBoard(), DebugType::LOAD, "## LOAD_SMM_386", CPU.data_bus);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+        CPU.data_bus_resolved = true;
+      }
+      else {
+        Controller.getBoard().debugPrintf(DebugType::LOAD, false, "## LOAD_SMM_386: Passed checkpoint. Deasserting SMI. Next fetch should be for program");
+        Controller.writePin(OutputPin::Smi, true); // SMI is active-low
+        CPU.loadall_checkpoint = 1;
+      }
+    }
+    else if (CPU.bus_state_latched == MEMR && !CPU.data_bus_resolved) {
+      // We are reading a memory word. Read from bus emulator with SMIACT set.
+      CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), false, true);
+      Controller.getBoard().debugPrintf(DebugType::LOAD, true, "## LOAD_SMM_386: Writing SMM dump word to bus: %04X\n\r", CPU.data_bus);
+      Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+      CPU.data_bus_resolved = true;
+    }
+  }
+
+  // We can't tell when the queue flushed but we can see the initial code fetch at the new CS:IP.
+  // We don't need to enter LoadDone in this case, we can jump directly to Execute as all LoadDone does is wait
+  // for ALE. (TODO: Should this just be the primary way we leave Load?)
+  uint32_t base_address = ArduinoX86::Bus->smm_dump386_regs().cs_desc.address;
+  uint32_t run_address = base_address + ArduinoX86::Bus->smm_dump386_regs().eip;
+  
+  if (CPU.loadall_checkpoint > 0 && CPU.bus_state == CODE) {
+    if (CPU.address_latch() == run_address) {
+      Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOADALL_386: Detected jump to new CS:IP to trigger transition into Execute.");
+      ArduinoX86::Server.change_state(ServerState::Execute);
+    }
+    else {
+      // CPU is prefetching after LOADALL, but not at the expected address. This is an error.
+      Controller.getBoard().debugPrintf(
+        DebugType::ERROR, false, 
+        "## LOAD_SMM_386: Unexpected prefetch address: %06X Expected: %06X\n\r", 
+        CPU.address_latch(), run_address);
+
+      set_error("Unexpected prefetch address after LOAD_SMM_386");
+      ArduinoX86::Server.change_state(ServerState::Error);
+    }
+  }  
+}
+
 void handle_storeall_286() {
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
@@ -1609,7 +1673,7 @@ void handle_storeall_286() {
 }
 
 /// @brief Handle the SMM register store operation for 386 CPUs.
-void handle_storeall_386() {
+void handle_smm_store_386() {
   if (!Controller.readMRDCPin()) {
     // CPU is reading (MRDC active-low)
     if (CPU.bus_state_latched == CODE) {
@@ -1628,7 +1692,7 @@ void handle_storeall_386() {
           CPU.data_type = QueueDataType::ProgramEnd;
           //change_state(LoadDone);
         }
-        CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STOREALL_386", CPU.data_bus);
+        CPU.program->debug_print(Controller.getBoard(), DebugType::STORE, "## STORE_SMM_386", CPU.data_bus);
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         CPU.data_bus_resolved = true;
       }
@@ -1637,13 +1701,13 @@ void handle_storeall_386() {
 
   if (!Controller.readMWTCPin()) {
     // CPU is writing (MWTC active-low)
-    Controller.getBoard().debugPrintf(DebugType::STORE, true, "## STOREALL_386: Sending write to bus emulator: %04X\n\r", CPU.data_bus);
-    ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), CPU.data_bus, !Controller.readBHEPin());
+    Controller.getBoard().debugPrintf(DebugType::STORE, true, "## STORE_SMM_386: Sending write to bus emulator: %04X\n\r", CPU.data_bus);
+    ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), CPU.data_bus, !Controller.readBHEPin(), true);
 
     if (CPU.address_latch() == SMRAM_LAST_WRITE) {
       // SMM terminating write.
-      Controller.getBoard().debugPrintf(DebugType::STORE, false, "## STOREALL_386: Terminating read at %08X\n\r", SMRAM_LAST_WRITE);
-      ArduinoX86::Server.change_state(ServerState::StoreDone);
+      Controller.getBoard().debugPrintf(DebugType::STORE, false, "## STORE_SMM_386:: Terminating read at %08X\n\r", SMRAM_LAST_WRITE);
+      ArduinoX86::Server.change_state(ServerState::StoreDoneSmm);
     }
   }
 }
@@ -1968,14 +2032,21 @@ void handle_execute_automatic() {
   if (CPU.bus_state == HALT) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
     
-    if (CPU.use_smm() && READ_SMI_PIN) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
-      Controller.writePin(OutputPin::Smi, false);
+    if (CPU.use_smm()) {
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM enabled.");
+      if (READ_SMI_PIN) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
+        Controller.writePin(OutputPin::Smi, false);
+      }
     }
-    else if (!READ_NMI_PIN){
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing NMI pin high.", true);
-      Controller.writePin(OutputPin::Nmi, true);
+    else {
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM disabled.");
+      if (!READ_NMI_PIN){
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing NMI pin high.", true);
+        Controller.writePin(OutputPin::Nmi, true);
+      }
     }
+
   }
 
   if (Controller.readALEPin()) {
