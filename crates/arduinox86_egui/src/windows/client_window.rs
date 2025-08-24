@@ -33,6 +33,7 @@ use egui_notify::Toasts;
 
 pub struct ClientWindow {
     icon_size: f32,
+    enable_cycle_logging: bool,
     use_sdram_backend: bool,
     use_smm: bool,
     debug_enabled: bool,
@@ -49,6 +50,7 @@ impl Default for ClientWindow {
     fn default() -> Self {
         Self {
             icon_size: 24.0,
+            enable_cycle_logging: false,
             use_sdram_backend: false,
             use_smm: false,
             debug_enabled: false,
@@ -77,6 +79,7 @@ impl ClientWindow {
     pub fn sync_flags(&mut self, c_ctx: &ClientContext) {
         let flags = c_ctx.cached_flags();
 
+        self.enable_cycle_logging = flags & ServerFlags::ENABLE_CYCLE_LOGGING != 0;
         self.use_sdram_backend = flags & ServerFlags::USE_SDRAM_BACKEND != 0;
         self.debug_enabled = flags & ServerFlags::ENABLE_DEBUG != 0;
         self.use_smm = flags & ServerFlags::USE_SMM != 0;
@@ -164,17 +167,42 @@ impl ClientWindow {
                             if ui.checkbox(&mut self.debug_enabled, "Enable Serial Debug").changed() {
                                 match c_ctx.set_flag_state(ServerFlags::ENABLE_DEBUG, self.debug_enabled) {
                                     Ok(true) => {
-                                        let toggle_str = "Serial Debug enabled!".to_string();
+                                        let toggle_str = "Serial debug enabled!".to_string();
                                         log::debug!("{}", toggle_str);
                                         toasts.success(toggle_str);
                                     }
                                     Ok(false) => {
-                                        let toggle_str = "Serial Debug disabled!".to_string();
+                                        let toggle_str = "Serial debug disabled!".to_string();
                                         log::debug!("{}", toggle_str);
                                         toasts.success(toggle_str);
                                     }
                                     Err(e) => {
-                                        let toggle_str = format!("Failed to set Serial Debug state: {}", e);
+                                        let toggle_str = format!("Failed to set serial debug state: {}", e);
+                                        log::error!("{}", toggle_str);
+                                        toasts.error(toggle_str);
+                                        self.sync_flags(c_ctx);
+                                    }
+                                }
+                            }
+
+                            if ui
+                                .checkbox(&mut self.enable_cycle_logging, "Enable Cycle Logging")
+                                .changed()
+                            {
+                                match c_ctx.set_flag_state(ServerFlags::ENABLE_CYCLE_LOGGING, self.enable_cycle_logging)
+                                {
+                                    Ok(true) => {
+                                        let toggle_str = "Cycle logging enabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Ok(false) => {
+                                        let toggle_str = "Cycle logging disabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Err(e) => {
+                                        let toggle_str = format!("Failed to set cycle logging state: {}", e);
                                         log::error!("{}", toggle_str);
                                         toasts.error(toggle_str);
                                         self.sync_flags(c_ctx);
@@ -291,7 +319,19 @@ impl ClientWindow {
                             .on_hover_text("Stop")
                             .clicked()
                         {
-                            // Do pause
+                            match c_ctx.set_flag_state(ServerFlags::EXECUTE_AUTOMATIC, false) {
+                                Ok(_) => {
+                                    let toggle_str = "Execution stopped!".to_string();
+                                    log::debug!("{}", toggle_str);
+                                    toasts.success(toggle_str);
+                                }
+                                Err(e) => {
+                                    let toggle_str = format!("Failed to stop execution: {}", e);
+                                    log::error!("{}", toggle_str);
+                                    toasts.error(toggle_str);
+                                    self.sync_flags(c_ctx);
+                                }
+                            }
                         }
 
                         if ui

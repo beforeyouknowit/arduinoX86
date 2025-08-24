@@ -65,6 +65,7 @@ impl ServerFlags {
     pub const USE_SDRAM_BACKEND: u32    = 0x0000_0010; // Use SDRAM backend for memory
     pub const USE_SMM: u32              = 0x0000_0020; // Use SMM for register readout
     pub const ENABLE_DEBUG: u32         = 0x0000_0040; // Enable debug serial output
+    pub const ENABLE_CYCLE_LOGGING: u32 = 0x0000_0080; // Enable cycle logging
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.

@@ -68,6 +68,7 @@ public:
   static constexpr uint32_t FLAG_USE_SDRAM_BACKEND  = 0x00000010; // Use SDRAM as memory backend (requires GIGA)
   static constexpr uint32_t FLAG_USE_SMM            = 0x00000020; // Use SMM for register readout on 386/486 CPUs
   static constexpr uint32_t FLAG_DEBUG_ENABLED      = 0x00000040; // Enable debug mode
+  static constexpr uint32_t FLAG_LOG_CYCLES         = 0x00000080; // Enable cycle logging
 
   enum class ServerCommand {
     CmdNone            = 0x00,

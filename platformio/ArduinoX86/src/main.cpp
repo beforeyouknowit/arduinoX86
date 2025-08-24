@@ -473,11 +473,6 @@ void print_cpu_state() {
   //char s = CPU.status0 & 0x07;
   //char rout_chr = '.';
 
-  if (!Controller.getBoard().isDebugEnabled()) {
-    // If debug is not enabled, we don't print the CPU state.
-    return;
-  }
-
   // Set the bus string width
   if (CPU.width == CpuBusWidth::Eight) {
     bus_str_width = 2;
@@ -1166,95 +1161,99 @@ void cycle() {
       break;
   }
 
-  // Print instruction state if tracing is enabled
-  switch (ArduinoX86::Server.state()) {
-    case ServerState::Reset:
-#if TRACE_RESET
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::CpuId:
-#if TRACE_ID
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::CpuSetup:
-#if TRACE_SETUP
-      print_cpu_state();  
-#else
-      //delayMicroseconds(20);
-#endif
-      break;
-    case ServerState::JumpVector:
-#if TRACE_VECTOR
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::Load:  // FALLTHROUGH
-    case ServerState::LoadSmm: // FALLTHROUGH
-    case ServerState::LoadDone:
-#if TRACE_LOAD
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::Prefetch:
-#if TRACE_PREFETCH
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::EmuEnter:
-#if TRACE_EMU_ENTER
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::EmuExit:
-#if TRACE_EMU_EXIT
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::Execute:
-#if TRACE_EXECUTE
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::ExecuteDone:  // FALLTHROUGH
-    case ServerState::ExecuteFinalize:
-#if TRACE_FINALIZE
-      print_cpu_state();
-#endif
-      break;
-    case ServerState::Done: // FALLTHROUGH
-    case ServerState::StoreDone:  // FALLTHROUGH
-    case ServerState::Store: // FALLTHROUGH
-    case ServerState::StoreAll:
-#if TRACE_STORE
-      print_cpu_state();
-#endif
-      break;
+  if (Controller.getBoard().isDebugEnabled()) {
+    // Print instruction state if tracing is enabled
+    switch (ArduinoX86::Server.state()) {
+      case ServerState::Reset:
+        #if TRACE_RESET
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::CpuId:
+        #if TRACE_ID
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::CpuSetup:
+        #if TRACE_SETUP
+          print_cpu_state();  
+        #else
+          //delayMicroseconds(20);
+        #endif
+        break;
+      case ServerState::JumpVector:
+        #if TRACE_VECTOR
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::Load:  // FALLTHROUGH
+      case ServerState::LoadSmm: // FALLTHROUGH
+      case ServerState::LoadDone:
+        #if TRACE_LOAD
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::Prefetch:
+        #if TRACE_PREFETCH
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::EmuEnter:
+        #if TRACE_EMU_ENTER
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::EmuExit:
+        #if TRACE_EMU_EXIT
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::Execute:
+        #if TRACE_EXECUTE
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::ExecuteDone:  // FALLTHROUGH
+      case ServerState::ExecuteFinalize:
+        #if TRACE_FINALIZE
+          print_cpu_state();
+        #endif
+        break;
+      case ServerState::Done: // FALLTHROUGH
+      case ServerState::StoreDone:  // FALLTHROUGH
+      case ServerState::Store: // FALLTHROUGH
+      case ServerState::StoreAll:
+        #if TRACE_STORE
+          print_cpu_state();
+        #endif
+        break;
 
-    case ServerState::Error:
-      print_cpu_state();
-      break;
+      case ServerState::Error:
+        print_cpu_state();
+        break;
+    }
   }
 
   // Log cycle state.
-  cycle_state.data_bus = CPU.data_bus;
-  cycle_state.pins = 0;
+  if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, ShieldType>::FLAG_LOG_CYCLES) {
+    cycle_state.data_bus = CPU.data_bus;
+    cycle_state.pins = 0;
 
-  if (Controller.readALEPin()) {
-    cycle_state.pins |= CycleState::ALE;
+    if (Controller.readALEPin()) {
+      cycle_state.pins |= CycleState::ALE;
+    }
+    if (Controller.readBHEPin()) {
+      cycle_state.pins |= CycleState::BHE;
+    }
+    if (Controller.readLockPin()) {
+      cycle_state.pins |= CycleState::LOCK;
+    }
+    if (Controller.readReadyPin()) {
+      cycle_state.pins |= CycleState::READY;
+    }    
+    ArduinoX86::CycleLogger->log(cycle_state);
   }
-  if (Controller.readBHEPin()) {
-    cycle_state.pins |= CycleState::BHE;
-  }
-  if (Controller.readLockPin()) {
-    cycle_state.pins |= CycleState::LOCK;
-  }
-  if (Controller.readReadyPin()) {
-    cycle_state.pins |= CycleState::READY;
-  }
-  ArduinoX86::CycleLogger->log(cycle_state);
-
+  
   // Handle wait states - doing this after logging cycle simulates READY going low sometime during
   // Tc.
   if (Controller.readALEPin() && CPU.wait_states > 0) {
@@ -1954,15 +1953,20 @@ void handle_execute_automatic() {
   static uint16_t exception_offset = 0;
   static uint32_t next_exception_address = 0;
 
+  bool print = Controller.getBoard().isDebugEnabled();
+
   if (cpu_mwtc) {
     // The CPU is writing to memory. Send it to the bus emulator.
-    Controller.getBoard().debugPrintf(
-      DebugType::EXECUTE, 
-      true, 
-      "## EXECUTE: Sending write to bus emulator: [%08X]<-%04X\n\r", 
-      CPU.address_latch(),
-      CPU.data_bus
-    );
+    if (print) {
+      // Logging is wrapped in "if (print)" to avoid unnecessary string formatting during normal operation.
+      Controller.getBoard().debugPrintf(
+        DebugType::EXECUTE,
+        true,
+        "## EXECUTE: Sending write to bus emulator: [%08X]<-%04X\n\r",
+        CPU.address_latch(),
+        CPU.data_bus
+      );
+    }
     ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), CPU.data_bus, !Controller.readBHEPin());
 
     if (CPU.cpu_type != CpuType::i80386) {
@@ -1986,11 +1990,13 @@ void handle_execute_automatic() {
     bool is_fetch = (CPU.bus_state_latched == CODE);
     CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), is_fetch);
 
-    if (is_fetch) {
-      Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Prefetching from bus emulator: %04X\n\r", CPU.data_bus);
-    }
-    else {
-      Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Reading from bus emulator: %04X\n\r", CPU.data_bus);
+    if (print) {
+      if (is_fetch) {
+        Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Prefetching from bus emulator: %04X\n\r", CPU.data_bus);
+      }
+      else {
+        Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Reading from bus emulator: %04X\n\r", CPU.data_bus);
+      }
     }
 
     if (exception_stage == 1) {

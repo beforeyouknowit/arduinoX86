@@ -45,6 +45,7 @@ template<typename BoardType, typename ShieldType>
 CommandServer<BoardType,ShieldType>::CommandServer(BoardController<BoardType,ShieldType>& controller_)
   : controller_(controller_)
 {
+  flags_ |= FLAG_LOG_CYCLES;
 
   useSmm_ = USE_SMI;
   if (useSmm_) {
@@ -52,7 +53,6 @@ CommandServer<BoardType,ShieldType>::CommandServer(BoardController<BoardType,Shi
     CPU.set_use_smm(useSmm_);
   }
   
-
   if (controller_.getBoard().isDebugEnabled()) {
     flags_ |= FLAG_DEBUG_ENABLED;
   }
@@ -1400,6 +1400,13 @@ bool CommandServer<BoardType, ShieldType>::cmd_set_flags(void) {
   else if (!(new_flags & CommandServer::FLAG_DEBUG_ENABLED) && (flags_ & CommandServer::FLAG_DEBUG_ENABLED)) {
     controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling debug mode");
     controller_.getBoard().setDebugEnabled(false);
+  }
+
+  if ((new_flags & CommandServer::FLAG_LOG_CYCLES) && !(flags_ & CommandServer::FLAG_LOG_CYCLES)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling cycle logging ##");
+  } 
+  else if (!(new_flags & CommandServer::FLAG_LOG_CYCLES) && (flags_ & CommandServer::FLAG_LOG_CYCLES)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling cycle logging ##");
   }
 
   flags_ = new_flags;
