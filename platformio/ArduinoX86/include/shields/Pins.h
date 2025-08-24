@@ -20,43 +20,25 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
+
 #pragma once
-// Define the baud rate to use for the RS232 module plugged into your hat
-// (or possibly directly into your Arduino, but in this case our "hat" is
-// the specific pinout template.
 
-#include <config.h>
+#include <Arduino.h>
 
-class Hat8088;
-class Hat80186;
-class Hat80286;
-class Hat80386;
-
-template<typename Hat>
-struct HatTraits {
-  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE; // Default baud rate
+/// @brief Enumeration of input pins used by the CPU.
+/// These pins can be referenced as parameters to a Shield's writePin() or readPin() methods,
+/// but there is no guarantee that all pins are implemented on all Hats.
+enum class OutputPin : uint8_t {
+  Ready,
+  Test,
+  Intr,
+  Nmi,
+  Invalid, // Invalid pin variant is used as only previous pins in the list can be sent as 
+           // parameters to cmd_write_pin().
+  Reset,
+  Clock,
+  Hold,
+  Busy,
+  Smi,
 };
 
-// Specialize for Hat8088
-template<>
-struct HatTraits<Hat8088> {
-  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
-};
-
-// Specialize for Hat80186
-template<>
-struct HatTraits<Hat80186> {
-  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
-};
-
-// Specialize for Hat80286
-template<>
-struct HatTraits<Hat80286> {
-  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
-};
-
-// Specialize for Hat80386
-template<>
-struct HatTraits<Hat80386> {
-  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
-};

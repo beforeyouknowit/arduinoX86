@@ -29,7 +29,7 @@
 #include <memory>
 #include <cstdint>
 
-#include <Hat.h>
+#include <Shield.h>
 #include <BusTypes.h>
 #include <serial_config.h>
 #include <arduinoX86.h>

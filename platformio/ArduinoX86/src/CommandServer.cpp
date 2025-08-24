@@ -26,7 +26,7 @@
 #include <Arduino.h>
 #include <config.h>
 
-#include <Hat.h>
+#include <Shield.h>
 #include <Board.h>
 #include <globals.h>
 #include <BoardController.h>
@@ -41,8 +41,8 @@
 #define MAX_BUFFER_LEN 512ul
 #endif
 
-template<typename BoardType, typename HatType>
-CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatType>& controller_)
+template<typename BoardType, typename ShieldType>
+CommandServer<BoardType,ShieldType>::CommandServer(BoardController<BoardType,ShieldType>& controller_)
   : controller_(controller_)
 {
 
@@ -59,8 +59,8 @@ CommandServer<BoardType,HatType>::CommandServer(BoardController<BoardType,HatTyp
 }
 
 
-template<typename BoardType, typename HatType>
-void CommandServer<BoardType,HatType>::reset() 
+template<typename BoardType, typename ShieldType>
+void CommandServer<BoardType,ShieldType>::reset() 
 {
   ArduinoX86::Bus->reset_logging();
   ArduinoX86::Bus->disable_logging();
@@ -70,9 +70,9 @@ void CommandServer<BoardType,HatType>::reset()
 
 /// @brief Runs the command server, processing incoming commands and executing them.
 /// @tparam BoardType 
-/// @tparam HatType 
-template<typename BoardType, typename HatType>
-void CommandServer<BoardType,HatType>::run()
+/// @tparam ShieldType 
+template<typename BoardType, typename ShieldType>
+void CommandServer<BoardType,ShieldType>::run()
 {
 
   switch (commandState_) {
@@ -174,11 +174,11 @@ void CommandServer<BoardType,HatType>::run()
 /// @brief Returns the name of the command based on the ServerCommand enum.
 /// This is useful for debugging and logging purposes.
 /// @tparam BoardType 
-/// @tparam HatType 
+/// @tparam ShieldType 
 /// @param cmd The command to get the name of.
 /// @return Name of the command as a constant C string.
-template<typename BoardType, typename HatType>
-const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cmd) {
+template<typename BoardType, typename ShieldType>
+const char* CommandServer<BoardType, ShieldType>::get_command_name(ServerCommand cmd) {
   switch(cmd) {
       case ServerCommand::CmdNone: return "CmdNone";
       case ServerCommand::CmdVersion: return "CmdVersion";
@@ -225,8 +225,8 @@ const char* CommandServer<BoardType, HatType>::get_command_name(ServerCommand cm
   }
 }
 
-template<typename BoardType, typename HatType>
-const char* CommandServer<BoardType, HatType>::get_state_string(ServerState state) {
+template<typename BoardType, typename ShieldType>
+const char* CommandServer<BoardType, ShieldType>::get_state_string(ServerState state) {
   switch(state) {
       case ServerState::Reset: return "Reset";
       case ServerState::CpuId: return "CpuId";
@@ -252,8 +252,8 @@ const char* CommandServer<BoardType, HatType>::get_state_string(ServerState stat
   }
 }
 
-template<typename BoardType, typename HatType>
-char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
+template<typename BoardType, typename ShieldType>
+char CommandServer<BoardType, ShieldType>::get_state_char(ServerState state) {
   switch(state) {
       case ServerState::Reset: return 'R';
       case ServerState::CpuId: return 'I';
@@ -280,11 +280,11 @@ char CommandServer<BoardType, HatType>::get_state_char(ServerState state) {
 
 /// @brief Dispatches a command based on the command byte received.
 /// @tparam BoardType
-/// @tparam HatType
+/// @tparam ShieldType
 /// @param cmd_byte The command byte to dispatch.
 /// @return True if the command was successfully dispatched, false otherwise.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::dispatch_command(ServerCommand cmd) {
   switch(cmd) {
     case ServerCommand::CmdNone:
         return cmd_null();
@@ -375,10 +375,10 @@ bool CommandServer<BoardType, HatType>::dispatch_command(ServerCommand cmd) {
 /// @brief Handle the version command. This is the first command sent upon opening a serial port to discover an ArduinoX86 server.
 /// It sends an identification string, and protocol version number.
 /// @tparam BoardType 
-/// @tparam HatType 
+/// @tparam ShieldType 
 /// @return Always returns true.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_version() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_version() {
   debug_cmd("In cmd");
 
   const char msg[] = "ardx86 ";
@@ -394,11 +394,11 @@ bool CommandServer<BoardType, HatType>::cmd_version() {
 
 /// @brief Get the number of input bytes expected from the client for a given command
 /// @tparam BoardType 
-/// @tparam HatType 
+/// @tparam ShieldType 
 /// @param cmd 
 /// @return The number of input bytes expected for the command
-template<typename BoardType, typename HatType>
-uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand cmd) {
+template<typename BoardType, typename ShieldType>
+uint8_t CommandServer<BoardType, ShieldType>::get_command_input_bytes(ServerCommand cmd) {
     switch(cmd) {
         case ServerCommand::CmdNone: return 0;
         case ServerCommand::CmdVersion: return 0;
@@ -445,8 +445,8 @@ uint8_t CommandServer<BoardType, HatType>::get_command_input_bytes(ServerCommand
     }
 }
 
-template<typename BoardType, typename HatType>
-void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
+template<typename BoardType, typename ShieldType>
+void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
 
   // Leave current state.
   switch (state_) {
@@ -639,8 +639,8 @@ void CommandServer<BoardType, HatType>::change_state(ServerState new_state) {
 // Attempt to reset the CPU and report status.
 // This will be rarely used by itself as the register state is not set up. The Load
 // command will reset the CPU and set register state.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_reset_cpu() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_reset_cpu() {
   debug_cmd("In cmd_reset()");
   CpuResetResult result;
   clear_error();
@@ -657,8 +657,8 @@ bool CommandServer<BoardType, HatType>::cmd_reset_cpu() {
 
 // Server command - Cpu type
 // Return the detected CPU type and the queue status availability bit in MSB
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_cpu_type() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_cpu_type() {
   debug_cmd("In cmd_cpu_type()");
   clear_error();
 
@@ -679,8 +679,8 @@ bool CommandServer<BoardType, HatType>::cmd_cpu_type() {
 
 // Server command - Cycle
 // Execute the specified number of CPU cycles.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_cycle() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_cycle() {
   uint8_t cycle_ct = commandBuffer_[0];
   for (uint8_t i = 0; i < cycle_ct; i++) {
     cycle();
@@ -695,8 +695,8 @@ bool CommandServer<BoardType, HatType>::cmd_cycle() {
 // On 8088-80186, this command takes 28 bytes, which correspond to the word values of each of the 14
 // CPU registers.
 // On 80286, this command takes 102 bytes, which correspond to the LOADALL structure.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_load() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_load() {
 
   clear_error();
   volatile uint8_t *read_p = nullptr;
@@ -858,8 +858,8 @@ bool CommandServer<BoardType, HatType>::cmd_load() {
 
 // Server command - ReadAddressLatch
 // Read back the contents of the address latch as a sequence of 3 bytes (little-endian)
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_address_latch() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_address_latch() {
   INBAND_SERIAL.write((uint8_t)(CPU.address_latch() & 0xFF));
   INBAND_SERIAL.write((uint8_t)((CPU.address_latch() >> 8) & 0xFF));
   INBAND_SERIAL.write((uint8_t)((CPU.address_latch() >> 16) & 0xFF));
@@ -868,8 +868,8 @@ bool CommandServer<BoardType, HatType>::cmd_read_address_latch() {
 
 // Server command - ReadAddress
 // Read back the contents of the address bus as a sequence of 3 bytes (little-endian)
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_address() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_address() {
   //read_address_pins(true);
   CPU.address_bus = Controller.readAddressBus(true);
   INBAND_SERIAL.write((uint8_t)(CPU.address_bus & 0xFF));
@@ -878,24 +878,24 @@ bool CommandServer<BoardType, HatType>::cmd_read_address() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_invalid() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_invalid() {
   DEBUG_SERIAL.println("Called cmd_invalid!");
   return false;
 }
 
 // Server command - ReadStatus
 // Return the value of the CPU status lines S0-S5 and QS0-QS1
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_status() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_status() {
   CPU.status0 = Controller.readCpuStatusLines();
   INBAND_SERIAL.write(CPU.status0);
   return true;
 }
 
 // Server command - Read8288Command
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_8288_command() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_8288_command() {
   CPU.command_bits = Controller.readBusControllerCommandLines();
   //read_8288_command_bits();
   INBAND_SERIAL.write(CPU.command_bits);
@@ -903,8 +903,8 @@ bool CommandServer<BoardType, HatType>::cmd_read_8288_command() {
 }
 
 // Server command - Read8288Control
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_8288_control() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_8288_control() {
   Controller.readBusControllerControlLines();
   //read_8288_control_bits();
   INBAND_SERIAL.write(CPU.control_bits);
@@ -912,8 +912,8 @@ bool CommandServer<BoardType, HatType>::cmd_read_8288_control() {
 }
 
 // Server command - ReadDataBus
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_data_bus() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_data_bus() {
   INBAND_SERIAL.write((uint8_t)CPU.data_bus);
   INBAND_SERIAL.write((uint8_t)(CPU.data_bus >> 8));
   return true;
@@ -925,8 +925,8 @@ bool CommandServer<BoardType, HatType>::cmd_read_data_bus() {
 // This should not be called for CODE fetches after we have called cmd_prefetch_store(),
 // unless a flow control operation occurs that flushes the queue and returns us to
 // within original program boundaries.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_write_data_bus() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_write_data_bus() {
   if (CPU.bus_state_latched == CODE) {
     // We've just been instructed to write a normal fetch byte to the bus.
     // If we were prefetching the store program, reset this status as a queue
@@ -949,8 +949,8 @@ bool CommandServer<BoardType, HatType>::cmd_write_data_bus() {
 // Should be called in place of cmd_write_data_bus() by host on T3/TwLast when
 // program bytes have been exhausted.
 // (When we are prefetching past execution boundaries during main program execution)
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_prefetch_store() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_prefetch_store() {
 
   if (CPU.in_emulation) {
     // Prefetch the EmuExit program
@@ -996,8 +996,8 @@ bool CommandServer<BoardType, HatType>::cmd_prefetch_store() {
 // Server command - Finalize
 // Sets the data bus flag to DATA_PROGRAM_END, so that the Execute state can terminate
 // on the next instruction queue fetch
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_finalize() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_finalize() {
   if (state_ == ServerState::Execute) {
     change_state(ServerState::ExecuteFinalize);
 
@@ -1030,8 +1030,8 @@ bool CommandServer<BoardType, HatType>::cmd_finalize() {
 // Server command - BeginStore
 // Execute state must be in ExecuteDone before intiating BeginStore command
 //
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_begin_store(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_begin_store(void) {
   /*
   char err_msg[30];
 
@@ -1052,8 +1052,8 @@ bool CommandServer<BoardType, HatType>::cmd_begin_store(void) {
 // Returns values of registers in the following order, little-endian
 // AX, BX, CX, DX, SS, SP, FLAGS, IP, CS, DS, ES, BP, SI, DI
 // Execute state must be in ExecuteDone before executing Store command
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_store(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_store(void) {
 
   size_t write_len = 0;
 
@@ -1198,16 +1198,16 @@ bool CommandServer<BoardType, HatType>::cmd_store(void) {
 
 // Server command - QueueLen
 // Return the length of the instruction queue in bytes
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_queue_len(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_queue_len(void) {
   INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.len()));
   return true;
 }
 
 // Server command - QueueBytes
 // Return the contents of the instruction queue, from 0-6 bytes.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_queue_bytes(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_queue_bytes(void) {
   for (size_t i = 0; i < CPU.queue.len(); i++) {
     INBAND_SERIAL.write(static_cast<uint8_t>(CPU.queue.read_byte(i)));
   }
@@ -1216,8 +1216,8 @@ bool CommandServer<BoardType, HatType>::cmd_queue_bytes(void) {
 
 // Server command - Write pin
 // Sets the value of the specified CPU input pin
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_write_pin(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_write_pin(void) {
 
   uint8_t pin_idx = commandBuffer_[0];
   uint8_t pin_val = commandBuffer_[1] & 0x01;
@@ -1271,16 +1271,16 @@ bool CommandServer<BoardType, HatType>::cmd_write_pin(void) {
 }
 
 // Server command - Read pin
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_pin(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_pin(void) {
   // Not implemented
   INBAND_SERIAL.write((uint8_t)0);
   return true;
 }
 
 // Server command - Get program state
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_get_program_state(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_get_program_state(void) {
   controller_.getBoard().debugPrintf(
     DebugType::CMD, 
     false,
@@ -1292,8 +1292,8 @@ bool CommandServer<BoardType, HatType>::cmd_get_program_state(void) {
 }
 
 // Server command - Get last error
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_get_last_error(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_get_last_error(void) {
   INBAND_SERIAL.write(errorBuffer_);
   return true;
 }
@@ -1303,8 +1303,8 @@ bool CommandServer<BoardType, HatType>::cmd_get_last_error(void) {
 // Parameter: One byte, flags. Bit 0 set to 1 will cycle CPU first before 
 //            returning the state.
 // Returns 11 bytes
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_get_cycle_state(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_get_cycle_state(void) {
   uint8_t send_buf[11] = { 0 };
   bool do_cycle = (bool)(commandBuffer_[0] & 0x01);
   if (do_cycle) {
@@ -1340,8 +1340,8 @@ bool CommandServer<BoardType, HatType>::cmd_get_cycle_state(void) {
 }
 
 // Server command - Set flags
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_flags(void) {
 
   uint32_t new_flags = commandBuffer_[0] | 
             (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
@@ -1407,8 +1407,8 @@ bool CommandServer<BoardType, HatType>::cmd_set_flags(void) {
 }
 
 // Server command - prefetch
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_prefetch(void) {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_prefetch(void) {
   if ((CPU.cpu_type == CpuType::necV20) || (CPU.cpu_type == CpuType::necV30)) {
     // Simply toggle the emulation flag
     CPU.do_prefetch = true;
@@ -1431,8 +1431,8 @@ bool CommandServer<BoardType, HatType>::cmd_prefetch(void) {
 // 3 seconds after sending the init command.
 // Returns one data byte. A value of 0 indicates no display is present.
 // A value of 1 indicates the display is present and will be initialized.
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_init_screen() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_init_screen() {
   uint8_t byte0 = 0;
   #if GIGA_DISPLAY_SHIELD
     byte0 = 1;
@@ -1442,8 +1442,8 @@ bool CommandServer<BoardType, HatType>::cmd_init_screen() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_storeall() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_storeall() {
   change_state(ServerState::StoreAll);
 
   for (int i = 0; i < 300; i++) {
@@ -1457,8 +1457,8 @@ bool CommandServer<BoardType, HatType>::cmd_storeall() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_set_random_seed() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_random_seed() {
 
   uint32_t seed = commandBuffer_[0] | 
                   (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
@@ -1469,8 +1469,8 @@ bool CommandServer<BoardType, HatType>::cmd_set_random_seed() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_randomize_mem() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_randomize_mem() {
 
   uint32_t seed = commandBuffer_[0] | 
                   (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
@@ -1485,8 +1485,8 @@ bool CommandServer<BoardType, HatType>::cmd_randomize_mem() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_set_memory() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_memory() {
     uint8_t read_buffer[MAX_BUFFER_LEN];
     uint32_t address = commandBuffer_[0] | 
                       (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
@@ -1537,14 +1537,14 @@ bool CommandServer<BoardType, HatType>::cmd_set_memory() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_get_cycle_states() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_get_cycle_states() {
   ArduinoX86::CycleLogger->dump_states();
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_enable_debug() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_enable_debug() {
   bool enabled = static_cast<bool>(commandBuffer_[0]);
   if (enabled) {
     flags_ |= CommandServer::FLAG_DEBUG_ENABLED;
@@ -1558,8 +1558,8 @@ bool CommandServer<BoardType, HatType>::cmd_enable_debug() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_set_memory_strategy() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_memory_strategy() {
 
   IBusBackend::DefaultStrategy strategy = static_cast<IBusBackend::DefaultStrategy>(commandBuffer_[0]);
   uint32_t start_address = commandBuffer_[1] | 
@@ -1582,14 +1582,14 @@ bool CommandServer<BoardType, HatType>::cmd_set_memory_strategy() {
   }
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_get_flags() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_get_flags() {
   proto_write(reinterpret_cast<const uint8_t*>(&flags_), sizeof(flags_));
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_read_memory() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_read_memory() {
   uint32_t address = commandBuffer_[0] |
                     (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
                     (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
@@ -1630,14 +1630,14 @@ bool CommandServer<BoardType, HatType>::cmd_read_memory() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_erase_memory() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_erase_memory() {
   ArduinoX86::Bus->erase_memory();
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_server_status() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_server_status() {
   // Returns the current server status as:
   // 1 byte: Server state (ServerState enum)
   // 8 bytes: Current cycle count (uint64_t)
@@ -1650,21 +1650,21 @@ bool CommandServer<BoardType, HatType>::cmd_server_status() {
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_clear_cycle_log(){
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_clear_cycle_log(){
   ArduinoX86::CycleLogger->reset();
   controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_clear_cycle_log(): Cycle log cleared.");
   return true;
 }
 
-template<typename BoardType, typename HatType>
-bool CommandServer<BoardType, HatType>::cmd_null() {
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_null() {
   return true;
 }
 
 // Error handling methods
-template<typename BoardType, typename HatType>
-void CommandServer<BoardType, HatType>::set_error(const char* format, ...) {
+template<typename BoardType, typename ShieldType>
+void CommandServer<BoardType, ShieldType>::set_error(const char* format, ...) {
   va_list args;
   va_start(args, format);
   vsnprintf(errorBuffer_, MAX_ERROR_LEN, format, args);
@@ -1674,9 +1674,9 @@ void CommandServer<BoardType, HatType>::set_error(const char* format, ...) {
   errorBuffer_[MAX_ERROR_LEN - 1] = 0;
 }
 
-template<typename BoardType, typename HatType>
-const char* CommandServer<BoardType, HatType>::get_last_error() const {
+template<typename BoardType, typename ShieldType>
+const char* CommandServer<BoardType, ShieldType>::get_last_error() const {
   return errorBuffer_;
 }
 
-template class CommandServer<BoardType, HatType>;
+template class CommandServer<BoardType, ShieldType>;

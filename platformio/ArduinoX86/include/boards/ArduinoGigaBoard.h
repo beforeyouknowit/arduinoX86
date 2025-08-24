@@ -31,9 +31,9 @@
 #include <serial_config.h>
 #include <DebugPrint.h>
 
-#include "../hats/HatTraits.h"
+#include "../shields/ShieldTraits.h"
 
-template<typename Hat>
+template<typename Shield>
 class ArduinoGigaBoard : public DebugPrintMixin<decltype(Serial2)> {
 public:
   ArduinoGigaBoard() : DebugPrintMixin(Serial2) {}
@@ -43,11 +43,11 @@ public:
     // Initialize SDRAM
     SDRAM.begin();
 
-    // Initialize GPIO via the hat
-    Hat::initPins();
+    // Initialize GPIO via the shield
+    Shield::initPins();
 
     // Initialize the Serial2 port for debugging.
-    Serial2.begin(HatTraits<Hat>::kDebugBaudRate);
+    Serial2.begin(ShieldTraits<Shield>::kDebugBaudRate);
     while (!Serial2)
       ;
 

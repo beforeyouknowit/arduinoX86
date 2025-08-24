@@ -32,22 +32,22 @@ struct BoardTraits {
 };
 
 // Forward declare board classes
-template<typename Hat>
+template<typename Shield>
 class ArduinoDueBoard;
 
-template<typename Hat>
+template<typename Shield>
 class ArduinoGigaBoard;
 
 // Specialization for ArduinoDueBoard
-template<typename Hat>
-struct BoardTraits<ArduinoDueBoard<Hat>> {
+template<typename Shield>
+struct BoardTraits<ArduinoDueBoard<Shield>> {
   static constexpr int _DBUS_01 = 23;
   static constexpr int _CLK_PIN = 4;
 };
 
 // Specialization for ArduinoGigaBoard
-template<typename Hat>
-struct BoardTraits<ArduinoGigaBoard<Hat>> {
+template<typename Shield>
+struct BoardTraits<ArduinoGigaBoard<Shield>> {
   static constexpr int _DBUS_01 = 23;
   static constexpr int _CLK_PIN = 4;
 };

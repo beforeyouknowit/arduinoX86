@@ -27,26 +27,26 @@
 
 extern uint8_t PACKET_BUFFER[PACKET_SIZE]; // Packet buffer for serial communication
 
-#if defined(HAT_8088_V1)
-#include <hats/Hat8088.h>
+#if defined(SHIELD_8088_V1)
+#include <shields/Shield8088.h>
 
-// Define the static constexpr members of Hat8088
-constexpr std::array<int,8> Hat8088::OUTPUT_PINS;
-constexpr std::array<int,40> Hat8088::INPUT_PINS;
+// Define the static constexpr members of Shield8088
+constexpr std::array<int,8> Shield8088::OUTPUT_PINS;
+constexpr std::array<int,40> Shield8088::INPUT_PINS;
 #endif
 
-#if defined(HAT_286_5V_V1)
-#include <hats/Hat80286.h>
+#if defined(SHIELD_286_5V_V1)
+#include <shields/Shield80286.h>
 
-// Define the static constexpr members of Hat80286
-constexpr std::array<int,6> Hat80286::OUTPUT_PINS;
-constexpr std::array<int,36> Hat80286::INPUT_PINS;
+// Define the static constexpr members of Shield80286
+constexpr std::array<int,6> Shield80286::OUTPUT_PINS;
+constexpr std::array<int,36> Shield80286::INPUT_PINS;
 #endif
 
-#if defined(HAT_386_3V_V1)
-#include <hats/Hat80386.h>
+#if defined(SHIELD_386EX_V1)
+#include <shields/Shield80386.h>
 
-// Define the static constexpr members of Hat80286
-constexpr std::array<int,11> Hat80386::OUTPUT_PINS;
-constexpr std::array<int,35> Hat80386::INPUT_PINS;
+// Define the static constexpr members of Shield80386
+constexpr std::array<int,11> Shield80386::OUTPUT_PINS;
+constexpr std::array<int,35> Shield80386::INPUT_PINS;
 #endif

@@ -9,20 +9,20 @@
 // Define this if you have connected an 8087 FPU
 //#define FPU_8087
 
-// The main AruduinoX86 boards are:
-// HAT_8088_V1 - Hat8088 rev 1.1 - Due & Giga compatible, supporting the 8088, 8086, NEC V20 and NEC V30 CPUs
-// HAT_80186_3V_V1 - Hat80186 3V rev 1 - Due & Giga compatible, supporting 3V 186 CPUs (80L186)
-// HAT_286_3V_V1 - Hat286_3V - Due & Giga compatible. Uses shifters to operate at 3V. (Never produced)
-// HAT_286_5V_V1 - Hat286_5V - Giga only, allowing 5V 286 CPUs (80C286) to be used without shifters.
+// The main AruduinoX86 shields are:
+// SHIELD_8088_V1 - Shield8088 rev 1.1 - Due & Giga compatible, supporting the 8088, 8086, NEC V20 and NEC V30 CPUs
+// SHIELD_80186_3V_V1 - Shield80186 3V rev 1 - Due & Giga compatible, supporting 3V 186 CPUs (80L186)
+// SHIELD_286_3V_V1 - Shield286_3V - Due & Giga compatible. Uses shifters to operate at 3V. (Never produced)
+// SHIELD_286_5V_V1 - Shield286_5V - Giga only, allowing 5V 286 CPUs (80C286) to be used without shifters.
 
 // Only define one of these!
-//#define HAT_8088_V1
-//#define HAT_80186_3V_V1
-//#define HAT_286_5V_V1
-#define HAT_386_3V_V1
+//#define SHIELD_8088_V1
+//#define SHIELD_80186_3V_V1
+//#define SHIELD_286_5V_V1
+#define SHIELD_386EX_V1
 
-#if (defined(HAT_8088_V1) + defined(HAT_80186_V1) + defined(HAT_286_5V_V1) + defined(HAT_386_3V_V1)) != 1
-  #error "You must define only one hat type!"
+#if (defined(SHIELD_8088_V1) + defined(SHIELD_80186_3V_V1) + defined(SHIELD_286_5V_V1) + defined(SHIELD_386EX_V1)) != 1
+  #error "You must define only one shield type!"
 #endif
 
 // Baud rate is ignored for Arduino DUE as it uses native SerialUSB. This is legacy.

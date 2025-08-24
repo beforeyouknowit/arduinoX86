@@ -29,9 +29,8 @@ void cycle();
 #include <arduinoX86.h>
 #include <serial_config.h>
 #include <gpio_pins.h>
-#include <hats/HatBase.h>
-#include <hats/HatBase.h>
-#include <hats/Pins.h>
+#include <shields/ShieldBase.h>
+#include <shields/Pins.h>
 #include <DebugFilter.h>
 
 #define CPU_8088
@@ -62,7 +61,7 @@ void cycle();
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
 
-// Data bus mappings for 8088 hat.
+// Data bus mappings for 8088 shield.
 #define SET_DBUS_00 do { SET_PIN_D22; } while (0)
 #define CLEAR_DBUS_00 do { CLEAR_PIN_D22; } while (0)
 
@@ -364,7 +363,7 @@ void cycle();
   #define READ_LOCK_PIN READ_PIN_D10
 #endif
 
-class Hat8088 : public HatBase<Hat8088> {
+class Shield8088 : public ShieldBase<Shield8088> {
 
 private:
   // Address pins, used for slow address reading via digitalRead()
@@ -538,7 +537,7 @@ public:
     }
   }
 
-  /// @brief Return true if the current hat has a multiplexed bus.
+  /// @brief Return true if the current shield has a multiplexed bus.
   static bool hasMultiplexedBusImpl() {
     return true;
   }

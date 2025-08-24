@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "HatBase.h"
+#include "ShieldBase.h"
 #include "../serial_config.h"
 #include "../gpio_pins.h"
 
@@ -64,7 +64,7 @@
 
 #define READ_SMI_PIN 1
 
-class Hat80186 : public HatBase<Hat80186> {
+class Shield80186 : public ShieldBase<Shield80186> {
 private:
   // Address pins, used for slow address reading via digitalRead()
   static constexpr std::array<int,20> ADDRESS_PINS = {{
@@ -166,7 +166,7 @@ public:
     return data;
   }
 
-  /// @brief Return true if the current hat has a multiplexed bus.
+  /// @brief Return true if the current shield has a multiplexed bus.
   static bool hasMultiplexedBusImpl() {
     return true;
   }

@@ -15,30 +15,48 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-
 #pragma once
+// Define the baud rate to use for the RS232 module plugged into your shield
+// (or possibly directly into your Arduino, but in this case our "shield" is
+// the specific pinout template.
 
-#if defined(HAT_8088_V1)
-  #include "hats/Hat8088.h"
-  class Hat8088;
-  using HatType = Hat8088;
-#elif defined(HAT_80186_3V_V1)
-  #include "hats/Hat80186.h"
-  class Hat80186;
-  using HatType = Hat80186;
-#elif defined(HAT_286_5V_V1)
-  #include "hats/Hat80286.h"
-  class Hat80286;
-  using HatType = Hat80286;
-#elif defined(HAT_386_3V_V1)
-  #include "hats/Hat80386.h"
-  class Hat80386;
-  using HatType = Hat80386;
-#else
-  #error "You must define a hat type!"
-#endif 
+#include <config.h>
+
+class Shield8088;
+class Shield80186;
+class Shield80286;
+class Shield80386;
+
+template<typename Shield>
+struct ShieldTraits {
+  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE; // Default baud rate
+};
+
+// Specialize for Shield8088
+template<>
+struct ShieldTraits<Shield8088> {
+  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
+};
+
+// Specialize for Shield80186
+template<>
+struct ShieldTraits<Shield80186> {
+  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
+};
+
+// Specialize for Shield80286
+template<>
+struct ShieldTraits<Shield80286> {
+  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
+};
+
+// Specialize for Shield80386
+template<>
+struct ShieldTraits<Shield80386> {
+  static constexpr unsigned long kDebugBaudRate = DEBUG_BAUD_RATE;
+};

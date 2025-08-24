@@ -30,11 +30,11 @@
 #include <BusTypes.h>
 #include <CpuTypes.h>
 #include <gpio_pins.h>
-#include <hats/Pins.h>
+#include <shields/Pins.h>
 #include <ansi_color.h>
 
 template<typename Derived>
-class HatBase {
+class ShieldBase {
 
   public: 
     void setBusDirection(BusDirection direction, ActiveBusWidth width = ActiveBusWidth::Sixteen) {
@@ -174,12 +174,12 @@ class HatBase {
       }
     }
 
-  /// @brief  Return true if the current hat has segment status lines.
+  /// @brief  Return true if the current shield has segment status lines.
   static bool hasSegmentStatus() {
     return true;
   }
 
-  /// @brief Return true if the current hat has a multiplexed bus.
+  /// @brief Return true if the current shield has a multiplexed bus.
   static bool hasMultiplexedBus() {
     return Derived::hasMultiplexedBusImpl();
   }
@@ -276,5 +276,5 @@ class HatBase {
     // … shared pin‐setup …
   }
 
-  virtual ~HatBase() = default;
+  virtual ~ShieldBase() = default;
 };

@@ -23,20 +23,20 @@
 
 #pragma once
 
-#include <Hat.h>
+#include <Shield.h>
 
 #include "boards/ArduinoDueBoard.h"
 #include "boards/ArduinoGigaBoard.h"
 
-// Select Board base (templated on Hat)
+// Select Board base (templated on Shield)
 #if defined(__SAM3X8E__) // If Arduino DUE
-  template<typename Hat>
-  using BoardTypeBase = ArduinoDueBoard<Hat>;
+  template<typename Shield>
+  using BoardTypeBase = ArduinoDueBoard<Shield>;
 #elif defined(ARDUINO_GIGA)
-  template<typename Hat>
-  using BoardTypeBase = ArduinoGigaBoard<Hat>;
+  template<typename Shield>
+  using BoardTypeBase = ArduinoGigaBoard<Shield>;
 #else
   #error "Unsupported board type!"
 #endif
 
-using BoardType = BoardTypeBase<HatType>;
+using BoardType = BoardTypeBase<ShieldType>;

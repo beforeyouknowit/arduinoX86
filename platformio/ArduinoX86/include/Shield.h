@@ -15,30 +15,31 @@
     THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER   
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
 
 #pragma once
+#include <config.h>
 
-#include <Arduino.h>
-
-/// @brief Enumeration of input pins used by the CPU.
-/// These pins can be referenced as parameters to a Hat's writePin() or readPin() methods,
-/// but there is no guarantee that all pins are implemented on all Hats.
-enum class OutputPin : uint8_t {
-  Ready,
-  Test,
-  Intr,
-  Nmi,
-  Invalid, // Invalid pin variant is used as only previous pins in the list can be sent as 
-           // parameters to cmd_write_pin().
-  Reset,
-  Clock,
-  Hold,
-  Busy,
-  Smi,
-};
-
+#if defined(SHIELD_8088_V1)
+  #include <shields/Shield8088.h>
+  class Shield8088;
+  using ShieldType = Shield8088;
+#elif defined(SHIELD_80186_3V_V1)
+  #include <shields/Shield80186.h>
+  class Shield80186;
+  using ShieldType = Shield80186;
+#elif defined(SHIELD_286_5V_V1)
+  #include <shields/Shield80286.h>
+  class Shield80286;
+  using ShieldType = Shield80286;
+#elif defined(SHIELD_386EX_V1)
+  #include <shields/Shield80386.h>
+  class Shield80386;
+  using ShieldType = Shield80386;
+#else
+  #error "You must define a shield type!"
+#endif 

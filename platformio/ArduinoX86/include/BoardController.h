@@ -25,22 +25,22 @@
 
 #include <CpuTypes.h>
 #include <BusTypes.h>
-#include <hats/Pins.h>
+#include <shields/Pins.h>
 
-template<typename Board, typename Hat>
+template<typename Board, typename Shield>
 class BoardController {
   Board& board;
-  Hat hat;  // Add Hat instance to maintain state
+  Shield shield;  // Add Shield instance to maintain state
 
 public:
-  explicit BoardController(Board& b) : board(b), hat() {}
+  explicit BoardController(Board& b) : board(b), shield() {}
   
-  // Constructor that allows passing Hat constructor parameters
+  // Constructor that allows passing Shield constructor parameters
   template<typename... HatArgs>
-  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), hat(std::forward<HatArgs>(hatArgs)...) {}
+  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), shield(std::forward<HatArgs>(hatArgs)...) {}
   
   CpuResetResult resetCpu() {
-    return hat.resetCpu(board);
+    return shield.resetCpu(board);
   }
 
   Board& getBoard() {
@@ -48,118 +48,118 @@ public:
   }
 
   void tickCpu() {
-    hat.tickCpu();
+    shield.tickCpu();
   }
 
   static int getAddressBusWidth() {
-    return Hat::getAddressBusWidth();
+    return Shield::getAddressBusWidth();
   }
 
   static int getAddressDigits() {
-    return Hat::getAddressDigits();
+    return Shield::getAddressDigits();
   }
 
   static bool hasSegmentStatus() {
-    return Hat::hasSegmentStatus();
+    return Shield::hasSegmentStatus();
   }
 
   static BusStatus decodeBusStatus(uint8_t status_byte) {
-    return Hat::decodeBusStatus(status_byte);
+    return Shield::decodeBusStatus(status_byte);
   }
 
   static TCycle getNextCycle(TCycle current_cycle, BusStatus current_status, BusStatus latched_status) {
-    return Hat::getNextCycle(current_cycle, current_status, latched_status);
+    return Shield::getNextCycle(current_cycle, current_status, latched_status);
   }
 
   uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
-    return hat.readDataBus(width, peek);
+    return shield.readDataBus(width, peek);
   }
 
   void writeDataBus(uint16_t data, ActiveBusWidth width) {
-    hat.writeDataBus(data, width);
+    shield.writeDataBus(data, width);
   }
 
   uint32_t readAddressBus(bool peek) {
-    return hat.readAddressBus(peek);
+    return shield.readAddressBus(peek);
   }
 
   static void writePin(OutputPin pin, bool value) {
-    Hat::writePin(pin, value);
+    Shield::writePin(pin, value);
   }
 
   uint8_t readCpuStatusLines() {
-    return hat.readCpuStatusLines();
+    return shield.readCpuStatusLines();
   }
 
   uint8_t readBusControllerCommandLines() {
-    return hat.readBusControllerCommandLines();
+    return shield.readBusControllerCommandLines();
   }
 
   uint8_t readBusControllerControlLines() {
-    return hat.readBusControllerControlLines();
+    return shield.readBusControllerControlLines();
   }
 
   bool cpuIsReading(BusTransferType &read_type) const {
-    return Hat::cpuIsReading(read_type);
+    return Shield::cpuIsReading(read_type);
   }
 
   bool cpuIsWriting(BusTransferType &write_type) const {
-    return Hat::cpuIsWriting(write_type);
+    return Shield::cpuIsWriting(write_type);
   }
 
   static const char* getBusStatusString(BusStatus status) {
-    return Hat::getBusStatusString(status);
+    return Shield::getBusStatusString(status);
   }
 
   static const char* getBusStatusColor(BusStatus status) {
-    return Hat::getBusStatusColor(status);
+    return Shield::getBusStatusColor(status);
   }
 
   static const char* getTCycleString(TCycle cycle) {
-    return Hat::getTCycleString(cycle);
+    return Shield::getTCycleString(cycle);
   }
 
   static bool hasMultiplexedBus() {
-    return Hat::hasMultiplexedBus();
+    return Shield::hasMultiplexedBus();
   }
 
   bool readBHEPin() {
-    return hat.readBHEPin();
+    return shield.readBHEPin();
   }
 
   bool readALEPin() {
-    return hat.readALEPin();
+    return shield.readALEPin();
   }
 
   bool readLockPin() {
-    return hat.readLockPin();
+    return shield.readLockPin();
   }
 
   bool readReadyPin() {
-    return hat.readReadyPin();
+    return shield.readReadyPin();
   }
 
   bool readMRDCPin() {
-    return hat.readMRDCPin();
+    return shield.readMRDCPin();
   }
 
   bool readAMWCPin() {
-    return hat.readAMWCPin();
+    return shield.readAMWCPin();
   }
 
   bool readMWTCPin() {
-    return hat.readMWTCPin();
+    return shield.readMWTCPin();
   }
 
   bool readIORCPin() {
-    return hat.readIORCPin();
+    return shield.readIORCPin();
   }
 
   bool readIOWCPin() {
-    return hat.readIOWCPin();
+    return shield.readIOWCPin();
   }
 
   bool readAIOWCPin() {
-    return hat.readAIOWCPin();
+    return shield.readAIOWCPin();
   }
 };

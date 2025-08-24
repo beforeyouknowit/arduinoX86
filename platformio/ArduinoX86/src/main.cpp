@@ -109,18 +109,18 @@ uint8_t NMI_STACK_BUFFER[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-// Specialize BoardType for the chosen HatType
-using BoardType = BoardTypeBase<HatType>;
+// Specialize BoardType for the chosen ShieldType
+using BoardType = BoardTypeBase<ShieldType>;
 
 // Instantiate board and controller
 BoardType Board;
-BoardController<BoardType, HatType> Controller(Board); // Uses default Hat constructor
-// Or if you want to pass Hat constructor parameters:
-// BoardController<BoardType, HatType> Controller(Board, true); // Pass emulate_bus_controller = true
+BoardController<BoardType, ShieldType> Controller(Board); // Uses default Shield constructor
+// Or if you want to pass Shield constructor parameters:
+// BoardController<BoardType, ShieldType> Controller(Board, true); // Pass emulate_bus_controller = true
 
 // Instantiate the command server
 namespace ArduinoX86 {  
-  CommandServer<BoardType, HatType> Server(Controller);
+  CommandServer<BoardType, ShieldType> Server(Controller);
   BusEmulator *Bus = nullptr;
   CycleStateLogger *CycleLogger = nullptr;
 };
@@ -181,7 +181,7 @@ void setup() {
   //i8288_status();
 
 #if HAT_8087_V1
-  debugPrintlnColor(ansi::bright_cyan, "8087 Hat specified!");
+  debugPrintlnColor(ansi::bright_cyan, "8087 Shield specified!");
 #endif
 
   // Patch the jumps in programs that jump
@@ -981,7 +981,7 @@ void cycle() {
     //  - Executing a HALT
     //  - Asserting NMI before the end of the instruction
     case ServerState::Execute:
-      if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, HatType>::FLAG_EXECUTE_AUTOMATIC) {
+      if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, ShieldType>::FLAG_EXECUTE_AUTOMATIC) {
         handle_execute_automatic();
       }
       else {

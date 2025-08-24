@@ -24,19 +24,19 @@
 #pragma once
 
 #include <Board.h>
-#include <Hat.h>
+#include <Shield.h>
 #include <bus_emulator/BusEmulator.h>
 #include <CycleStateLogger.h>
 
-template<typename BoardType, typename HatType> class BoardController;
-template<typename BoardType, typename HatType> class CommandServer;
+template<typename BoardType, typename ShieldType> class BoardController;
+template<typename BoardType, typename ShieldType> class CommandServer;
 
 extern Cpu CPU;
 extern Intel8288 I8288;
-extern BoardController<BoardType,HatType> Controller;
+extern BoardController<BoardType,ShieldType> Controller;
 
 namespace ArduinoX86 {
-  extern CommandServer<BoardType,HatType> Server;
+  extern CommandServer<BoardType,ShieldType> Server;
   extern BusEmulator *Bus;
   extern CycleStateLogger *CycleLogger;
 }

@@ -30,8 +30,8 @@ void cycle();
 #include <serial_config.h>
 #include <gpio_pins.h>
 #include <BusTypes.h>
-#include <hats/HatBase.h>
-#include <hats/Pins.h>
+#include <shields/ShieldBase.h>
+#include <shields/Pins.h>
 #include <DebugFilter.h>
 
 #define CPU_386
@@ -221,7 +221,7 @@ void cycle();
     }                                             \
   } while (0)
 
-class Hat80386 : public HatBase<Hat80386> {
+class Shield80386 : public ShieldBase<Shield80386> {
 
 private:
   // Address pins, used for slow address reading via digitalRead()
@@ -264,7 +264,7 @@ protected:
   
 public:
 
-  Hat80386(bool emulate_bus_controller = false) : _emulate_bus_controller(emulate_bus_controller) 
+  Shield80386(bool emulate_bus_controller = false) : _emulate_bus_controller(emulate_bus_controller) 
     {}
 
   static void initPins() {
@@ -291,7 +291,7 @@ public:
     return ADDRESS_DIGITS;
   }
 
-  /// @brief Return true if the current hat has a multiplexed bus.
+  /// @brief Return true if the current shield has a multiplexed bus.
   static bool hasMultiplexedBusImpl() {
     return false;
   }

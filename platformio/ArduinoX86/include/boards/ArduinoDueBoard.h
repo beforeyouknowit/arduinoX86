@@ -28,18 +28,18 @@
 #include "../serial_config.h"   // Board-specific configuration and pin mappings
 
 #include "../DebugPrint.h"   // Debug print mixin
-#include "../hats/HatTraits.h" // Hat-specific traits
-template<typename Hat>
+#include "../shields/ShieldTraits.h" // Shield-specific traits
+template<typename Shield>
 class ArduinoDueBoard : public DebugPrintMixin<decltype(Serial1)> {
 public:
   ArduinoDueBoard() : DebugPrintMixin(Serial1) {}
 
   void init() {
-    // Initialize GPIO via the hat
-    Hat::initPins();
+    // Initialize GPIO via the shield
+    Shield::initPins();
 
     // Initialize the Serial1 port for debugging.
-    Serial1.begin(HatTraits<Hat>::kDebugBaudRate);
+    Serial1.begin(ShieldTraits<Shield>::kDebugBaudRate);
     while (!Serial1)
       ;
     // Initialize the board's debugging states. 

@@ -35,7 +35,7 @@ enum class CpuBusWidth : uint8_t {
   Sixteen,
 };
 
-// Type of CPU. These are either detected or specified by the configured hat.
+// Type of CPU. These are either detected or specified by the configured shield.
 enum class CpuType : uint8_t {
   Undetected,
   i8088, 

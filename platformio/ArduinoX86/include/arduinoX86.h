@@ -30,7 +30,7 @@
 #include <serial_config.h>
 #include <ansi_color.h>
 #include <BusTypes.h>
-#include <Hat.h>
+#include <Shield.h>
 #include <gpio_pins.h>
 #include <Cpu.h>
 #include <InstructionQueue.h>

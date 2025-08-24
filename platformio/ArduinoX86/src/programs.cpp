@@ -88,7 +88,7 @@ InlineProgram LOAD_PROGRAM_SMM_386("LOAD_SMM_386", {
 // This routine is run first, in the reset vector, before the Jump program.
 //
 // CPU detection is only relevant for hats that support multiple CPUs which is pretty much just 
-// the original Arduino8088 hat that supports the 8088, 8086, V20, and V30 CPUs.
+// the original Arduino8088 shield that supports the 8088, 8086, V20, and V30 CPUs.
 InlineProgram CPUID_PROGRAM("CPUID", {
   0xD6,                    // SALC/Undefined
   0xD9, 0x3E, 0x00, 0x00,  // fnstcw [0000]
