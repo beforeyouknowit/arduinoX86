@@ -51,6 +51,19 @@ impl Scheduler {
         self.events.push_back(event);
     }
 
+    pub fn clear_events(&mut self) {
+        self.events.clear();
+    }
+
+    pub fn remove_event_type(&mut self, event_type: &GuiEvent) {
+        self.events.extract_if(|e| e.event == *event_type).for_each(drop);
+    }
+
+    pub fn replace_event_type(&mut self, event: ScheduledEvent) {
+        self.remove_event_type(&event.event);
+        self.add_event(event);
+    }
+
     pub fn run(&mut self, events: &mut GuiEventQueue) {
         let elapsed = self.last_run.elapsed();
         self.last_run = Instant::now();
@@ -66,6 +79,9 @@ impl Scheduler {
                 match event.event {
                     GuiEvent::PollStatus => {
                         events.push(GuiEvent::PollStatus);
+                    }
+                    GuiEvent::RefreshMemory => {
+                        events.push(GuiEvent::RefreshMemory);
                     }
                     _ => {}
                 }

@@ -26,11 +26,13 @@
 #include <CpuTypes.h>
 #include <BusTypes.h>
 #include <shields/Pins.h>
+#include <interrupts.h>
 
 template<typename Board, typename Shield>
 class BoardController {
   Board& board;
   Shield shield;  // Add Shield instance to maintain state
+  bool ale_interrupt_enabled_ = false;
 
 public:
   explicit BoardController(Board& b) : board(b), shield() {}
@@ -45,6 +47,28 @@ public:
 
   Board& getBoard() {
     return board;
+  }
+
+  void setAleInterrupt(bool enabled) {
+    if (enabled != ale_interrupt_enabled_) {
+      ale_interrupt_enabled_ = enabled;
+      if (enabled) {
+        board.debugPrintln(DebugType::EMIT, "BoardController: Enabling ALE interrupt");
+        attachInterrupt(digitalPinToInterrupt(ALE_PIN), ale_interrupt_handler, ALE_TRIGGER);
+        attachInterrupt(digitalPinToInterrupt(READYO_PIN), readyo_interrupt_handler, FALLING);
+        attachInterrupt(digitalPinToInterrupt(CLK_PIN), cycle_edge_interrupt_handler, RISING);
+      } else {
+        detachInterrupt(digitalPinToInterrupt(ALE_PIN));
+        detachInterrupt(digitalPinToInterrupt(READYO_PIN));
+        detachInterrupt(digitalPinToInterrupt(CLK_PIN));
+      }
+    }
+    if (enabled) {
+      
+    }
+    else {
+      board.debugPrintln(DebugType::EMIT, "BoardController: ALE interrupt disabled");
+    }
   }
 
   void tickCpu() {
@@ -85,6 +109,10 @@ public:
 
   static void writePin(OutputPin pin, bool value) {
     Shield::writePin(pin, value);
+  }
+
+  static bool readPin(OutputPin pin) {
+    return Shield::readPin(pin);
   }
 
   uint8_t readCpuStatusLines() {
@@ -161,5 +189,9 @@ public:
 
   bool readAIOWCPin() {
     return shield.readAIOWCPin();
+  }
+
+  void printPinStates() {
+    shield.printPinStates(board);
   }
 };

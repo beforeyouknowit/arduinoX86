@@ -52,6 +52,7 @@ public:
       ;
 
     // Initialize the board's debugging states. 
+    // Warning, Error, and Emit are always enabled.
     setDebugType(DebugType::STATE,     DEBUG_STATE);
     setDebugType(DebugType::RESET,     DEBUG_RESET);
     setDebugType(DebugType::SETUP,     DEBUG_SETUP);
@@ -72,6 +73,8 @@ public:
     setDebugType(DebugType::CMD,       DEBUG_CMD);
     setDebugType(DebugType::DUMP,      DEBUG_DUMP);
     setDebugType(DebugType::SERVER,    DEBUG_SERVER);
+    setDebugType(DebugType::WARNING,   true);
+    setDebugType(DebugType::ERROR,     true);
     setDebugType(DebugType::EMIT,      true);
   }
 };

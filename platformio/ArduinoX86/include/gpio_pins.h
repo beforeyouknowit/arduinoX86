@@ -309,6 +309,11 @@
     #define SET_PIN_D88     (GPIOE->BSRR = BIT03)
     #define CLEAR_PIN_D88   (GPIOE->BSRR = (BIT03 << 16))
 
+    #define READ_PIN_D93            ((GPIOB->IDR & BIT05) != 0)
+    #define WRITE_PIN_D93(x)  ((x) ? (GPIOB->ODR |= BIT05) : (GPIOB->ODR &= ~BIT05))
+    #define READ_PIN_D94            ((GPIOB->IDR & BIT13) != 0)
+    #define WRITE_PIN_D94(x)  ((x) ? (GPIOB->ODR |= BIT13) : (GPIOB->ODR &= ~BIT13))
+
 #elif defined(__SAM3X8E__) 
     // If Arduino DUE
     #define READ_PIN_D03      ((PIOC->PIO_PDSR & BIT28) != 0)

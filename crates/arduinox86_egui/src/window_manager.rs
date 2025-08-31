@@ -110,17 +110,39 @@ impl WindowManager {
             }
         }
 
-        // Close closed windows
-        for name in close_windows {
+        // Close closed binary windows
+        for name in &close_windows {
             log::debug!("Closing binary view window: {}", name);
-            _ = rm.remove_blob(&name);
-            self.blob_windows.remove(&name);
+            _ = rm.remove_blob(name);
+            self.blob_windows.remove(name);
+        }
+        close_windows.clear();
+
+        for (name, editor) in &mut self.code_windows {
+            if let Window::CodeEditor { open, window } = editor {
+                let initial_open = *open;
+                egui::Window::new(format!("Code Editor: {}", window.program_name()))
+                    .open(open)
+                    .default_width(400.0)
+                    .default_height(300.0)
+                    .show(e_ctx, |ui| {
+                        window.show(ui, syntect_settings, events);
+                    });
+
+                if initial_open && !*open {
+                    // Window was closed
+                    close_windows.push(name.clone());
+                }
+            }
+            else {
+                log::error!("Failed to code editor for window: {}", name);
+            }
         }
 
-        for (_name, editor) in &mut self.code_windows {
-            if let Window::CodeEditor { window, .. } = editor {
-                window.show(e_ctx, syntect_settings, events);
-            }
+        // Close closed code windows
+        for name in &close_windows {
+            log::debug!("Closing code editor window: {}", name);
+            self.code_windows.remove(name);
         }
     }
 

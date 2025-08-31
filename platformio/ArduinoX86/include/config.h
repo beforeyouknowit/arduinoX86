@@ -20,8 +20,9 @@
 //#define SHIELD_80186_3V_V1
 //#define SHIELD_286_5V_V1
 #define SHIELD_386EX_V1
+//#define SHIELD_386EX_V2
 
-#if (defined(SHIELD_8088_V1) + defined(SHIELD_80186_3V_V1) + defined(SHIELD_286_5V_V1) + defined(SHIELD_386EX_V1)) != 1
+#if (defined(SHIELD_8088_V1) + defined(SHIELD_80186_3V_V1) + defined(SHIELD_286_5V_V1) + defined(SHIELD_386EX_V1) + defined(SHIELD_386EX_V2)) != 1
   #error "You must define only one shield type!"
 #endif
 
@@ -61,7 +62,7 @@
 // Note: tracing a STORE operation will likely cause it to timeout on the client.
 #define TRACE_RESET     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces during CPU Reset.
 #define TRACE_SETUP     ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuSetup state.
-#define TRACE_VECTOR    ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
+#define TRACE_VECTOR    ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the JumpVector state.
 #define TRACE_LOAD      ((1 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Load state.
 #define TRACE_ID        ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the CpuId state.
 #define TRACE_PREFTECH  ((0 | TRACE_ALL) & ~TRACE_NONE) // Print cycle traces for the Prefetch state.

@@ -230,7 +230,13 @@ void cycle();
 #define S2_PIN 16
 #define READ_BHE_PIN READ_PIN_D17
 #define READ_RESET_PIN READ_PIN_D05
+
+#define READY_ASSERT 1
+#define READY_DEASSERT 0
+#define READY_PIN 6
 #define READ_READY_PIN READ_PIN_D06
+#define READ_READY_PIN_NORM (READ_READY_PIN)
+
 #define READ_TEST_PIN READ_PIN_D07
 #define READ_INTR_PIN READ_PIN_D12
 #define READ_NMI_PIN READ_PIN_D13
@@ -244,7 +250,6 @@ void cycle();
 #define READ_QS0_PIN READ_PIN_D09
 #define READ_QS1_PIN READ_PIN_D08
 
-#define READY_PIN 6
 #define TEST_PIN 7
 #define LOCK_PIN 10
 #define INTR_PIN 12
@@ -278,6 +283,8 @@ void cycle();
 #define IOWC_PIN 47
 #define INTA_PIN 45
 
+#define ALE_PIN  50
+#define ALE_TRIGGER RISING
 #define READ_ALE_PIN      READ_PIN_D50
 #define READ_MRDC_PIN     READ_PIN_D51
 #define READ_AMWC_PIN     READ_PIN_D52
@@ -309,27 +316,6 @@ void cycle();
   #define WRITE_AEN_PIN(x) ((x) ? (PIOA->PIO_SODR = BIT16) : (PIOA->PIO_CODR = BIT16))
   // A1: PA24
   #define WRITE_CEN_PIN(x) ((x) ? (PIOA->PIO_SODR = BIT24) : (PIOA->PIO_CODR = BIT24))
-
-#elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-  // D4
-  #define WRITE_CLK(x) ((x) ? (PORTG |= (1 << 5)) : (PORTG &= ~(1 << 5))) // CLK is PG5
-  // D5
-  #define WRITE_RESET(x) ((x) ? (PORTE |= (1 << 3)) : (PORTE &= ~(1 << 3))) // RESET is PE3
-  // D6
-  #define WRITE_READY_PIN(x) ((x) ? (PORTH |= (1 << 3)) : (PORTH &= ~(1 << 3)))
-  // D7
-  #define WRITE_TEST_PIN(x) ((x) ? (PORTH |= (1 << 4)) : (PORTH &= ~(1 << 4)))
-  // D10
-  #define WRITE_LOCK_PIN(x) ((x) ? (PORTB |= (1 << 4)) : (PORTB &= ~(1 << 4)))
-  // D12
-  #define WRITE_INTR_PIN(x) ((x) ? (PORTB |= (1 << 6)) : (PORTB &= ~(1 << 6)))
-  // D13
-  #define WRITE_NMI_PIN(x) ((x) ? (PORTB |= (1 << 7)) : (PORTB &= ~(1 << 7)))
-  // A0
-  #define WRITE_AEN_PIN(x) ((x) ? (PORTF |= 0x01) : (PORTF &= ~0x01))
-  // A1
-  #define WRITE_CEN_PIN(x) ((x) ? (PORTF |= (1 << 1)) : (PORTF &= ~(1 << 1)))
-
 #elif defined (ARDUINO_GIGA)
 
   // D4: PJ8
@@ -357,8 +343,6 @@ void cycle();
 
 #if defined(__SAM3X8E__) // If Arduino DUE
   #define READ_LOCK_PIN READ_PIN_D10
-#elif defined(__AVR_ATmega2560__) // If Arduino MEGA
-  #define READ_LOCK_PIN 0
 #elif defined(ARDUINO_GIGA)
   #define READ_LOCK_PIN READ_PIN_D10
 #endif

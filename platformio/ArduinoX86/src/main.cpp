@@ -451,7 +451,7 @@ void print_cpu_state() {
   char aiow_chr = !aiowc ? 'A' : '.';
   char iow_chr = !iowc ? 'W' : '.';
 
-  char ready_chr = READ_READY_PIN ? 'R' : '.';
+  char ready_chr = READ_READY_PIN_NORM ? 'R' : '.';
   char reset_chr = READ_RESET_PIN ? 'X' : '.';
   char intr_chr = READ_INTR_PIN ? 'I' : '.';
   char inta_chr = '.';
@@ -572,6 +572,8 @@ void print_cpu_state() {
       reset_chr, ready_chr, lock_chr, intr_chr, inta_chr, nmi_chr, smi_chr, test_chr, bhe_chr);
 
   DEBUG_SERIAL.print(buf);
+
+  Controller.printPinStates();
 
 #if defined(FPU_8087)
   snprintf(
@@ -761,12 +763,13 @@ void cycle() {
   CPU.wait_state_ct++;
   if (CPU.wait_state_ct >= CPU.wait_states) {
     // If we have waited enough, we can clear the wait state.
-    Controller.writePin(OutputPin::Ready, true);
+    //Controller.writePin(OutputPin::Ready, READY_ASSERT);
     //Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state cleared ##");
   }
 
   // Check for CPU shutdown.
-  if ((CPU.bus_state == HALT) && (CPU.address_bus == 0x000000)) {
+  if ((CPU.bus_state == HALT) && (CPU.address_bus == 0x000000) && (!CPU.is_shutdown())) {
+    CPU.set_shutdown();
     Controller.getBoard().debugPrintln(DebugType::ERROR, "## CPU shutdown detected ##");
     ArduinoX86::Server.change_state(ServerState::Shutdown);
     set_error("CPU shutdown detected!");
@@ -1259,7 +1262,7 @@ void cycle() {
   if (Controller.readALEPin() && CPU.wait_states > 0) {
     // Lower READY line on ALE.
     //Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state requested ##");
-    Controller.writePin(OutputPin::Ready, false);
+    //Controller.writePin(OutputPin::Ready, READY_DEASSERT);
     CPU.wait_state_ct = 0;
   }
 
@@ -1424,9 +1427,12 @@ void handle_jump_vector_state(uint8_t q) {
   if (Controller.readALEPin()) {
     // Jump is finished on first address latch of LOAD_SEG:0
     uint32_t dest = calc_flat_address(LOAD_SEG, 0);
-    if (dest == CPU.address_latch()) {
-      Controller.getBoard().debugPrint(DebugType::VECTOR, "## ALE at LOAD_SEG. Transitioning to Load state. SEG: ");
-      Controller.getBoard().debugPrintln(DebugType::VECTOR, CPU.address_latch(), 16);
+    if (dest == (CPU.address_latch() & ~0x000F)) {
+      if (dest == (CPU.address_latch())) {
+        Controller.getBoard().debugPrintf(DebugType::VECTOR, false, "## ALE at LOAD_SEG: %08X. Transitioning to Load state.", CPU.address_latch());
+      } else {
+        Controller.getBoard().debugPrintf(DebugType::ERROR, false, "## ALE at LOAD_SEG: %08X. Transitioning to Load state. (masked)", CPU.address_latch());
+      }
       ArduinoX86::Server.change_state(ServerState::Load);
     }
   }
@@ -1554,7 +1560,7 @@ void handle_loadall_386() {
   uint32_t base_address = CPU.loadall_regs_386.cs_desc.address;
   uint32_t run_address = base_address + CPU.loadall_regs_386.eip;
   
-  if (CPU.loadall_checkpoint > 0 && CPU.bus_state == CODE) {
+  if (CPU.loadall_checkpoint > 0 && CPU.bus_state_latched == CODE) {
     if (CPU.address_latch() == run_address) {
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOADALL_386: Detected jump to new CS:IP to trigger transition into Execute.");
       ArduinoX86::Server.change_state(ServerState::Execute);
@@ -1927,7 +1933,9 @@ void handle_execute_state() {
 
   if (!READ_SMI_PIN) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted.");
-    if (Controller.readALEPin() && CPU.bus_state == MEMW) {
+    // Sometimes the bus is PASV[1] on 386 during ADS. Not sure why.
+    Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: SMI asserted, ads is %s, bus state is %d\n\r", Controller.readALEPin() ? "high" : "low", (CPU.status0 & 0xF));
+    if (Controller.readALEPin() && ((CPU.bus_state == MEMW) || ((CPU.status0 & 0xF) == 1))) {
 
       Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMW cycle detected.");
       // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
@@ -2017,9 +2025,15 @@ void handle_execute_automatic() {
     }
   }
 
-  if (cpu_iorc && CPU.bus_cycle == WRITE_CYCLE) {
-    // The CPU is reading from the I/O bus. Read from the bus emulator.
-    CPU.data_bus = ArduinoX86::Bus->io_read_bus(CPU.address_latch(), !Controller.readBHEPin());
+  if (cpu_iorc) {
+    if (READ_ABUS_23) {
+      // NPX read. Read if READYO is high. 
+      CPU.data_bus = Controller.readDataBus(CPU.data_width);
+    }
+    else if (CPU.bus_cycle == WRITE_CYCLE) {
+      // The CPU is reading from the I/O bus. Read from the bus emulator.
+      CPU.data_bus = ArduinoX86::Bus->io_read_bus(CPU.address_latch(), !Controller.readBHEPin());
+    }
   }
 
   if ((READ_NMI_PIN) && (CPU.nmi_checkpoint == 0)) {
@@ -2121,15 +2135,11 @@ void handle_execute_automatic() {
     // Handle entering SMM state.
     if (!READ_SMI_PIN) {
       Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted.");
-      if (Controller.readALEPin() && CPU.bus_state == MEMW) {
-
-        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMW cycle detected.");
-        // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
-        if (CPU.address_latch() == SMRAM_FIRST_WRITE) {
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted and writing to SMRAM. Entering Store...");
-          CPU.smi_terminate = true;
-          ArduinoX86::Server.change_state(ServerState::StoreAll);
-        }
+      if (Controller.readALEPin() && (CPU.address_latch() == SMRAM_FIRST_WRITE)) {
+        // Sometimes the bus state is still HALT on ALE, so we don't check for MEMW. Just the address is good enough.
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI asserted and writing to SMRAM. Entering Store...");
+        CPU.smi_terminate = true;
+        ArduinoX86::Server.change_state(ServerState::StoreAll);
       }
     }
   }

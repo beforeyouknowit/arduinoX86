@@ -69,6 +69,7 @@ public:
   static constexpr uint32_t FLAG_USE_SMM            = 0x00000020; // Use SMM for register readout on 386/486 CPUs
   static constexpr uint32_t FLAG_DEBUG_ENABLED      = 0x00000040; // Enable debug mode
   static constexpr uint32_t FLAG_LOG_CYCLES         = 0x00000080; // Enable cycle logging
+  static constexpr uint32_t FLAG_ALE_INTERRUPT      = 0x00000100; // Enable ALE interrupt to deassert READY at T1
 
   enum class ServerCommand {
     CmdNone            = 0x00,
@@ -169,6 +170,7 @@ private:
   unsigned long commandStartTime_ = 0;
   unsigned long stateBeginTime_ = 0;
   uint32_t flags_ = 0; 
+  bool ale_interrupt_enabled_ = false;
 
   // Error handling
   static constexpr size_t MAX_ERROR_LEN = 256;

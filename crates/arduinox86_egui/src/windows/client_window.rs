@@ -28,7 +28,7 @@ use crate::{
     events::{GuiEvent, GuiEventQueue},
 };
 use anyhow::{anyhow, Result};
-use arduinox86_client::{ProgramState, ServerFlags, ServerStatus};
+use arduinox86_client::{CpuPin, ProgramState, ServerFlags, ServerStatus};
 use egui_notify::Toasts;
 
 pub struct ClientWindow {
@@ -36,6 +36,7 @@ pub struct ClientWindow {
     enable_cycle_logging: bool,
     use_sdram_backend: bool,
     use_smm: bool,
+    ale_interrupt_enabled: bool,
     debug_enabled: bool,
     last_status_time: Option<Instant>,
     last_cycle_ct: u64,
@@ -53,6 +54,7 @@ impl Default for ClientWindow {
             enable_cycle_logging: false,
             use_sdram_backend: false,
             use_smm: false,
+            ale_interrupt_enabled: false,
             debug_enabled: false,
             last_status_time: None,
             last_cycle_ct: 0,
@@ -251,6 +253,32 @@ impl ClientWindow {
                                     }
                                 }
                             }
+
+                            if ui
+                                .checkbox(&mut self.ale_interrupt_enabled, "ALE interrupt resets READY")
+                                .changed()
+                            {
+                                match c_ctx
+                                    .set_flag_state(ServerFlags::ENABLE_ALE_INTERRUPT, self.ale_interrupt_enabled)
+                                {
+                                    Ok(true) => {
+                                        let toggle_str = "ALE interrupt enabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Ok(false) => {
+                                        let toggle_str = "ALE interrupt disabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Err(e) => {
+                                        let toggle_str = format!("Failed to set ALE interrupt control state: {}", e);
+                                        log::error!("{}", toggle_str);
+                                        toasts.error(toggle_str);
+                                        self.sync_flags(c_ctx);
+                                    }
+                                }
+                            }
                         });
                     });
 
@@ -332,6 +360,30 @@ impl ClientWindow {
                                     self.sync_flags(c_ctx);
                                 }
                             }
+                        }
+
+                        if ui
+                            .button(
+                                egui::RichText::new(format!("{}", egui_phosphor::regular::HAND_PALM))
+                                    .size(self.icon_size),
+                            )
+                            .on_hover_text("Toggle Ready")
+                            .clicked()
+                        {
+                            if let Ok(pin) = c_ctx.client.read_pin(CpuPin::READY) {
+                                if pin {
+                                    log::debug!("READY pin is high, setting low");
+                                    c_ctx.client.write_pin(CpuPin::READY, false).ok();
+                                }
+                                else {
+                                    log::debug!("READY pin is low, setting high");
+                                    c_ctx.client.write_pin(CpuPin::READY, true).ok();
+                                }
+                            }
+                            else {
+                                log::error!("Failed to read READY pin state");
+                            }
+                            // Do disconnect
                         }
 
                         if ui

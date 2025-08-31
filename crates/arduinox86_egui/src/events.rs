@@ -20,18 +20,34 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::enums::{FileOpenContext, FileSaveContext};
+use crate::enums::{FileOpenContext, FileSaveContext, MountAddress};
 use std::path::PathBuf;
 
+#[derive(PartialEq, Eq)]
 pub enum GuiEvent {
     ResetState,
     LoadRegisters,
     EraseMemory,
-    ReadMemory { address: u32, size: u32 },
+    ReadMemory {
+        address: u32,
+        size:    u32,
+    },
     RunProgram,
-    AssembleProgram { program_name: String },
+    AssembleProgram {
+        program_name: String,
+    },
     PollStatus,
     ClearCycleLog,
+    ToggleRefreshMemory {
+        enabled: bool,
+        hertz:   u32,
+    },
+    RefreshMemory,
+    UploadBlob {
+        blob_name: String,
+        mount_address: MountAddress,
+        size: Option<usize>,
+    },
 }
 
 #[derive(Default)]

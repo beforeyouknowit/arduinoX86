@@ -135,7 +135,7 @@ impl CycleTable {
                         for (i, cycle) in self.cycles.iter().enumerate() {
                             let mut data_str_opt = None;
                             // If is last cycle
-                            if i == num_cycles - 1 {
+                            if (i == num_cycles - 1) && cycle.is_reading() {
                                 data_str_opt = Some(&mut self.data_bus_str);
                             }
 

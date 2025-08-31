@@ -119,7 +119,7 @@ InlineProgram EMU_EXIT_PROGRAM("EMU_EXIT", {
 // we'll jump to a clean new segment. The exact segment is configurable with LOAD_SEG which
 // will get patched into this routine as the destination segment.
 //InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xEA, 0x00, 0x00, 0x00, 0x00}, 3);
-InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xFF, 0xFF, 0x00, 0x00, 0x00}, 3);
+InlineProgram JUMP_VECTOR("JUMP_VECTOR", {0xEA, 0x00, 0x00, 0x00, 0x00}, 3);
 
 // STOREALL opcode for 286. 
 InlineProgram STOREALL_PROGRAM("STOREALL", { 0xF1, 0x0F, 0x04 });

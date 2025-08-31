@@ -52,6 +52,11 @@ class ShieldBase {
       static_cast<Derived*>(this)->tickCpuImpl();
     };
 
+
+    static bool readPin(OutputPin pin) {
+      return Derived::readPinImpl(pin);
+    }
+
     static void writePin(OutputPin pin, bool value) {
       Derived::writePinImpl(pin, value);
     }
@@ -94,6 +99,11 @@ class ShieldBase {
     bool readIORCPin()  { return static_cast<Derived*>(this)->readIORCPinImpl(); }
     bool readIOWCPin()  { return static_cast<Derived*>(this)->readIOWCPinImpl(); }
     bool readAIOWCPin() { return static_cast<Derived*>(this)->readAIOWCPinImpl(); }
+
+    template<typename Board>
+    void printPinStates(Board& board) {
+      static_cast<Derived*>(this)->printPinStatesImpl(board);
+    }
 
     static void writeResetPin(bool value) {
        Derived::writeResetPinImpl(value);

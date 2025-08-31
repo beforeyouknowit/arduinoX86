@@ -24,16 +24,20 @@ use crate::{
     client::ClientContext,
     controls::data_table::DataTableWidget,
     enums::MountAddress,
-    events::GuiEventQueue,
+    events::{GuiEvent, GuiEventQueue},
     structs::BinaryBlob,
     widgets::mount_address_widget::MountAddressWidget,
+    TEXT_COLOR,
 };
+use egui::{Color32, TextStyle};
 
 pub struct BinaryView {
     pub name: String,
     pub icon_size: f32,
     pub mount_addr: MountAddress,
     pub mount_str: String,
+    pub size_str: String,
+    pub size: usize,
     pub dt: DataTableWidget,
 }
 
@@ -41,9 +45,11 @@ impl Default for BinaryView {
     fn default() -> Self {
         Self {
             name: "Program".into(),
-            icon_size: 18.0,
+            icon_size: 24.0,
             mount_addr: MountAddress::CsIp,
             mount_str: "0".to_string(),
+            size_str: "0".to_string(),
+            size: 0,
             dt: DataTableWidget::default(),
         }
     }
@@ -62,6 +68,8 @@ impl BinaryView {
     }
 
     pub fn set_data(&mut self, data: &[u8]) {
+        self.size = data.len();
+        self.size_str = format!("{}", self.size);
         self.dt.set_data(data);
     }
 
@@ -70,10 +78,48 @@ impl BinaryView {
         ui: &mut egui::Ui,
         blob: &mut BinaryBlob,
         _c_ctx: &mut ClientContext,
-        _events: &mut GuiEventQueue,
+        events: &mut GuiEventQueue,
     ) {
         ui.vertical(|ui| {
-            ui.add(MountAddressWidget::new(&mut self.mount_addr, &mut self.mount_str));
+            ui.horizontal(|ui| {
+                if ui
+                    .button(
+                        egui::RichText::new(format!("{}", egui_phosphor::regular::BOX_ARROW_UP)).size(self.icon_size),
+                    )
+                    .on_hover_text("Load binary")
+                    .clicked()
+                {
+                    events.push(GuiEvent::UploadBlob {
+                        blob_name: self.name.clone(),
+                        mount_address: self.mount_addr,
+                        size: if self.size == 0 { None } else { Some(self.size) },
+                    });
+                }
+
+                ui.separator();
+                ui.add(MountAddressWidget::new(&mut self.mount_addr, &mut self.mount_str));
+
+                let text_color = if self.size_str.parse::<usize>().is_ok() {
+                    TEXT_COLOR
+                }
+                else {
+                    Color32::RED
+                };
+
+                ui.label("Size:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.size_str)
+                        .font(TextStyle::Monospace)
+                        .desired_width(50.0)
+                        .char_limit(6)
+                        .text_color(text_color),
+                );
+
+                if let Ok(size) = self.size_str.parse::<usize>() {
+                    self.size = size;
+                }
+            });
+
             blob.set_mount_address(self.mount_addr.clone());
             ui.separator();
             self.dt.show(ui);

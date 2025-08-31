@@ -38,6 +38,10 @@
 #define WRITE_BIT(data, mask, set_macro, clear_macro) \
     do { if ((data) & (mask)) { set_macro; } else { clear_macro; } } while (0)
 
+
+#define READY_ASSERT 1
+#define READY_DEASSERT 0
+
 #define READY_PIN 6
 #define TEST_PIN 7
 #define LOCK_PIN 10

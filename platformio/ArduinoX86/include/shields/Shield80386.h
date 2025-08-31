@@ -58,39 +58,59 @@ void cycle();
 
 // -------------------------- CPU Input pins ----------------------------------
 // We use the analog pins for CPU inputs as they are not 5v tolerant.
+#define ALE_PIN 9
+#define ALE_TRIGGER FALLING
 #define BHE_PIN 13
 #define HOLD_PIN 76 // A0
-#define READY_PIN 77 // A1
 #define BS8_PIN 79 // A3
 #define RW_PIN 82 // A6
-#define INTR_PIN 84
-#define NMI_PIN 85
+#define INTR_PIN 0
+
 #define READ_BHE_PIN READ_PIN_D13
-
-#define READ_READY_PIN READ_PIN_D84
-#define WRITE_PIN_READY(x) WRITE_PIN_D84(x)
-
 #define READ_RESET_PIN READ_PIN_D05
 
 #define READ_INTR_PIN READ_PIN_A1
 #define WRITE_PIN_INTR(x) WRITE_PIN_A1(x)
 
-#define READ_NMI_PIN READ_PIN_D85
-#define WRITE_PIN_NMI(x) WRITE_PIN_D85(x)
+#define READY_ASSERT 0
+#define READY_DEASSERT 1
+#define READ_READY_PIN_NORM (!READ_READY_PIN)
+
+#if defined(SHIELD_386EX_V2)
+  #define READY_PIN 83
+  #define READ_READY_PIN READ_PIN_A7
+  #define WRITE_READY_PIN(x) WRITE_PIN_A7(x)
+
+  #define NMI_PIN 93
+  #define READ_NMI_PIN READ_PIN_D93
+  #define WRITE_NMI_PIN(x) WRITE_PIN_D93(x)
+#else
+  #define READY_PIN 84
+  #define READ_READY_PIN READ_PIN_D84
+  #define WRITE_READY_PIN(x) WRITE_PIN_D84(x)
+
+  #define NMI_PIN 85
+  #define READ_NMI_PIN READ_PIN_D85
+  #define WRITE_NMI_PIN(x) WRITE_PIN_D85(x)
+#endif
 
 #define READ_SMI_PIN READ_PIN_D02
-#define WRITE_PIN_SMI(x) WRITE_PIN_D02(x)
+#define WRITE_SMI_PIN(x) WRITE_PIN_D02(x)
 
 #define READ_RW_PIN READ_PIN_D82
 #define READ_DC_PIN READ_PIN_D08
 
+#define READ_BUSY_PIN READ_PIN_D06
 #define READ_TEST_PIN READ_PIN_D06
 #define WRITE_TEST_PIN(x) WRITE_PIN_D06(x) 
 
 #define WRITE_BS8_PIN(x) WRITE_PIN_A3(x)
 
 #define READ_LOCK_PIN READ_PIN_D07 
-
+#define READ_ERROR_PIN READ_PIN_D03
+#define READYO_PIN 94
+#define READ_READYO_PIN READ_PIN_D94
+#define READ_PEREQ_PIN READ_PIN_D11
 #define READ_S0_PIN READ_MRDC_PIN
 #define READ_S1_PIN READ_MWTC_PIN
 #define READ_M_IO_PIN READ_PIN_D10
@@ -236,20 +256,20 @@ private:
     2,  // SMI
     4,  // CLK
     5,  // RESET
-    6,  // BUSY/TEST
     76, // HOLD (A0)
     77, // READY (A1)
     78, // NMI (A2)
     79, // BS8 (A3)
     83, // unused (A7)
-    84, // INTR
-    85  // NMI
+    84, // READY (V1)
+    85, // NMI (V1)
+    93 // NMI (V2)
   };
 
   // All input pins, used to set pin direction on setup
-  static constexpr std::array<int,35> INPUT_PINS = {{
-    13, 12, 11, 10, 9, 8, 7, 3, // (8) Various signal pins
-    80, 81, 82, // (3) R, W, RW
+  static constexpr std::array<int,37> INPUT_PINS = {{
+    13, 12, 11, 10, 9, 8, 7, 6, 3, // (8) Various signal pins
+    80, 81, 82, 94, // (3) R, W, RW
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Address pins - Bottom half of double-row header
     21, 20, 17, 16, 15, 14, 1, 0, // (8) Address pins - Top row of GPIO pins
   }};
@@ -259,7 +279,7 @@ private:
 protected:
   static constexpr unsigned ClockDivisor = 2;
   static constexpr unsigned ClockHighDelay = 2;
-  static constexpr unsigned ClockLowDelay = 1;
+  static constexpr unsigned ClockLowDelay = 2;
   size_t addressBusWidth = 22; // Default address bus width is 22 bits
   
 public:
@@ -530,10 +550,36 @@ public:
     return address;
   }
 
+  static bool readPinImpl(OutputPin pin) {
+    switch (pin) {
+      case OutputPin::Ready:
+        return READ_READY_PIN;
+        break;
+      case OutputPin::Test:
+        // !BUSY is tied to Vcc, so we don't control it.
+        //WRITE_PIN_D05(value);
+        break;
+      case OutputPin::Intr:
+        return READ_PIN_A3;
+        break;
+      case OutputPin::Nmi:
+        return READ_NMI_PIN;
+        break;
+      case OutputPin::Smi:
+        return READ_SMI_PIN;
+        break;
+      default:
+        // Handle other pins if necessary
+        break;
+    }
+
+    return false;
+  }
+
   static void writePinImpl(OutputPin pin, bool value) {
     switch (pin) {
       case OutputPin::Ready:
-        WRITE_PIN_READY(value);
+        WRITE_READY_PIN(value);
         break;
       case OutputPin::Test:
         // !BUSY is tied to Vcc, so we don't control it.
@@ -543,10 +589,10 @@ public:
         WRITE_PIN_A3(value);
         break;
       case OutputPin::Nmi:
-        WRITE_PIN_NMI(value);
+        WRITE_NMI_PIN(value);
         break;
       case OutputPin::Smi:
-        WRITE_PIN_SMI(value);
+        WRITE_SMI_PIN(value);
         break;
       default:
         // Handle other pins if necessary
@@ -565,7 +611,8 @@ public:
     digitalWrite(INTR_PIN, LOW); // INTR must be low or CPU will immediately interrupt.
     digitalWrite(NMI_PIN, LOW); // NMI must be low or CPU will immediately interrupt.
     digitalWrite(HOLD_PIN, LOW); // HOLD must be low or CPU will not reset.
-    WRITE_PIN_SMI(1); // SMI inactive
+    WRITE_READY_PIN(READY_ASSERT); // Default READY for CPU setup
+    WRITE_SMI_PIN(1); // SMI inactive
     
     bool ale_went_off = false;
     //bool bhe_went_off = false;
@@ -717,5 +764,35 @@ public:
     //control |= READ_PIN_D43 ? 0x04 : 0;     // MCE/PDEN - Pin 43
     //control |= READ_PIN_D44 ? 0x08 : 0;     // DEN      - Pin 44
     return control;
+  }
+
+  template<typename Board>
+  void printPinStatesImpl(Board& board) {
+    char error_chr = 'e';
+    if (!READ_ERROR_PIN) { 
+      error_chr = 'E';
+    }
+
+    char ready_chr = 'r';
+    if (!READ_READY_PIN) {
+      ready_chr = 'R';
+    }
+
+    char readyo_chr = 'o';
+    if (!READ_READYO_PIN) {
+      readyo_chr = 'O';
+    }
+
+    char pereq_chr = 'q';
+    if (READ_PEREQ_PIN) {
+      pereq_chr = 'Q';
+    }
+
+    char busy_chr = 'b';
+    if (!READ_BUSY_PIN) {
+      busy_chr = 'B';
+    }
+    
+    board.debugPrintf(DebugType::EMIT, false, "P2:%c%c%c%c%c ", ready_chr, readyo_chr, error_chr, pereq_chr, busy_chr);
   }
 };

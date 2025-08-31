@@ -114,6 +114,10 @@ public:
     return address_latch_;
   }
 
+  bool is_shutdown() const { return is_shutdown_; }
+  void set_shutdown() { is_shutdown_ = true; }
+  void clear_shutdown() { is_shutdown_ = false; }
+
   void latch_address(uint32_t address) {
     // Latch the address bus value on ALE/ADS
     address_latch_ = address;
@@ -121,6 +125,7 @@ public:
 
 private:
   bool use_smm_ = false; // Use SMM for register readout on 386/486 CPUs
+  bool is_shutdown_ = false; // Whether the CPU is in a shutdown state.
   uint64_t cycle_ct_ = 0; // Number of cycles executed since reset.
   uint32_t address_latch_ = 0; // Value of address bus as of ALE/ADS.
 };

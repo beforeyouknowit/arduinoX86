@@ -43,10 +43,10 @@ constexpr std::array<int,6> Shield80286::OUTPUT_PINS;
 constexpr std::array<int,36> Shield80286::INPUT_PINS;
 #endif
 
-#if defined(SHIELD_386EX_V1)
+#if defined(SHIELD_386EX_V1) || defined(SHIELD_386EX_V2)
 #include <shields/Shield80386.h>
 
 // Define the static constexpr members of Shield80386
 constexpr std::array<int,11> Shield80386::OUTPUT_PINS;
-constexpr std::array<int,35> Shield80386::INPUT_PINS;
+constexpr std::array<int,37> Shield80386::INPUT_PINS;
 #endif

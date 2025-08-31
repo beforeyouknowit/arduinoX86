@@ -30,6 +30,8 @@ constexpr const char* getColor(DebugType stage) {
   using namespace ansi;
 
   switch (stage) {
+    case DebugType::WARNING:   return bright_yellow;
+    case DebugType::ERROR:     return red;
     case DebugType::STATE:     return yellow;
     case DebugType::RESET:     return green;
     case DebugType::SETUP:     return cyan;
@@ -48,10 +50,9 @@ constexpr const char* getColor(DebugType stage) {
     case DebugType::BUS:       return cyan;
     case DebugType::PROTO:     return yellow;
     case DebugType::CMD:       return bright_cyan;
-    case DebugType::ERROR:     return red;
     case DebugType::DUMP:      return bright_yellow;
     case DebugType::SERVER:    return bright_green;
-    default:                  return reset;
+    default:                   return reset;
   }
 }
 

@@ -66,6 +66,7 @@ impl ServerFlags {
     pub const USE_SMM: u32              = 0x0000_0020; // Use SMM for register readout
     pub const ENABLE_DEBUG: u32         = 0x0000_0040; // Enable debug serial output
     pub const ENABLE_CYCLE_LOGGING: u32 = 0x0000_0080; // Enable cycle logging
+    pub const ENABLE_ALE_INTERRUPT: u32 = 0x0000_0100; // Enable ALE interrupt to arbitrate READY line
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
@@ -1131,12 +1132,25 @@ impl CpuClient {
         Ok(err_string.to_string())
     }
 
+    pub fn read_pin(&mut self, pin_no: CpuPin) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 1] = [0; 1];
+        let mut recv_buf: [u8; 1] = [0; 1];
+        buf[0] = pin_no as u8;
+        self.send_command_byte(ServerCommand::CmdReadPin)?;
+        self.send_buf(&mut buf)?;
+        self.recv_buf(&mut recv_buf)?;
+        self.read_result_code(ServerCommand::CmdReadPin)?;
+
+        Ok(recv_buf[0] != 0)
+    }
+
     pub fn write_pin(&mut self, pin_no: CpuPin, val: bool) -> Result<bool, CpuClientError> {
         let mut buf: [u8; 2] = [0; 2];
         buf[0] = pin_no as u8;
         buf[1] = val as u8;
         self.send_command_byte(ServerCommand::CmdWritePin)?;
         self.send_buf(&mut buf)?;
+
         self.read_result_code(ServerCommand::CmdWritePin)
     }
 

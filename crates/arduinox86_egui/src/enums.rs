@@ -82,7 +82,7 @@ pub enum BinaryBlobType {
     Registers,
 }
 
-#[derive(Copy, Clone, serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 pub enum MountAddress {
     CsIp,
     FlatAddress(u32),

@@ -22,24 +22,7 @@
 */
 
 #pragma once
-#include <config.h>
 
-#if defined(SHIELD_8088_V1)
-  #include <shields/Shield8088.h>
-  class Shield8088;
-  using ShieldType = Shield8088;
-#elif defined(SHIELD_80186_3V_V1)
-  #include <shields/Shield80186.h>
-  class Shield80186;
-  using ShieldType = Shield80186;
-#elif defined(SHIELD_286_5V_V1)
-  #include <shields/Shield80286.h>
-  class Shield80286;
-  using ShieldType = Shield80286;
-#elif defined(SHIELD_386EX_V1) || defined(SHIELD_386EX_V2)
-  #include <shields/Shield80386.h>
-  class Shield80386;
-  using ShieldType = Shield80386;
-#else
-  #error "You must define a shield type!"
-#endif 
+void ale_interrupt_handler();
+void readyo_interrupt_handler();
+void cycle_edge_interrupt_handler();

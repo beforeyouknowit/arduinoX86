@@ -89,6 +89,8 @@ pub struct TransientAppState {
     scheduler: Scheduler,
     event_queue: GuiEventQueue,
     error_msg: Option<String>,
+
+    auto_refresh: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -550,11 +552,13 @@ impl eframe::App for App {
 impl App {
     /// Handle events from the GUI event queue.
     fn handle_events(&mut self, _c_ctx: &egui::Context) {
+        let mut new_events = Vec::new();
         if let Some(client_ctx) = &mut self.ts.client_ctx {
             while let Some(event) = self.ts.event_queue.pop() {
                 match event {
                     GuiEvent::ResetState => {
                         self.ts.last_program_state = None;
+                        *self.ts.final_register_window.open_mut() = false;
                     }
                     GuiEvent::LoadRegisters => {
                         let program_state = client_ctx.program_state();
@@ -668,6 +672,62 @@ impl App {
                             self.ts.error_msg = Some(format!("Failed to read memory: {}", e));
                         }
                     },
+                    GuiEvent::UploadBlob {
+                        blob_name,
+                        mount_address,
+                        size,
+                    } => {
+                        if let Some(blob) = self.ts.resource_manager.blob(&blob_name) {
+                            let resolved_mount_address = match mount_address {
+                                MountAddress::FlatAddress(addr) => addr,
+                                MountAddress::CsIp => self
+                                    .ts
+                                    .initial_register_window
+                                    .regs(RegisterSetType::Intel386)
+                                    .code_address(),
+                            };
+
+                            log::debug!(
+                                "Loading binary blob: {} at address {:08x}",
+                                blob_name,
+                                resolved_mount_address
+                            );
+
+                            let slice_size = std::cmp::min(size.unwrap_or(blob.data.len()), blob.data.len());
+                            if let Err(e) = client_ctx
+                                .client
+                                .set_memory(resolved_mount_address, &blob.data[0..slice_size])
+                            {
+                                self.gs
+                                    .toasts
+                                    .error(format!("Failed to load binary blob: {}", e))
+                                    .duration(LONG_NOTIFICATION_TIME);
+
+                                log::error!("Failed to load binary blob: {}", e);
+                                self.ts.error_msg = Some(format!("Failed to load binary blob: {}", e));
+                                return;
+                            }
+                            else {
+                                self.gs
+                                    .toasts
+                                    .success(format!("Binary blob: {} loaded successfully!", blob.name))
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!(
+                                    "Binary blob: {} loaded successfully at address {:#x}",
+                                    blob.name,
+                                    resolved_mount_address
+                                );
+                            }
+                        }
+                        else {
+                            log::error!("Blob {} not found for upload.", blob_name);
+                            self.gs
+                                .toasts
+                                .error(format!("Blob {} not found for upload.", blob_name))
+                                .duration(LONG_NOTIFICATION_TIME);
+                            self.ts.error_msg = Some(format!("Blob {} not found for upload.", blob_name));
+                        }
+                    }
                     GuiEvent::RunProgram => {
                         // Load the binary resources into memory.
                         for blob in self.ts.resource_manager.blobs() {
@@ -909,8 +969,47 @@ impl App {
                             self.ts.error_msg = Some(format!("Failed to clear cycle log: {}", e));
                         }
                     },
+                    GuiEvent::ToggleRefreshMemory {
+                        enabled: state,
+                        hertz: rate,
+                    } => {
+                        if state != self.ts.auto_refresh {
+                            if state {
+                                let new_event = ScheduledEvent::new(
+                                    ScheduleType::Repeat,
+                                    GuiEvent::RefreshMemory,
+                                    1000 / rate as u64,
+                                );
+                                self.ts.scheduler.add_event(new_event);
+                                self.gs
+                                    .toasts
+                                    .info("Auto-refresh enabled.")
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!("Auto-refresh enabled.");
+                            }
+                            else {
+                                self.ts.scheduler.remove_event_type(&GuiEvent::RefreshMemory);
+                                self.gs
+                                    .toasts
+                                    .info("Auto-refresh disabled.")
+                                    .duration(NORMAL_NOTIFICATION_TIME);
+                                log::debug!("Auto-refresh disabled.");
+                            }
+                            self.ts.auto_refresh = state;
+                        }
+                    }
+                    GuiEvent::RefreshMemory => {
+                        log::debug!("Refreshing memory view.");
+                        let new_event = self.ts.memory_viewer_window.make_refresh_event();
+                        new_events.push(new_event);
+                    }
                 }
             }
+        }
+
+        // Add any events generated by processed events
+        for event in new_events {
+            self.ts.event_queue.push(event);
         }
     }
 

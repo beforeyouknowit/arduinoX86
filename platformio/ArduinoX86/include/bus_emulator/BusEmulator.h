@@ -183,7 +183,7 @@ public:
     return val;
   }
   uint16_t mem_read_bus(uint32_t address, bool bhe, bool isFetch, bool smi_act = false) {
-    uint16_t val;
+    uint16_t val = backend_->read_bus(address, bhe);
     if (smi_act && (address >= (SMRAM_END - sizeof (SmmDump386))) && (address < SMRAM_END)) {
       // Read from SMRAM.
       size_t offset = (SMRAM_END - 4) - (address & ~0x03); // Align to 4-byte aligned dwords, decreasing addresses from SMRAM_END
@@ -192,10 +192,6 @@ public:
         uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&smm_dump386_) + (offset / 2) + sub_offset;
         val = *reg_ptr;
       }
-    }
-    else {
-      // Normal read
-      val = backend_->read_bus(address, bhe);
     }
     
     logger_.log({

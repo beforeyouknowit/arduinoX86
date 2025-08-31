@@ -24,7 +24,9 @@ use crate::{
     client::ClientContext,
     controls::data_table::DataTableWidget,
     events::{GuiEvent, GuiEventQueue},
+    TEXT_COLOR,
 };
+use egui::{Color32, TextStyle};
 
 pub struct MemoryViewer {
     pub address_string: String,
@@ -32,6 +34,9 @@ pub struct MemoryViewer {
     pub size_string: String,
     pub size: u32,
     pub icon_size: f32,
+    pub auto_refresh: bool,
+    pub refresh_rate_string: String,
+    pub refresh_rate: u32,
     pub dt: DataTableWidget,
 }
 
@@ -43,6 +48,9 @@ impl Default for MemoryViewer {
             size_string: "00010000".to_string(), // Default to 64KB
             size: 0x10000,                       // Default to 64KB
             icon_size: 24.0,
+            auto_refresh: false,
+            refresh_rate_string: "1".to_string(),
+            refresh_rate: 1,
             dt: DataTableWidget::default(),
         }
     }
@@ -55,6 +63,13 @@ impl MemoryViewer {
 
     pub fn set_data(&mut self, data: &[u8]) {
         self.dt.set_data(data);
+    }
+
+    pub fn make_refresh_event(&self) -> GuiEvent {
+        GuiEvent::ReadMemory {
+            address: self.address,
+            size:    self.size,
+        }
     }
 
     pub fn show(&mut self, e_ctx: &egui::Context, c_ctx: &mut ClientContext, events: &mut GuiEventQueue) {
@@ -94,6 +109,57 @@ impl MemoryViewer {
                             }
                             else {
                                 self.size = 0;
+                            }
+                        }
+                    });
+
+                    ui.separator();
+
+                    let mut new_check = self.auto_refresh;
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Checkbox::new(&mut new_check, "Auto Refresh"));
+
+                        if self.auto_refresh != new_check {
+                            events.push(GuiEvent::ToggleRefreshMemory {
+                                enabled: new_check,
+                                hertz:   self.refresh_rate,
+                            });
+                            self.auto_refresh = new_check;
+                        }
+
+                        let text_color = if u32::from_str_radix(&self.refresh_rate_string, 10).is_ok() {
+                            TEXT_COLOR
+                        }
+                        else {
+                            Color32::RED
+                        };
+
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.refresh_rate_string)
+                                .font(TextStyle::Monospace)
+                                .desired_width(30.0)
+                                .char_limit(2)
+                                .text_color(text_color),
+                        );
+
+                        ui.label("Hz");
+
+                        if response.lost_focus() {
+                            if let Ok(rate) = self.refresh_rate_string.parse::<u32>() {
+                                self.refresh_rate = rate;
+                                if self.auto_refresh {
+                                    events.push(GuiEvent::ToggleRefreshMemory {
+                                        enabled: false,
+                                        hertz:   1,
+                                    });
+                                    events.push(GuiEvent::ToggleRefreshMemory {
+                                        enabled: true,
+                                        hertz:   rate,
+                                    });
+                                }
+                            }
+                            else {
+                                self.refresh_rate = 1;
                             }
                         }
                     });

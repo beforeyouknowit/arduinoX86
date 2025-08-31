@@ -941,6 +941,7 @@ bool CommandServer<BoardType, ShieldType>::cmd_write_data_bus() {
 
   Controller.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_write_data_bus(): Writing to data bus: %04X\n\r", CPU.data_bus);
   Controller.writeDataBus(CPU.data_bus, ActiveBusWidth::Sixteen);
+  CPU.data_bus_resolved = true;
   return true;
 }
 
@@ -1227,34 +1228,29 @@ bool CommandServer<BoardType, ShieldType>::cmd_write_pin(void) {
 
     switch (pin_idx) {
       case 0: // READY pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting READY pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
+      {
+        controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_write_pin(): Setting READY pin to: %d\n\r", pin_val);
         Controller.writePin(OutputPin::Ready, pin_val);
-        break;
 
+        bool new_value = Controller.readPin(OutputPin::Ready);
+        controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_write_pin(): READY pin now reads as: %d\n\r", new_value ? 1 : 0);
+        if (new_value != (pin_val != 0)) {
+          controller_.getBoard().debugPrintln(DebugType::ERROR, "cmd_write_pin(): WARNING: READY pin readback does not match written value!");
+        }
+        break;
+      }
       case 1: // TEST pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting TEST pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
+        controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_write_pin(): Setting TEST pin to: %d\n\r", pin_val);
         Controller.writePin(OutputPin::Test, pin_val);
         break;
 
       case 2: // INTR pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting INTR pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
+        controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_write_pin(): Setting INTR pin to: %d\n\r", pin_val);
         Controller.writePin(OutputPin::Intr, pin_val);
         break;
 
       case 3: // NMI pin
-#if DEBUG_PIN_CMD
-        debugPrintColor(ansi::cyan, "Setting NMI pin to: ");
-        debugPrintlnColor(ansi::cyan, pin_val);
-#endif
+        controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_write_pin(): Setting NMI pin to: %d\n\r", pin_val);
         Controller.writePin(OutputPin::Nmi, pin_val);
         break;
 
@@ -1263,8 +1259,10 @@ bool CommandServer<BoardType, ShieldType>::cmd_write_pin(void) {
         return false;
     }
     return true;
-  } else {
+  } 
+  else {
     // Invalid pin
+    Controller.getBoard().debugPrintln(DebugType::ERROR, "cmd_write_pin(): Invalid pin index");
     error_beep();
     return false;
   }
@@ -1273,9 +1271,36 @@ bool CommandServer<BoardType, ShieldType>::cmd_write_pin(void) {
 // Server command - Read pin
 template<typename BoardType, typename ShieldType>
 bool CommandServer<BoardType, ShieldType>::cmd_read_pin(void) {
-  // Not implemented
-  INBAND_SERIAL.write((uint8_t)0);
-  return true;
+  uint8_t pin_idx = commandBuffer_[0];
+  bool value = false;
+  bool state = true;
+
+  switch (pin_idx) {
+    case 0: // READY pin
+      value = Controller.readPin(OutputPin::Ready);
+      Controller.getBoard().debugPrintf(DebugType::CMD, false, "cmd_read_pin(): Reading READY pin state: %d\n\r", value ? 1 : 0);
+      break;
+
+    case 1: // TEST pin
+      value = Controller.readPin(OutputPin::Test);
+      break;
+
+    case 2: // INTR pin
+      value = Controller.readPin(OutputPin::Intr);
+      break;
+
+    case 3: // NMI pin
+      value = Controller.readPin(OutputPin::Nmi);
+      break;
+
+    default:
+      Controller.getBoard().debugPrintln(DebugType::ERROR, "cmd_read_pin(): Invalid pin index");
+      value = false;
+      state = false;
+  }
+
+  INBAND_SERIAL.write((uint8_t)(value ? 1 : 0));
+  return state;
 }
 
 // Server command - Get program state
@@ -1407,6 +1432,17 @@ bool CommandServer<BoardType, ShieldType>::cmd_set_flags(void) {
   } 
   else if (!(new_flags & CommandServer::FLAG_LOG_CYCLES) && (flags_ & CommandServer::FLAG_LOG_CYCLES)) {
     controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling cycle logging ##");
+  }
+
+  if ((new_flags & CommandServer::FLAG_ALE_INTERRUPT) && !(flags_ & CommandServer::FLAG_ALE_INTERRUPT)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling ALE interrupt ##");
+    controller_.setAleInterrupt(true);
+    ale_interrupt_enabled_ = true;
+  } 
+  else if (!(new_flags & CommandServer::FLAG_ALE_INTERRUPT) && (flags_ & CommandServer::FLAG_ALE_INTERRUPT)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling ALE interrupt ##");
+    controller_.setAleInterrupt(false);
+    ale_interrupt_enabled_ = false;
   }
 
   flags_ = new_flags;

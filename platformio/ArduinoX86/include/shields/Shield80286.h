@@ -72,11 +72,17 @@ void cycle();
 // -------------------------- CPU Input pins ----------------------------------
 // We use the analog pins for CPU inputs as they are not 5v tolerant.
 #define BHE_PIN 13
-#define READY_PIN 76 // A1
+
 #define NMI_PIN 78 // A2
 #define INTR_PIN 79 // A3
 #define READ_BHE_PIN READ_PIN_D13
-#define READ_READY_PIN (!READ_PIN_D76)
+
+#define READY_ASSERT 0
+#define READY_DEASSERT 1
+#define READY_PIN 76 // A1
+#define READ_READY_PIN (READ_PIN_D76)
+#define READ_READY_PIN_NORM (!READ_READY_PIN)
+
 #define READ_RESET_PIN READ_PIN_D05
 #define READ_NMI_PIN READ_PIN_D78
 #define READ_SMI_PIN 1
@@ -98,6 +104,9 @@ void cycle();
 #define READ_ICE_PIN0 READ_PIN_D20
 #define READ_ICE_PIN1 READ_PIN_D21
 // ------------------------- 82288 status pins --------------------------------
+
+#define ALE_PIN 8
+#define ALE_TRIGGER RISING
 #define READ_ALE_PIN READ_PIN_D08
 
 #define READ_MRDC_PIN READ_PIN_D07
