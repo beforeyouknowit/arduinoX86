@@ -4,13 +4,17 @@
 ; Compile with nasm to build program.bin for cpu_client
 ; nasm program.asm -o program.bin
 cpu	386
-org	0h
+org	100h
+
+%define DOS 1
 
 start:
     push    0xa000	  ; let ES point to 0xA000
     pop     es				; start of VGA Video RAM
-    ;mov     al,0x13	 ; mode 13h, 320x200 pixels, 256 colors
-    ;int     10h			 ; set graphic mode
+    mov     al,0x13	  ; mode 13h, 320x200 pixels, 256 colors
+%if DOS
+    int     10h			  ; set graphic mode
+%endif
 X:
     mov     bl,14		  ; start depth at 14
 L:
@@ -41,10 +45,14 @@ Q:
     inc     di				; for a slightly smoother animation
     loop    X				  ; repeat for 64k pixels
     inc     si				; increment frame counter
-    ;hlt					     ; synced against timer, wait (18.2 FPS)
-    ;in      ax,0x60	 ; read keyboard
-    ;dec     ax			   ; check for ESC
-    jmp     X			     ; if not, repeat process
-    ;ret					     ; quit program
+%if DOS
+    hlt					      ; synced against timer, wait (18.2 FPS)
+    in      ax,0x60	  ; read keyboard
+    dec     ax			  ; check for ESC
+    jnz     X
+%else
+    jmp     X			    ; if not, repeat process
+%endif
+    ret					      ; quit program
 
 
