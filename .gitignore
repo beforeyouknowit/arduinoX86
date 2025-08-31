@@ -29,22 +29,22 @@ Arduino_Uno_Shield.kicad_mod
 Arduino_Zero_Shield.kicad_mod
 Pro_Mini_Clone_Socket.kicad_mod
 # 808X HAT
-hats/**/*.lck
-hats/**/*.bak
-hats/**/*.kicad_pcb.zip
-hats/**/*-backups/
-hats/808x/kicad/gerbers*
-hats/808x/gerbers/*.zip
-hats/808x/kicad/ard8088.wrl
+shields/**/*.lck
+shields/**/*.bak
+shields/**/*.kicad_pcb.zip
+shields/**/*-backups/
+shields/808x/kicad/gerbers*
+shields/808x/gerbers/*.zip
+shields/808x/kicad/ard8088.wrl
 # 286 HAT
-hats/286_5V/kicad/gerbers
-hats/286_5V/kicad/arduino_286_5v-backups
-hats/286_5V/kicad/arduino*bak
-hats/286_5V/kicad/Package_LCC.pretty/*
-!hats/286_5V/kicad/Package_LCC.pretty/286-plcc.pretty
+shields/286_5V/kicad/gerbers
+shields/286_5V/kicad/arduino_286_5v-backups
+shields/286_5V/kicad/arduino*bak
+shields/286_5V/kicad/Package_LCC.pretty/*
+!shields/286_5V/kicad/Package_LCC.pretty/286-plcc.pretty
 # 386EX HAT
-hats/386EX/kicad/gerbers
-hats/386EX/kicad/arduino_386-backups
+shields/386EX/kicad/gerbers
+shields/386EX/kicad/arduino_386-backups
 \#auto_saved_files#
 _autosave*
 rescue-backup
