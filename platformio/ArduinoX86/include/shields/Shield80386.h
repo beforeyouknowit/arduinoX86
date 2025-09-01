@@ -234,10 +234,9 @@ void cycle();
 #define SPIN_LOOP(count)                          \
   do {                                            \
     for (volatile unsigned int _spin_i = 0;       \
-         _spin_i < (count);                      \
+         _spin_i < (count);                       \
          ++_spin_i) {                             \
-      /* prevent the compiler from discarding the loop */ \
-      __asm__ __volatile__ ("" ::: "memory");    \
+      __asm__ __volatile__ ("" ::: "memory");     \
     }                                             \
   } while (0)
 
@@ -252,13 +251,12 @@ private:
   static constexpr int ADDRESS_LINES = 22;
   static constexpr int ADDRESS_DIGITS = 6; // 22 bits = 6 digits in hex
 
-  static constexpr std::array<int,11> OUTPUT_PINS = {
+  static constexpr std::array<int,10> OUTPUT_PINS = {
     2,  // SMI
     4,  // CLK
     5,  // RESET
     76, // HOLD (A0)
     77, // READY (A1)
-    78, // NMI (A2)
     79, // BS8 (A3)
     83, // unused (A7)
     84, // READY (V1)
@@ -267,9 +265,9 @@ private:
   };
 
   // All input pins, used to set pin direction on setup
-  static constexpr std::array<int,37> INPUT_PINS = {{
+  static constexpr std::array<int,38> INPUT_PINS = {{
     13, 12, 11, 10, 9, 8, 7, 6, 3, // (8) Various signal pins
-    80, 81, 82, 94, // (3) R, W, RW
+    78, 80, 81, 82, 94, // (5) SMIACT(A2), R, W, RW, READYO
     38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, // (16) Address pins - Bottom half of double-row header
     21, 20, 17, 16, 15, 14, 1, 0, // (8) Address pins - Top row of GPIO pins
   }};

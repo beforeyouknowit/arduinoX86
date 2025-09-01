@@ -47,6 +47,6 @@ constexpr std::array<int,36> Shield80286::INPUT_PINS;
 #include <shields/Shield80386.h>
 
 // Define the static constexpr members of Shield80386
-constexpr std::array<int,11> Shield80386::OUTPUT_PINS;
-constexpr std::array<int,37> Shield80386::INPUT_PINS;
+constexpr std::array<int,10> Shield80386::OUTPUT_PINS;
+constexpr std::array<int,38> Shield80386::INPUT_PINS;
 #endif
