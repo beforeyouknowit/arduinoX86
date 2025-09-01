@@ -32,6 +32,7 @@ pub struct CycleTable {
     arch: ServerCpuType,
     cycles: Vec<ServerCycleState>,
     data_bus_str: String,
+    address_latch: u32,
 }
 
 impl CycleTable {
@@ -40,6 +41,7 @@ impl CycleTable {
             arch,
             cycles: Vec::new(),
             data_bus_str: String::new(),
+            address_latch: 0,
         }
     }
 
@@ -81,12 +83,14 @@ impl CycleTable {
             return None;
         }
 
-        let available_height = ui.available_height();
-        let num_rows = self.cycles.len();
-        let text_height = egui::TextStyle::Body
-            .resolve(ui.style())
-            .size
-            .max(ui.spacing().interact_size.y);
+        self.address_latch = 0;
+
+        // let available_height = ui.available_height();
+        // let num_rows = self.cycles.len();
+        // let text_height = egui::TextStyle::Body
+        //     .resolve(ui.style())
+        //     .size
+        //     .max(ui.spacing().interact_size.y);
 
         let bg: Color32 = ui.visuals().code_bg_color;
         let max_scroll_height = 400.0;
@@ -139,7 +143,8 @@ impl CycleTable {
                                 data_str_opt = Some(&mut self.data_bus_str);
                             }
 
-                            let cycle_display = CycleDisplay::new(self.arch, cycle.clone(), data_str_opt);
+                            let cycle_display =
+                                CycleDisplay::new(self.arch, cycle.clone(), &mut self.address_latch, data_str_opt);
 
                             inner_response = Some(ui.add(cycle_display));
                         }

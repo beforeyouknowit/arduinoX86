@@ -198,6 +198,7 @@ impl Display for ServerCycleStatePrinter {
         };
 
         let bus_state = self.cpu_type.decode_status(self.state.cpu_status_bits);
+        let bus_raw = self.cpu_type.raw_status(self.state.cpu_status_bits);
         let bus_str = match bus_state {
             BusState::INTA => "INTA",
             BusState::IOR => "IOR ",
@@ -248,9 +249,9 @@ impl Display for ServerCycleStatePrinter {
         let data_chr_width = self.cpu_type.data_chr_width();
         write!(
             f,
-            "{ale_str:02}:{addr_latch:0bus_chr_width$X}:{addr_bus:0bus_chr_width$X}:{data_bus:0data_chr_width$X} \
+            "{ale_str:02}{addr_latch:0bus_chr_width$X}:{addr_bus:0bus_chr_width$X}:{data_bus:0data_chr_width$X} \
             {seg_str:02} M:{rs_chr}{aws_chr}{ws_chr} I:{ior_chr}{aiow_chr}{iow_chr} \
-            P:{intr_chr}{inta_chr}{bhe_chr} {bus_str:04} {t_str:02} {xfer_str:06}",
+            P:{intr_chr}{inta_chr}{bhe_chr} {bus_str:04}[{bus_raw:01}] {t_str:02} {xfer_str:06}",
             ale_str = ale_str,
             addr_latch = self.address_latch,
             addr_bus = self.state.address_bus,
@@ -267,6 +268,7 @@ impl Display for ServerCycleStatePrinter {
             inta_chr = inta_chr,
             bhe_chr = bhe_chr,
             bus_str = bus_str,
+            bus_raw = bus_raw,
             t_str = t_string,
             xfer_str = xfer_str,
             // q_op_chr = q_op_chr,

@@ -23,7 +23,7 @@
 
 use crate::{DEFAULT_FONT_SIZE, TEXT_COLOR};
 
-use arduinox86_client::{ServerCpuType, ServerCycleState};
+use arduinox86_client::{BusState, CpuWidth, DataWidth, ServerCpuType, ServerCycleState, TState};
 use egui::{text::LayoutJob, Color32, FontId, Response, TextFormat, TextStyle, Ui, Widget};
 
 pub const ALE_COLOR: Color32 = Color32::from_rgba_premultiplied(0xf9, 0x7a, 0x48, 0xff);
@@ -34,13 +34,16 @@ pub const BRACKET_COLOR: Color32 = Color32::GRAY;
 //pub const IO_COLOR: Color32 = Color32::ORANGE;
 pub const MEM_COLOR: Color32 = TEXT_COLOR;
 pub const IO_COLOR: Color32 = TEXT_COLOR;
+pub const PIN_COLOR: Color32 = TEXT_COLOR;
 pub const READ_COLOR: Color32 = desat_to_color32(BRIGHT_GREEN, DESAT);
 pub const WRITE_COLOR: Color32 = desat_to_color32(BRIGHT_BLUE, DESAT);
+pub const BHE_COLOR: Color32 = desat_to_color32(BRIGHT_YELLOW, DESAT);
 
 pub struct CycleDisplay<'a> {
     font_size: f32,
     arch: ServerCpuType,
     state: ServerCycleState,
+    address_latch: &'a mut u32,
     data_bus_opt: Option<&'a mut String>,
     edit_dbus: bool,
 }
@@ -122,11 +125,17 @@ pub const T_STATES: [(&str, Color32); 8] = [
 ];
 
 impl<'a> CycleDisplay<'a> {
-    pub fn new(arch: ServerCpuType, state: ServerCycleState, data_bus_opt: Option<&'a mut String>) -> Self {
+    pub fn new(
+        arch: ServerCpuType,
+        state: ServerCycleState,
+        address_latch: &'a mut u32,
+        data_bus_opt: Option<&'a mut String>,
+    ) -> Self {
         Self {
             font_size: DEFAULT_FONT_SIZE,
             arch,
             state,
+            address_latch,
             edit_dbus: data_bus_opt.is_some(),
             data_bus_opt,
         }
@@ -135,6 +144,35 @@ impl<'a> CycleDisplay<'a> {
     pub fn with_edit_dbus(mut self, edit: bool) -> Self {
         self.edit_dbus = edit;
         self
+    }
+
+    pub fn data_width(&self) -> DataWidth {
+        let cpu_width = CpuWidth::from(self.arch);
+        match cpu_width {
+            CpuWidth::Eight => DataWidth::EightLow,
+            CpuWidth::Sixteen => {
+                if (*self.address_latch & 1 != 0)
+                    && (self.state.bus_command_bits & ServerCycleState::COMMAND_BHE_BIT == 0)
+                {
+                    DataWidth::EightHigh
+                }
+                else if self.state.pins & ServerCycleState::PIN_BHE == 0 {
+                    DataWidth::Sixteen
+                }
+                else {
+                    DataWidth::EightLow
+                }
+            }
+        }
+    }
+
+    pub fn data_bus_str(&self) -> String {
+        match self.data_width() {
+            DataWidth::Invalid => "----".to_string(),
+            DataWidth::Sixteen => format!("{:04X}", self.state.data_bus),
+            DataWidth::EightLow => format!("{:>4}", format!("{:02X}", self.state.data_bus as u8)),
+            DataWidth::EightHigh => format!("{:<4}", format!("{:02X}", (self.state.data_bus >> 8) as u8)),
+        }
     }
 }
 
@@ -162,6 +200,11 @@ impl Widget for CycleDisplay<'_> {
             ui.spacing_mut().item_spacing.x = 4.0;
 
             let ale = self.state.ale();
+            if ale {
+                *self.address_latch = self.state.address_bus;
+            }
+            let data_bus_value = self.data_bus_str();
+
             ui.horizontal(|ui| {
                 ui.set_min_width(150.0);
 
@@ -335,6 +378,19 @@ impl Widget for CycleDisplay<'_> {
             append_colored!(job, " ", Color32::TRANSPARENT, font);
             ui.label(job);
 
+            // Print pin states
+            let mut job = LayoutJob::default();
+            let bhe_chr = match self.state.bhe() {
+                true => 'B',
+                false => '.',
+            };
+            append_colored!(job, "P", PIN_COLOR, font);
+            append_colored!(job, ":", COLON_COLOR, font);
+            append_colored!(job, ".", TEXT_COLOR, font);
+            append_colored!(job, ".", TEXT_COLOR, font);
+            append_colored!(job, &bhe_chr.to_string(), TEXT_COLOR, font);
+            ui.label(job);
+
             // Print bus status
             let mut job = LayoutJob::default();
 
@@ -356,22 +412,43 @@ impl Widget for CycleDisplay<'_> {
             append_colored!(job, " ", Color32::TRANSPARENT, font);
             ui.label(job);
 
+            let bus_active = match self.arch {
+                ServerCpuType::Intel80386 => {
+                    // The 386 can write on t1
+                    if self.state.is_writing() {
+                        true
+                    }
+                    else {
+                        // The 386 can read after T1
+                        self.state.t_state() != TState::T1
+                    }
+                }
+                ServerCpuType::Intel80286 => {
+                    // The 286 can read/write after T1
+                    self.state.t_state() != TState::T1
+                }
+                _ => {
+                    // Older CPUs can only read/write in PASV state
+                    status == BusState::PASV
+                }
+            };
+
             // Print read/write activity
             let mut job = LayoutJob::default();
             let mut printed_rw = false;
-            if !ale {
+            if bus_active {
                 if have_read {
                     append_colored!(job, "R", READ_COLOR, font);
                     append_colored!(job, "-> ", TEXT_COLOR, font);
-                    append_colored!(job, &format!("{:04X}", self.state.data_bus), TEXT_COLOR, font);
+                    append_colored!(job, &data_bus_value, TEXT_COLOR, font);
                     printed_rw = true;
                 }
-            }
-            if have_write {
-                append_colored!(job, "<-", TEXT_COLOR, font);
-                append_colored!(job, "W ", WRITE_COLOR, font);
-                append_colored!(job, &format!("{:04X}", self.state.data_bus), TEXT_COLOR, font);
-                printed_rw = true;
+                else if have_write {
+                    append_colored!(job, "<-", TEXT_COLOR, font);
+                    append_colored!(job, "W ", WRITE_COLOR, font);
+                    append_colored!(job, &data_bus_value, TEXT_COLOR, font);
+                    printed_rw = true;
+                }
             }
 
             if !printed_rw {

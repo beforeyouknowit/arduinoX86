@@ -341,6 +341,13 @@ impl ServerCpuType {
             }
         }
     }
+
+    pub fn raw_status(&self, status_byte: u8) -> u8 {
+        match self {
+            ServerCpuType::Intel80286 => status_byte & 0x0F,
+            _ => status_byte & 0x07,
+        }
+    }
 }
 
 /// Derive the [CpuWidth] from a [ServerCpuType].
