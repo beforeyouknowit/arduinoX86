@@ -237,7 +237,7 @@ public:
       size_t offset = (SMRAM_END - 4) - (address & ~0x03); // Align to 4-byte aligned dwords, decreasing addresses from SMRAM_END
       size_t sub_offset = ((address & 0x03) != 0) ? 1 : 0; // Adjust for stack order for "high" words
       if (offset < sizeof(SmmDump386)) {
-        DEBUG_SERIAL.println("## BusEmulator: Writing to SmmDump386 register");
+        //DEBUG_SERIAL.println("## BusEmulator: Writing to SmmDump386 register");
         uint16_t* reg_ptr = reinterpret_cast<uint16_t*>(&smm_dump386_) + (offset / 2) + sub_offset;
         *reg_ptr = value;
       }
