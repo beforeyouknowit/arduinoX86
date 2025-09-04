@@ -21,43 +21,54 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use super::{Config, InstructionSize, TestContext};
-use crate::{display::print_regs_v2, gen_regs::TestRegisters, registers::Registers};
-use anyhow::{anyhow, Context, Error};
-use moo::types::{
-    MooComparison,
-    MooException,
-    MooFileMetadata,
-    MooRegisters,
-    MooRegisters32,
-    MooRegisters32Printer,
-    MooRegistersInit,
-    MooTestGenMetadata,
-};
 use std::{ffi::OsString, io::BufWriter, time::Instant};
 
+use super::{Config, InstructionSize, TestContext};
+use crate::{
+    bus_ops::BusOps,
+    cpu_common::{BusOp, BusOpType},
+    cycles::MyServerCycleState,
+    display::print_regs_v2,
+    gen_regs::TestRegisters,
+    instruction::TestInstruction,
+    registers::Registers,
+    state::{final_state_from_ops, initial_state_from_ops},
+};
+
+use moo::{
+    prelude::*,
+    types::{
+        MooComparison,
+        MooCpuType,
+        MooException,
+        MooFileMetadata,
+        MooRamEntry,
+        MooRegisters,
+        MooRegisters16,
+        MooRegisters16Printer,
+        MooRegisters32,
+        MooRegisters32Printer,
+        MooRegistersInit,
+        MooStateType,
+        MooTestGenMetadata,
+    },
+};
+
 use arduinox86_client::{
+    BinWrite,
     CpuWidth,
     MemoryStrategy,
     ProgramState,
+    RegisterSetType,
     RemoteCpuRegistersV2,
+    RemoteCpuRegistersV3A,
     RemoteCpuRegistersV3B,
     ServerCpuType,
     ServerFlags,
 };
 
-use moo::prelude::*;
-
-use crate::{
-    bus_ops::BusOps,
-    cpu_common::{BusOp, BusOpType},
-    cycles::MyServerCycleState,
-    instruction::TestInstruction,
-    state::{final_state_from_ops, initial_state_from_ops},
-};
-use anyhow::bail;
+use anyhow::{anyhow, bail, Context, Error};
 use iced_x86::{Mnemonic, OpKind};
-use moo::types::{MooCpuType, MooRamEntry, MooRegisters16, MooRegisters16Printer, MooStateType};
 use rand::{Rng, SeedableRng};
 
 // Trace print macro that writes to bufwriter
@@ -344,7 +355,9 @@ pub fn compare_registers(regs0: &MooRegisters, regs1: &MooRegisters) {
         (MooRegisters::Sixteen(regs0_inner), MooRegisters::Sixteen(regs1_inner)) => {
             compare_registers16(regs0_inner, regs1_inner);
         }
-
+        (MooRegisters::ThirtyTwo(regs0_inner), MooRegisters::ThirtyTwo(regs1_inner)) => {
+            compare_registers32(regs0_inner, regs1_inner);
+        }
         _ => {
             println!("Incompatible register types for comparison!");
         }
@@ -393,6 +406,57 @@ pub fn compare_registers16(regs0: &MooRegisters16, regs1: &MooRegisters16) {
     }
     if regs0.flags != regs1.flags {
         println!("FLAGS mismatch: {:04X} != {:04X}", regs0.flags, regs1.flags);
+    }
+}
+
+pub fn compare_registers32(regs0: &MooRegisters32, regs1: &MooRegisters32) {
+    if regs0.eax != regs1.eax {
+        println!("EAX mismatch: {:08X} != {:08X}", regs0.eax, regs1.eax);
+    }
+    if regs0.ebx != regs1.ebx {
+        println!("EBX mismatch: {:08X} != {:08X}", regs0.ebx, regs1.ebx);
+    }
+    if regs0.ecx != regs1.ecx {
+        println!("ECX mismatch: {:08X} != {:08X}", regs0.ecx, regs1.ecx);
+    }
+    if regs0.edx != regs1.edx {
+        println!("EDX mismatch: {:08X} != {:08X}", regs0.edx, regs1.edx);
+    }
+    if regs0.esp != regs1.esp {
+        println!("ESP mismatch: {:08X} != {:08X}", regs0.esp, regs1.esp);
+    }
+    if regs0.ebp != regs1.ebp {
+        println!("EBP mismatch: {:08X} != {:08X}", regs0.ebp, regs1.ebp);
+    }
+    if regs0.esi != regs1.esi {
+        println!("ESI mismatch: {:08X} != {:08X}", regs0.esi, regs1.esi);
+    }
+    if regs0.edi != regs1.edi {
+        println!("EDI mismatch: {:08X} != {:08X}", regs0.edi, regs1.edi);
+    }
+    if regs0.cs != regs1.cs {
+        println!("CS mismatch: {:04X} != {:04X}", regs0.cs, regs1.cs);
+    }
+    if regs0.ds != regs1.ds {
+        println!("DS mismatch: {:04X} != {:04X}", regs0.ds, regs1.ds);
+    }
+    if regs0.es != regs1.es {
+        println!("ES mismatch: {:04X} != {:04X}", regs0.es, regs1.es);
+    }
+    if regs0.fs != regs1.fs {
+        println!("FS mismatch: {:04X} != {:04X}", regs0.fs, regs1.fs);
+    }
+    if regs0.gs != regs1.gs {
+        println!("GS mismatch: {:04X} != {:04X}", regs0.gs, regs1.gs);
+    }
+    if regs0.ss != regs1.ss {
+        println!("SS mismatch: {:04X} != {:04X}", regs0.ss, regs1.ss);
+    }
+    if regs0.eip != regs1.eip {
+        println!("EIP mismatch: {:08X} != {:08X}", regs0.eip, regs1.eip);
+    }
+    if regs0.eflags != regs1.eflags {
+        println!("EFLAGS mismatch: {:08X} != {:08X}", regs0.eflags, regs1.eflags);
     }
 }
 
@@ -469,7 +533,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     }
 
     // Tell ArduinoX86 to execute instructions automatically.
-    let mut server_flags = ServerFlags::EXECUTE_AUTOMATIC;
+    let mut server_flags = ServerFlags::EXECUTE_AUTOMATIC | ServerFlags::ENABLE_CYCLE_LOGGING;
 
     if let MooCpuType::Intel80386Ex = config.test_gen.cpu_type {
         server_flags |= ServerFlags::USE_SMM;
@@ -1070,9 +1134,36 @@ pub fn generate_test(
     // Load the registers onto the Arduino.
     // ---------------------------------------------------------------------------------------------
 
+    // Determine server program state. If we're in SMM mode we will need to convert to V3B registers.
+    let state = context.client.get_program_state()?;
+
     // Reset cursor before writing to buffer!
     context.load_register_buffer.set_position(0);
-    test_registers.regs.to_buffer(&mut context.load_register_buffer);
+
+    let load_type = match state {
+        ProgramState::StoreDoneSmm => {
+            log::trace!("Server in SMM. Converting registers to V3B for loading.");
+
+            match &test_registers.regs {
+                Registers::V3A(v3a_regs) => {
+                    let v3b = RemoteCpuRegistersV3B::from(v3a_regs);
+                    v3b.write_le(&mut context.load_register_buffer)?;
+
+                    RegisterSetType::Intel386Smm
+                }
+                _ => {
+                    unimplemented!(
+                        "Unsupported register set type for SMM mode: {:?}",
+                        context.register_set_type
+                    );
+                }
+            }
+        }
+        _ => {
+            test_registers.regs.to_buffer(&mut context.load_register_buffer);
+            context.register_set_type
+        }
+    };
 
     let mut load_attempt_ct = 1;
     log::trace!(
@@ -1083,7 +1174,7 @@ pub fn generate_test(
 
     if let Err(e) = context
         .client
-        .load_registers_from_buf(context.register_set_type, context.load_register_buffer.get_ref())
+        .load_registers_from_buf(load_type, context.load_register_buffer.get_ref())
     {
         // If the load fails, retry up to `config.test_exec.load_retry` times.
         while load_attempt_ct < config.test_exec.load_retry {
@@ -1095,7 +1186,7 @@ pub fn generate_test(
             );
             if context
                 .client
-                .load_registers_from_buf(context.register_set_type, context.load_register_buffer.get_ref())
+                .load_registers_from_buf(load_type, context.load_register_buffer.get_ref())
                 .is_ok()
             {
                 break;
@@ -1113,7 +1204,7 @@ pub fn generate_test(
     let start_time = Instant::now();
     while !matches!(
         state,
-        ProgramState::StoreDone | ProgramState::Shutdown | ProgramState::Error
+        ProgramState::StoreDone | ProgramState::StoreDoneSmm | ProgramState::Shutdown | ProgramState::Error
     ) {
         // Sleep for a little bit so we're not spamming the Arduino.
         std::thread::sleep(std::time::Duration::from_millis(config.test_exec.polling_sleep.into()));
@@ -1329,6 +1420,7 @@ pub fn generate_test(
         final_state,
         &moo_cycle_states,
         exception,
+        None,
     );
 
     Ok(test)
