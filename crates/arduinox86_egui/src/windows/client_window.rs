@@ -36,6 +36,7 @@ pub struct ClientWindow {
     enable_cycle_logging: bool,
     use_sdram_backend: bool,
     use_smm: bool,
+    resolve_bus_stepping: bool,
     ale_interrupt_enabled: bool,
     debug_enabled: bool,
     last_status_time: Option<Instant>,
@@ -54,6 +55,7 @@ impl Default for ClientWindow {
             enable_cycle_logging: false,
             use_sdram_backend: false,
             use_smm: false,
+            resolve_bus_stepping: false,
             ale_interrupt_enabled: false,
             debug_enabled: false,
             last_status_time: None,
@@ -247,6 +249,30 @@ impl ClientWindow {
                                     }
                                     Err(e) => {
                                         let toggle_str = format!("Failed to set SMM control state: {}", e);
+                                        log::error!("{}", toggle_str);
+                                        toasts.error(toggle_str);
+                                        self.sync_flags(c_ctx);
+                                    }
+                                }
+                            }
+
+                            if ui
+                                .checkbox(&mut self.resolve_bus_stepping, "Resolve bus when stepping")
+                                .changed()
+                            {
+                                match c_ctx.set_flag_state(ServerFlags::RESOLVE_BUS_STEP, self.resolve_bus_stepping) {
+                                    Ok(true) => {
+                                        let toggle_str = "Bus resolution enabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Ok(false) => {
+                                        let toggle_str = "Bus resolution disabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Err(e) => {
+                                        let toggle_str = format!("Failed to set bus resolution control state: {}", e);
                                         log::error!("{}", toggle_str);
                                         toasts.error(toggle_str);
                                         self.sync_flags(c_ctx);
