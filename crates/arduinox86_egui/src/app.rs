@@ -339,7 +339,7 @@ impl eframe::App for App {
                             ui.horizontal(|ui| {
                                 if ui.button("Load Binary...").clicked() {
                                     if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("Binary Files", &["bin", "hex"])
+                                        .add_filter("Binary Files", &["bin", "hex", "rom"])
                                         .pick_file()
                                     {
                                         match BinaryBlob::from_path(
@@ -581,7 +581,8 @@ impl App {
                             }
                         }
 
-                        let initial_state = client_ctx.initial_state();
+                        let mut initial_state = client_ctx.initial_state().clone();
+                        initial_state.regs.normalize();
 
                         let mut buf = Cursor::new(Vec::<u8>::new());
 
