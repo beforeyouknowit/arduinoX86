@@ -569,7 +569,7 @@ impl Default for RemoteCpuRegistersV3A {
                 .with_limit(0xFFFF),
             cs_desc:  SegmentDescriptorV2::default()
                 .with_base_address((RemoteCpuRegistersV3A::DEFAULT_CS as u32) << 4)
-                .with_access(0x00009B00)
+                .with_access(0x00009300)
                 .with_limit(0xFFFF),
             es_desc:  SegmentDescriptorV2::default()
                 .with_access(0x00009300)
@@ -940,7 +940,7 @@ impl Default for RemoteCpuRegistersV3B {
                 .with_limit(0xFFFF),
             cs_desc:  SegmentDescriptorV2::default()
                 .with_base_address((RemoteCpuRegistersV3B::DEFAULT_CS as u32) << 4)
-                .with_access(0x00009B00)
+                .with_access(0x00009300)
                 .with_limit(0xFFFF),
             es_desc:  SegmentDescriptorV2::default()
                 .with_access(0x00009300)
