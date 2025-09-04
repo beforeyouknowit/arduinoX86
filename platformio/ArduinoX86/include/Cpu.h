@@ -94,6 +94,7 @@ public:
   int wait_state_ct;
   bool exception_armed;
   uint32_t predicted_fetch;
+  uint32_t exception_stage;
 
   void reset(CpuResetResult reset_result, bool preserve_bus_state = false, bool reset_registers = false);
 

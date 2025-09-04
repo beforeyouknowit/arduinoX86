@@ -33,6 +33,7 @@
 #include "arduinoX86.h"
 #include <globals.h>
 #include "opcodes.h"
+#include <exceptions.h>
 #include "Display.h"
 
 #include <BoardController.h>
@@ -1224,6 +1225,7 @@ void cycle() {
         break;
       case ServerState::Done: // FALLTHROUGH
       case ServerState::StoreDone:  // FALLTHROUGH
+      case ServerState::StoreDoneSmm: // FALLTHROUGH
       case ServerState::Store: // FALLTHROUGH
       case ServerState::StoreAll:
         #if TRACE_STORE
@@ -1231,6 +1233,7 @@ void cycle() {
         #endif
         break;
 
+      case ServerState::Shutdown: // FALLTHROUGH
       case ServerState::Error:
         print_cpu_state();
         break;
@@ -1389,10 +1392,7 @@ void handle_cpu_setup_state() {
     // Jump is finished on first address latch of LOAD_SEG:0
     uint32_t dest = calc_flat_address(LOAD_SEG, 0);
     if (dest == CPU.address_latch()) {
-#if DEBUG_SETUP
-      debugPrintColor(ansi::cyan, "## ALE at LOAD_SEG. Transitioning to Load state. SEG: ");
-      debugPrintlnColor(ansi::cyan, CPU.address_latch, 16);
-#endif
+      Controller.getBoard().debugPrintf(DebugType::SETUP, false, "## ALE at LOAD_SEG. Transitioning to Load state. SEG: %08X\n\r", CPU.address_latch());
       // Transition to Load state.
       ArduinoX86::Server.change_state(ServerState::Load);
     }
@@ -1493,6 +1493,8 @@ void handle_loadall_286() {
     if (CPU.address_latch() == run_address) {
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOADALL_286: Detected jump to new CS:IP to trigger transition into Execute.");
       ArduinoX86::Server.change_state(ServerState::Execute);
+      handle_execute_state(); // Handle the CODE fetch that triggered the transition
+      
     }
     else {
       // CPU is prefetching after LOADALL, but not at the expected address. This is an error.
@@ -1536,6 +1538,14 @@ void handle_loadall_386() {
 
     if (CPU.bus_state_latched == MEMR) {
       // We are reading a memory word
+
+      if (CPU.address_latch() == EXCEPTION_ADDR_GPF) {
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## LOADALL_386: General Protection Fault detected during LOADALL! ##");
+        set_error("LOADALL_386 General Protection Fault");
+        ArduinoX86::Server.change_state(ServerState::Error);
+        return;
+      }
+
       if ((CPU.address_latch() >= LOADALL386_ADDRESS) && (CPU.address_latch() < (LOADALL386_ADDRESS + sizeof CPU.loadall_regs_386))) {
 
         CPU.loadall_checkpoint++;
@@ -1564,6 +1574,7 @@ void handle_loadall_386() {
     if (CPU.address_latch() == run_address) {
       Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOADALL_386: Detected jump to new CS:IP to trigger transition into Execute.");
       ArduinoX86::Server.change_state(ServerState::Execute);
+      handle_execute_state(); // Handle the CODE fetch that triggered the transition
     }
     else {
       // CPU is prefetching after LOADALL, but not at the expected address. This is an error.
@@ -1599,17 +1610,36 @@ void handle_smm_load_386() {
         CPU.data_bus_resolved = true;
       }
       else {
+
+      }
+    }
+    else if (CPU.bus_state_latched == MEMR && !CPU.data_bus_resolved) {
+
+
+      if (CPU.address_latch() == EXCEPTION_ADDR_GPF) {
+        Controller.getBoard().debugPrintln(DebugType::ERROR, "## LOAD_SMM_386: General Protection Fault detected during SMM LOAD! ##");
+        set_error("LOAD_SMM_386 General Protection Fault");
+        ArduinoX86::Server.change_state(ServerState::Error);
+        return;
+      }
+
+      if (CPU.address_latch() == SMM_LOAD_CHECKPOINT) {
         Controller.getBoard().debugPrintf(DebugType::LOAD, false, "## LOAD_SMM_386: Passed checkpoint. Deasserting SMI. Next fetch should be for program");
         Controller.writePin(OutputPin::Smi, true); // SMI is active-low
         CPU.loadall_checkpoint = 1;
       }
-    }
-    else if (CPU.bus_state_latched == MEMR && !CPU.data_bus_resolved) {
-      // We are reading a memory word. Read from bus emulator with SMIACT set.
-      CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), false, true);
-      Controller.getBoard().debugPrintf(DebugType::LOAD, true, "## LOAD_SMM_386: Writing SMM dump word to bus: %04X\n\r", CPU.data_bus);
-      Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-      CPU.data_bus_resolved = true;
+      else if ((CPU.address_latch() >= SMRAM_386EX_DUMP_START) && (CPU.address_latch() < SMRAM_386EX_END_ADDRESS)) {
+        // Read from bus emulator with SMIACT set to get word from register struct.
+        CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), false, true);
+        Controller.getBoard().debugPrintf(DebugType::LOAD, true, "## LOAD_SMM_386: Writing SMM dump word to bus: %04X\n\r", CPU.data_bus);
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+        CPU.data_bus_resolved = true;
+      }
+      else {
+        CPU.data_bus = 0x0000;
+        Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+        CPU.data_bus_resolved = true;
+      }
     }
   }
 
@@ -1621,7 +1651,7 @@ void handle_smm_load_386() {
   
   if (CPU.loadall_checkpoint > 0 && CPU.bus_state == CODE) {
     if (CPU.address_latch() == run_address) {
-      Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOADALL_386: Detected jump to new CS:IP to trigger transition into Execute.");
+      Controller.getBoard().debugPrintln(DebugType::LOAD, "## LOAD_SMM_386: Detected jump to new CS:IP to trigger transition into Execute.");
       ArduinoX86::Server.change_state(ServerState::Execute);
     }
     else {
@@ -1890,9 +1920,21 @@ void handle_execute_state() {
     ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), CPU.data_bus, !Controller.readBHEPin());
   }
 
-  if ((cpu_mrdc || cpu_iodc) && CPU.bus_cycle == WRITE_CYCLE) {
-    // CPU is reading from data bus. We assume that the client has called CmdWriteDataBus to set
-    // the value of CPU.data_bus. Write it.
+  if (cpu_mrdc && CPU.bus_cycle == T1) {
+    // CPU is reading from memory. Resolve from the bus emulator on T1 - the client can override this if desired.
+    if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, ShieldType>::FLAG_RESOLVE_BUS_STEP) {
+      CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), false);
+      Controller.getBoard().debugPrintf(
+        DebugType::EXECUTE, 
+        true, 
+        "## EXECUTE: Reading from bus emulator: [%08X]->%04X\n\r", 
+        CPU.address_latch(), 
+        CPU.data_bus
+      );
+    }
+  }
+  else if ((cpu_mrdc || cpu_iodc) && CPU.bus_cycle == WRITE_CYCLE) {
+    
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);
     Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Wrote bus: %04X\n\r", CPU.data_bus);
     //Controller.getBoard().debugPrintln(DebugType::EXECUTE, CPU.data_bus, 16);
@@ -1957,7 +1999,7 @@ void handle_execute_automatic() {
   bool cpu_iowc = !Controller.readIOWCPin();
   static bool far_call_flag = false;
   static bool exception_address_odd = false;
-  static int exception_stage = 0;
+  
   static uint16_t exception_offset = 0;
   static uint32_t next_exception_address = 0;
 
@@ -2007,7 +2049,7 @@ void handle_execute_automatic() {
       }
     }
 
-    if (exception_stage == 1) {
+    if (CPU.exception_stage == 1) {
       // We are reading the IVT offset.
       if (CPU.data_bus & 1) {
         // Offset is odd. We need to detect this for the 386EX as it only emits even addresses when fetching.
@@ -2044,7 +2086,7 @@ void handle_execute_automatic() {
     ArduinoX86::CycleLogger->disable_logging();
   }
   else if ((!READ_SMI_PIN) && (CPU.smi_checkpoint == 0)) {
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SMI pin asserted - Execute will end at SMRAM write.", true);
+    Controller.getBoard().debugPrintln(DebugType::ERROR, "## EXECUTE: SMI pin asserted - Execute will end at SMRAM write.", true);
     CPU.smi_checkpoint = 1;
     ArduinoX86::CycleLogger->disable_logging();
   }
@@ -2113,13 +2155,13 @@ void handle_execute_automatic() {
         Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: Possible IVT read, far call flag is %d, align is %d\n\r", far_call_flag, (CPU.address_latch() & 0x03));
         if (((CPU.address_latch() & 0x03) == 0) && far_call_flag) {
           Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception/Interrupt candidate. Entering exception stage 1", true);
-          exception_stage = 1;
+          CPU.exception_stage = 1;
           next_exception_address = CPU.address_latch() + 2;
         }
-        if ((exception_stage == 1) && (CPU.address_latch() == next_exception_address)) {
+        if ((CPU.exception_stage == 1) && (CPU.address_latch() == next_exception_address)) {
           Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Detected Exception/Interrupt!", true);
           CPU.exception_armed = true;
-          exception_stage = 0;
+          CPU.exception_stage = 0;
           next_exception_address = 0;
         }
       }

@@ -537,8 +537,10 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
       ArduinoX86::CycleLogger->enable_logging();
       ArduinoX86::Bus->enable_logging();
       CPU.predicted_fetch = 0;
+      CPU.exception_stage = 0;
       CPU.exception_armed = false;
       CPU.execute_cycle_ct = 0;
+      CPU.smi_checkpoint = 0;
       CPU.nmi_checkpoint = 0;
       CPU.program->reset();
       if (CPU.do_emulation) {
@@ -548,6 +550,7 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
       break;
     case ServerState::ExecuteFinalize:
       NMI_VECTOR.reset();
+      CPU.smi_checkpoint = 0;
       CPU.nmi_checkpoint = 0;
       CPU.nmi_buf_cursor = 0;  // Reset cursor for NMI stack buffer storage
 
@@ -1443,6 +1446,13 @@ bool CommandServer<BoardType, ShieldType>::cmd_set_flags(void) {
     controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling ALE interrupt ##");
     controller_.setAleInterrupt(false);
     ale_interrupt_enabled_ = false;
+  }
+
+  if ((new_flags & CommandServer::FLAG_RESOLVE_BUS_STEP) && !(flags_ & CommandServer::FLAG_RESOLVE_BUS_STEP)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Enabling bus resolution during step ##");
+  } 
+  else if (!(new_flags & CommandServer::FLAG_RESOLVE_BUS_STEP) && (flags_ & CommandServer::FLAG_RESOLVE_BUS_STEP)) {
+    controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_set_flags(): Disabling bus resolution during step ##");
   }
 
   flags_ = new_flags;

@@ -44,6 +44,7 @@ void Cpu::reset(CpuResetResult reset_result, bool preserve_bus_state, bool reset
   cpuid_counter = 0;
   cpuid_queue_reads = 0;
   state_begin_time = 0;
+  exception_stage = 0;
 
   if (!preserve_bus_state) {
     last_address_bus = 0;

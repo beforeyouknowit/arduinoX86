@@ -70,6 +70,7 @@ public:
   static constexpr uint32_t FLAG_DEBUG_ENABLED      = 0x00000040; // Enable debug mode
   static constexpr uint32_t FLAG_LOG_CYCLES         = 0x00000080; // Enable cycle logging
   static constexpr uint32_t FLAG_ALE_INTERRUPT      = 0x00000100; // Enable ALE interrupt to deassert READY at T1
+  static constexpr uint32_t FLAG_RESOLVE_BUS_STEP   = 0x00000200; // Resolve the data bus when single-stepping (Execute state)
 
   enum class ServerCommand {
     CmdNone            = 0x00,
