@@ -43,6 +43,7 @@ use serialport::{ClearBuffer, SerialPort};
 use thiserror::Error;
 
 pub const ARDUINO_BAUD: u32 = 1000000;
+pub use binrw::BinWrite;
 pub use cycle_state::*;
 pub use register_printer::*;
 pub use registers::*;
@@ -67,6 +68,7 @@ impl ServerFlags {
     pub const ENABLE_DEBUG: u32         = 0x0000_0040; // Enable debug serial output
     pub const ENABLE_CYCLE_LOGGING: u32 = 0x0000_0080; // Enable cycle logging
     pub const ENABLE_ALE_INTERRUPT: u32 = 0x0000_0100; // Enable ALE interrupt to arbitrate READY line
+    pub const RESOLVE_BUS_STEP: u32     = 0x0000_0200; // Resolve bus step on each cycle
 }
 
 /// [ServerCommand] represents the commands that can be sent to the Arduino808X server.
@@ -464,6 +466,17 @@ pub enum RegisterSetType {
     Intel386Smm,
 }
 
+impl RegisterSetType {
+    pub fn size(&self) -> usize {
+        match self {
+            RegisterSetType::Intel8088 => 28,
+            RegisterSetType::Intel286 => 102,
+            RegisterSetType::Intel386 => 204,
+            RegisterSetType::Intel386Smm => 208,
+        }
+    }
+}
+
 impl From<&RemoteCpuRegisters> for RegisterSetType {
     fn from(value: &RemoteCpuRegisters) -> Self {
         match value {
@@ -748,6 +761,7 @@ impl CpuClient {
     /// Try to open the specified serial port and query it for an Arduino808X server.
     pub fn try_port(port_info: serialport::SerialPortInfo, timeout: u64) -> Option<Box<dyn SerialPort>> {
         let port_result = serialport::new(port_info.port_name.clone(), 0)
+            .dtr_on_open(true)
             .baud_rate(0)
             .timeout(std::time::Duration::from_millis(timeout))
             .stop_bits(serialport::StopBits::One)
@@ -846,12 +860,12 @@ impl CpuClient {
                     Ok(true)
                 }
                 else {
-                    log::error!("read_result_code: command returned failure: {:02X}", buf[0]);
+                    log::error!("read_result_code(): command {:?} returned failure: {:02X}", cmd, buf[0]);
                     Err(CpuClientError::CommandFailed(cmd))
                 }
             }
             Err(e) => {
-                log::error!("read_result_code: read operation failed: {}", e);
+                log::error!("read_result_code(): command {:?}: read operation failed: {}", cmd, e);
                 Err(CpuClientError::ReadFailure)
             }
         }
@@ -912,7 +926,17 @@ impl CpuClient {
         let mut buf: [u8; 1] = [0; 1];
         buf[0] = reg_type.into();
         self.send_buf(&buf)?;
-        self.send_buf(reg_data)?;
+
+        let expected_buf_size = reg_type.size();
+        if reg_data.len() < expected_buf_size {
+            return Err(CpuClientError::BadParameter(format!(
+                "Expected at least {} byte buffer for register data, got: {}",
+                expected_buf_size,
+                reg_data.len()
+            )));
+        }
+
+        self.send_buf(&reg_data[0..expected_buf_size])?;
         self.read_result_code(ServerCommand::CmdLoad)
     }
 
