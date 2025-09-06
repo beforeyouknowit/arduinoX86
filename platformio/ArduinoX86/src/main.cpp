@@ -2056,6 +2056,10 @@ void handle_execute_automatic() {
         Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception address is odd.");
         exception_address_odd = true;
       }
+      else {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Exception address is even.");
+        exception_address_odd = false;
+      }
     }
 
     Controller.writeDataBus(CPU.data_bus, CPU.data_width);

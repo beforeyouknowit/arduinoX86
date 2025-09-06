@@ -186,7 +186,7 @@ impl From<ServerCpuType> for MooIvtOrder {
     fn from(cpu_type: ServerCpuType) -> Self {
         match cpu_type {
             ServerCpuType::Intel80286 => MooIvtOrder::PushFirst,
-            ServerCpuType::Intel80386 => MooIvtOrder::PushFirst,
+            ServerCpuType::Intel80386 => MooIvtOrder::ReadFirst,
             _ => MooIvtOrder::ReadFirst,
         }
     }
@@ -211,6 +211,30 @@ impl From<&MooCpuType> for ServerCpuType {
             MooCpuType::Intel80186 => ServerCpuType::Intel80186(false),
             MooCpuType::Intel80286 => ServerCpuType::Intel80286,
             MooCpuType::Intel80386Ex => ServerCpuType::Intel80386,
+        }
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<ServerCpuType> for MooCpuType {
+    fn from(cpu_type: ServerCpuType) -> Self {
+        MooCpuType::from(&cpu_type)
+    }
+}
+
+#[cfg(feature = "use_moo")]
+impl From<&ServerCpuType> for MooCpuType {
+    fn from(cpu_type: &ServerCpuType) -> Self {
+        match cpu_type {
+            ServerCpuType::Intel8088 => MooCpuType::Intel8088,
+            ServerCpuType::Intel8086 => MooCpuType::Intel8086,
+            ServerCpuType::NecV20 => MooCpuType::NecV20,
+            ServerCpuType::NecV30 => MooCpuType::NecV30,
+            ServerCpuType::Intel80188(_) => MooCpuType::Intel80188,
+            ServerCpuType::Intel80186(_) => MooCpuType::Intel80186,
+            ServerCpuType::Intel80286 => MooCpuType::Intel80286,
+            ServerCpuType::Intel80386 => MooCpuType::Intel80386Ex,
+            ServerCpuType::Undetected => MooCpuType::Intel8088, // Default to 8088 if undetected
         }
     }
 }

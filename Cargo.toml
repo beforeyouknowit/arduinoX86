@@ -20,7 +20,7 @@ repository = "https://github.com/dbalsom/arduinoX86"
 clap = { version = "4.0", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
-serialport = "4.7.2"
+serialport = "~4.7.2"
 modular-bitfield = "0.11"
 binrw = "0.15"
 serde = { version = "1.0", features = ["derive"] }
@@ -30,6 +30,7 @@ thiserror = "2.0"
 rand = "0.9"
 rand_distr = "0.5"
 indexmap = "2.2"
+strum = "0.27"
 strum_macros = "0.27"
 moo-rs = { git = "https://github.com/dbalsom/moo", default-features = false, features = ["serde"] }
 crossbeam-channel = "0.5"

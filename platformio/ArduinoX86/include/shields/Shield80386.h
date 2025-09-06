@@ -393,8 +393,8 @@ public:
 
   static const char * getTCycleString(TCycle cycle) {
     switch (cycle) {
-      case T1: return "Ts";
-      case T2: return "Tc";
+      case T1: return "T1";
+      case T2: return "T2";
       case TW: return "Tw";
       case TI: return "Ti";
       default: return "T?"; // Unknown cycle

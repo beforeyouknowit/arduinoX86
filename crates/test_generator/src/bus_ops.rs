@@ -62,7 +62,7 @@ impl From<&[MyServerCycleState]> for BusOps {
 
 impl BusOps {
     pub fn new(ops: &[BusOp]) -> Self {
-        let mut ops = ops.to_vec();
+        let ops = ops.to_vec();
         BusOps { ops }
     }
 
@@ -208,7 +208,7 @@ impl BusOps {
         Ok(())
     }
 
-    pub fn detect_exception(&self, cpu_type: ServerCpuType) -> Option<MooException> {
+    pub fn detect_exception(&self, context: &mut TestContext, cpu_type: ServerCpuType) -> Option<MooException> {
         // Check for an exception in the bus operations.
 
         let mut have_stack_frame = false;
@@ -221,6 +221,32 @@ impl BusOps {
             .iter()
             .rev()
             .find(|bus_op| matches!(bus_op.op_type, BusOpType::MemWrite));
+
+        let last_consecutive_writes: Vec<_> = self
+            .ops
+            .iter()
+            .rev()
+            .skip_while(|bus_op| !matches!(bus_op.op_type, BusOpType::MemWrite))
+            .take_while(|bus_op| matches!(bus_op.op_type, BusOpType::MemWrite))
+            .cloned() // if you want owned BusOps, drop if &BusOp is fine
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+
+        if last_consecutive_writes.len() > 2 {
+            trace_log!(
+                context,
+                "Have {} consecutive last writes from {:08X?} to {:08X?}. Likely exception stack frame.",
+                last_consecutive_writes.len(),
+                last_consecutive_writes.first().map(|op| op.addr).unwrap_or(0),
+                last_consecutive_writes.last().map(|op| op.addr).unwrap_or(0)
+            );
+
+            if last_consecutive_writes.first().unwrap().addr & 1 != 0 {
+                trace_log!(context, "Stack pointer appears unaligned.")
+            }
+        }
 
         if let Some(last_write) = last_write {
             let sp_is_odd = last_write.addr & 1 != 0;
@@ -269,10 +295,6 @@ impl BusOps {
 
         let mut have_exception = false;
         if have_stack_frame && have_two_consecutive_ivr_reads {
-            println!(
-                "Have stack frame at bus op idx {} and IVR reads at bus op idx {}, exception num {}",
-                stack_frame_idx, ivt_read_idx, exception_num
-            );
             let ivt_order = MooIvtOrder::from(cpu_type);
             match ivt_order {
                 MooIvtOrder::ReadFirst => {
@@ -286,6 +308,11 @@ impl BusOps {
                     }
                 }
             }
+
+            println!(
+                "Have stack frame at bus op idx {} and IVT reads at bus op idx {}, exception num: {}, cpu_type: {:?} ivt_order: {:?} passed: {}",
+                stack_frame_idx, ivt_read_idx, exception_num, cpu_type, ivt_order, have_exception
+            );
 
             if have_exception {
                 return Some(MooException {

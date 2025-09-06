@@ -23,16 +23,14 @@
 
 use std::io::Write;
 
+#[cfg(feature = "use_iced")]
 use crate::registers_common::RandomizeOpts;
 
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
 use binrw::{binrw, BinRead, BinReaderExt, BinWrite};
-use modular_bitfield::{
-    bitfield,
-    prelude::{B1, B16, B2, B24, B4},
-};
+use modular_bitfield::{bitfield, prelude::*};
 
 #[cfg(feature = "use_moo")]
 use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
@@ -347,8 +345,9 @@ impl RemoteCpuRegistersV2 {
         }
     }
 
+    #[cfg(feature = "use_iced")]
     #[rustfmt::skip]
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>) {
+    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>, inject_values: &[u32]) {
         *self = RemoteCpuRegistersV2::default(); // Reset all registers to default values
 
         if opts.randomize_flags {
@@ -389,13 +388,18 @@ impl RemoteCpuRegistersV2 {
         }
 
         // Set sp to minimum value if beneath.
-        if self.sp < opts.sp_min_value {
-            self.sp = opts.sp_min_value;
+        if self.sp < opts.sp_min_value as u16 {
+            self.sp = opts.sp_min_value as u16;
         }
 
         // Set sp to maximum value if above.
-        if self.sp > opts.sp_max_value {
-            self.sp = opts.sp_max_value;
+        if self.sp > opts.sp_max_value as u16 {
+            self.sp = opts.sp_max_value as u16;
+        }
+
+        if opts.sp_use_ss_limit {
+            let limit = self.ss_desc.limit();
+            self.sp &= limit;
         }
 
         if opts.randomize_x {

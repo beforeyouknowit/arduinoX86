@@ -24,15 +24,16 @@ use crate::Registers32;
 use std::io::{Seek, Write};
 
 use crate::registers_common::RandomizeOpts;
-use binrw::{binrw, BinReaderExt, BinResult, BinWrite};
+
+use crate::registers_common::SegmentSize;
+use binrw::{binrw, BinRead, BinReaderExt, BinResult, BinWrite};
 
 #[cfg(feature = "use_moo")]
-use moo::{
-    prelude::MooRegisters32Init,
-    types::{MooRegisters16, MooRegisters32},
-};
+use moo::{prelude::MooRegisters32Init, types::MooRegisters32};
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
+
+use modular_bitfield::{bitfield, prelude::*};
 
 macro_rules! impl_registers32 {
     ($ty:ty $(,)?) => {
@@ -415,16 +416,62 @@ impl RemoteCpuRegistersV3 {
     }
 }
 
+#[bitfield]
+#[derive(BinRead, BinWrite)]
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[derive(Copy, Clone, Debug)]
+pub struct SegmentDescriptorV2AccessWord {
+    pub reserved0: B8,
+    pub accessed: B1,
+    pub w_er: B1,   // Write/Execute-Read
+    pub ed_c: B1,   // Expand-down/Conforming
+    pub dc: B1,     // Data/Code
+    pub system: B1, // 0=system, 1=code/data
+    pub dpl: B2,
+    pub present: B1,
+    pub reserved1: B6,
+    pub size: B1,        // 0=16-bit, 1=32-bit
+    pub granularity: B1, // 0=byte, 1=4K
+    pub reserved2: B8,
+}
+
+impl Default for SegmentDescriptorV2AccessWord {
+    fn default() -> Self {
+        SegmentDescriptorV2AccessWord::new()
+            .with_reserved0(0)
+            .with_accessed(0)
+            .with_w_er(1) // readable code / writable data
+            .with_ed_c(0)
+            .with_dc(0) // code/data
+            .with_system(1)
+            .with_dpl(0)
+            .with_present(1)
+            .with_reserved1(0)
+            .with_size(1) // 32-bit segment
+            .with_granularity(0) // byte granularity
+            .with_reserved2(0)
+    }
+}
+
 #[binrw]
 #[brw(little)]
 #[derive(Copy, Clone, Debug, Default)]
 pub struct SegmentDescriptorV2 {
-    pub access:  u32,
+    pub access:  SegmentDescriptorV2AccessWord,
     pub address: u32,
     pub limit:   u32,
 }
 
 impl SegmentDescriptorV2 {
+    #[inline]
+    pub fn limit(&self) -> u32 {
+        self.limit
+    }
+    #[inline]
+    pub fn base(&self) -> u32 {
+        self.address
+    }
     pub fn with_base_address(mut self, base: u32) -> Self {
         self.address = base;
         self
@@ -434,7 +481,7 @@ impl SegmentDescriptorV2 {
         self
     }
     pub fn with_access(mut self, access: u32) -> Self {
-        self.access = access;
+        self.access = SegmentDescriptorV2AccessWord::from_bytes(access.to_le_bytes());
         self
     }
 
@@ -444,6 +491,13 @@ impl SegmentDescriptorV2 {
 
     pub fn base_address(&self) -> u32 {
         self.address
+    }
+
+    pub fn segment_size(&self) -> SegmentSize {
+        match self.access.size() {
+            0 => SegmentSize::Sixteen,
+            _ => SegmentSize::ThirtyTwo,
+        }
     }
 }
 
@@ -455,7 +509,7 @@ fn read_descriptor_v2(slice: &[u8], index: usize) -> SegmentDescriptorV2 {
         .try_into()
         .expect("desc_slice must be at least 10*12=120 bytes");
     SegmentDescriptorV2 {
-        access:  u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        access:  SegmentDescriptorV2AccessWord::from_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
         address: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
         limit:   u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
     }
@@ -618,8 +672,10 @@ impl RemoteCpuRegistersV3A {
     pub fn weighted_u16(
         weight_zero: f32,
         weight_ones: f32,
+        weight_inject: f32,
         rand: &mut rand::rngs::StdRng,
         register_beta: &mut Beta<f64>,
+        inject_values: &[u32],
     ) -> u16 {
         let random_value: f32 = rand.random();
         if random_value < weight_zero {
@@ -627,6 +683,10 @@ impl RemoteCpuRegistersV3A {
         }
         else if random_value < weight_zero + weight_ones {
             0xFFFF // All bits set to 1
+        }
+        else if random_value < weight_zero + weight_ones + weight_inject {
+            let index = rand.random_range(0..inject_values.len());
+            inject_values[index] as u16
         }
         else {
             let value: u16 = (register_beta.sample(rand) * u16::MAX as f64) as u16;
@@ -637,8 +697,10 @@ impl RemoteCpuRegistersV3A {
     pub fn weighted_u32(
         weight_zero: f32,
         weight_ones: f32,
+        weight_inject: f32,
         rand: &mut rand::rngs::StdRng,
         register_beta: &mut Beta<f64>,
+        inject_values: &[u32],
     ) -> u32 {
         let random_value: f32 = rand.random();
         if random_value < weight_zero {
@@ -647,14 +709,49 @@ impl RemoteCpuRegistersV3A {
         else if random_value < weight_zero + weight_ones {
             0xFFFF // All bits set to 1
         }
+        else if random_value < weight_zero + weight_ones + weight_inject {
+            let index = rand.random_range(0..inject_values.len());
+            inject_values[index]
+        }
         else {
             let value: u32 = (register_beta.sample(rand) * u32::MAX as f64) as u32;
             value
         }
     }
 
+    #[cfg(feature = "use_iced")]
+    pub fn mask_registers(&mut self, segment: iced_x86::Register, mask_registers: &[iced_x86::Register]) {
+        use iced_x86::Register;
+
+        let limit_mask = match segment {
+            Register::CS => self.cs_desc.limit(),
+            Register::DS => self.ds_desc.limit(),
+            Register::ES => self.es_desc.limit(),
+            Register::FS => self.fs_desc.limit(),
+            Register::GS => self.gs_desc.limit(),
+            Register::SS => self.ss_desc.limit(),
+            _ => return, // Unsupported register for masking
+        };
+
+        for &reg in mask_registers {
+            match reg {
+                Register::EAX => self.eax = self.eax & limit_mask,
+                Register::EBX => self.ebx = self.ebx & limit_mask,
+                Register::ECX => self.ecx = self.ecx & limit_mask,
+                Register::EDX => self.edx = self.edx & limit_mask,
+                Register::ESI => self.esi = self.esi & limit_mask,
+                Register::EDI => self.edi = self.edi & limit_mask,
+                Register::EBP => self.ebp = self.ebp & limit_mask,
+                Register::ESP => self.esp = self.esp & limit_mask,
+                _ => {
+                    // Do nothing for registers not used in EA calculations
+                }
+            }
+        }
+    }
+
     #[rustfmt::skip]
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>) {
+    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>, inject_values: &[u32]) {
         *self = RemoteCpuRegistersV3A::default(); // Reset all registers to default values
 
         if opts.randomize_flags {
@@ -668,20 +765,20 @@ impl RemoteCpuRegistersV3A {
         }
 
         if opts.randomize_general {
-            self.eax = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.ebx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.ecx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.edx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.esp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.ebp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.esi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.edi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.ds = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.ss = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.es = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.fs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.gs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
-            self.cs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, rand, beta);
+            self.eax = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.ebx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.ecx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.edx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.esp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.ebp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.esi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.edi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.ds = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.ss = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.es = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.fs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.gs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.cs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
         }
 
         if opts.randomize_ip {
@@ -697,13 +794,19 @@ impl RemoteCpuRegistersV3A {
         }
 
         // Set sp to minimum value if beneath.
-        if self.esp < opts.sp_min_value32 {
-            self.esp = opts.sp_min_value32;
+        if self.esp < opts.sp_min_value {
+            self.esp = opts.sp_min_value;
         }
 
         // Set sp to maximum value if above.
-        if self.esp > opts.sp_max_value32 {
-            self.esp = opts.sp_max_value32;
+        if self.esp > opts.sp_max_value {
+            self.esp = opts.sp_max_value;
+        }
+
+        // Mask ESP with SS descriptor limit if enabled.
+        if opts.sp_use_ss_limit {
+            let ss_limit = self.ss_desc.limit();
+            self.esp = self.esp & ss_limit;
         }
 
         if opts.randomize_msw {

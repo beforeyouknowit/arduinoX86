@@ -199,16 +199,7 @@ impl Display for ServerCycleStatePrinter {
 
         let bus_state = self.cpu_type.decode_status(self.state.cpu_status_bits);
         let bus_raw = self.cpu_type.raw_status(self.state.cpu_status_bits);
-        let bus_str = match bus_state {
-            BusState::INTA => "INTA",
-            BusState::IOR => "IOR ",
-            BusState::IOW => "IOW ",
-            BusState::HALT => "HALT",
-            BusState::CODE => "CODE",
-            BusState::MEMR => "MEMR",
-            BusState::MEMW => "MEMW",
-            BusState::PASV => "PASV",
-        };
+        let bus_str = bus_state.to_string();
 
         let t_string = self.cpu_type.tstate_to_string(self.state.t_state());
 

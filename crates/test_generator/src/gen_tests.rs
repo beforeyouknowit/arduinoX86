@@ -23,10 +23,10 @@
 
 use std::{ffi::OsString, io::BufWriter, time::Instant};
 
-use super::{Config, InstructionSize, TestContext};
+use super::{Config, TestContext, TestOpcodeSizePrefix};
 use crate::{
     bus_ops::BusOps,
-    cpu_common::{BusOp, BusOpType},
+    cpu_common::BusOp,
     cycles::MyServerCycleState,
     display::print_regs_v2,
     gen_regs::TestRegisters,
@@ -40,7 +40,6 @@ use moo::{
     types::{
         MooComparison,
         MooCpuType,
-        MooException,
         MooFileMetadata,
         MooRamEntry,
         MooRegisters,
@@ -61,15 +60,26 @@ use arduinox86_client::{
     ProgramState,
     RegisterSetType,
     RemoteCpuRegistersV2,
-    RemoteCpuRegistersV3A,
     RemoteCpuRegistersV3B,
-    ServerCpuType,
     ServerFlags,
 };
 
 use anyhow::{anyhow, bail, Context, Error};
-use iced_x86::{Mnemonic, OpKind};
+use iced_x86::Mnemonic;
+use moo::types::MooCycleStatePrinter;
 use rand::{Rng, SeedableRng};
+
+#[macro_export]
+macro_rules! trace_banner {
+    ($ctx:expr) => {{
+        use std::io::Write;
+        writeln!(
+            $ctx.trace_log,
+            ">>> ----------------------------------------------------------------------------------------------------"
+        )
+        .expect("failed to write to trace_log!");
+    }};
+}
 
 // Trace print macro that writes to bufwriter
 #[macro_export]
@@ -97,257 +107,6 @@ macro_rules! trace_error {
         // 3) also log via log::error!
         log::error!($($arg)*);
     }};
-}
-
-pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<()> {
-    let mut opcode_range_start: u8 = 0;
-    let mut opcode_range_end: u8 = 0xFF;
-
-    if config.test_gen.opcode_range.len() > 1 {
-        opcode_range_start = config.test_gen.opcode_range[0];
-        opcode_range_end = config.test_gen.opcode_range[1];
-
-        println!(
-            "Generating tests for opcodes from [{:02x} to {:02x}]",
-            opcode_range_start, opcode_range_end
-        );
-    }
-    else {
-        log::error!("Invalid opcode range specified.");
-        bail!("Invalid opcode range specified.");
-    }
-
-    // Tell ArduinoX86 to execute instructions automatically.
-    context.client.set_flags(ServerFlags::EXECUTE_AUTOMATIC)?;
-    // Set default serial debug state.
-    context.client.enable_debug(config.test_exec.serial_debug_default)?;
-
-    let mut last_opcode = opcode_range_start;
-    for opcode in opcode_range_start..=opcode_range_end {
-        let mut op_ext_start = 0;
-        let mut op_ext_end = 0;
-        let mut have_group_ext = false;
-        if config.test_gen.group_opcodes.contains(&opcode) {
-            have_group_ext = true;
-            (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode);
-        }
-
-        if config.test_gen.excluded_opcodes.contains(&opcode) {
-            log::debug!("Skipping excluded opcode: {:02X}", opcode);
-            continue;
-        }
-        if config.test_gen.prefixes.contains(&opcode) {
-            log::debug!("Skipping prefix: {:02X}", opcode);
-            continue;
-        }
-
-        for opcode_ext in op_ext_start..=op_ext_end {
-            last_opcode = opcode;
-
-            let mut op_ext_str = "".to_string();
-            if have_group_ext {
-                // If this is a group opcode, append the extension.
-                op_ext_str = format!(".{:1X}", opcode_ext);
-            }
-
-            // Create the file path.
-            let mut file_path = config.test_gen.test_output_dir.clone();
-            let filename = OsString::from(format!("{:02X}{}.MOO", opcode, op_ext_str));
-            file_path.push(filename.clone());
-
-            // Create the trace file.
-            let trace_filename = OsString::from(format!(
-                "{:02X}{}{}",
-                opcode,
-                op_ext_str,
-                config.test_gen.trace_file_suffix.display()
-            ));
-            let trace_file_path = config.test_gen.verify_trace_output_dir.join(trace_filename);
-
-            // Open the trace file if it exists (and we are appending), otherwise create a new one.
-            let trace_file = if !config.test_gen.append_file || !trace_file_path.exists() {
-                log::debug!("Creating trace file {}", trace_file_path.to_string_lossy());
-                std::fs::File::create(&trace_file_path)
-                    .with_context(|| format!("Creating trace file: {}", trace_file_path.display()))?
-            }
-            else {
-                log::debug!("Using existing trace file: {}", trace_file_path.to_string_lossy());
-                std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&trace_file_path)
-                    .with_context(|| format!("Opening existing trace file: {}", trace_file_path.display()))?
-            };
-            context.trace_log = BufWriter::new(trace_file);
-
-            let mut test_file = MooTestFile::new(
-                config.test_gen.moo_version,
-                "C286".to_string(),
-                config.test_gen.test_count,
-            );
-
-            // Open `file_path` for reading as a BufReader.
-            match std::fs::File::open(&file_path) {
-                Ok(file) => {
-                    log::debug!("Appending to existing test file: {}", file_path.to_string_lossy());
-                    let mut file_reader = std::io::BufReader::new(file);
-                    test_file = MooTestFile::read(&mut file_reader)?;
-
-                    if test_file.metadata().is_none() {
-                        return Err(anyhow::anyhow!(
-                            "Test file {} has no metadata.",
-                            file_path.to_string_lossy()
-                        ));
-                    }
-
-                    println!(
-                        "Read {} tests from existing file: {}",
-                        test_file.test_ct(),
-                        file_path.to_string_lossy()
-                    );
-                }
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::NotFound {
-                        // If the file does not exist, we will create it later.
-                        log::debug!("File {} not found, skipping...", file_path.to_string_lossy());
-                        continue;
-                    }
-                    else {
-                        return Err(anyhow::anyhow!("Error opening test file: {}", e));
-                    }
-                }
-            }
-
-            for test_num in 0..test_file.test_ct() {
-                // Create unique instruction and initial register set for each test.
-                // These should not change regardless of test attempt count.
-
-                let mut gen_num: usize = 0;
-
-                let file_seed = test_file.metadata().unwrap().file_seed;
-
-                let tests = test_file.tests();
-                let instruction_bytes = tests[test_num].bytes();
-
-                let mut test_registers = TestRegisters::from(tests[test_num].initial_regs());
-                let mut test_instruction = TestInstruction::from((InstructionSize::Sixteen, instruction_bytes));
-
-                // Write initial memory state to device.
-                let initial_mem = tests[test_num].initial_mem_state();
-
-                write_initial_mem(context, &initial_mem.entries)?;
-
-                // Set flow control end condition
-                if config.test_gen.flow_control_opcodes.contains(&opcode) {
-                    let flags = context.client.get_flags()?;
-                    if flags & ServerFlags::HALT_AFTER_JUMP == 0 {
-                        // Enable halt after jump if not already set.
-                        context.client.set_flags(flags | ServerFlags::HALT_AFTER_JUMP)?;
-                        log::debug!("Enabled HALT_AFTER_JUMP for opcode {:02X}", opcode);
-                    }
-                }
-
-                let mut test_attempt_ct = 0;
-                let mut test_result = generate_test(
-                    context,
-                    config,
-                    test_num,
-                    gen_num,
-                    opcode,
-                    have_group_ext.then_some(opcode_ext),
-                    &test_instruction,
-                    &mut test_registers,
-                );
-
-                while test_result.is_err() {
-                    test_attempt_ct += 1;
-                    trace_error!(
-                        context,
-                        "Failed to generate test for opcode {:02X}, attempt {}/{}: {}",
-                        opcode,
-                        test_attempt_ct,
-                        config.test_exec.test_retry,
-                        test_result.as_ref().err().unwrap()
-                    );
-
-                    if test_attempt_ct >= config.test_exec.test_retry {
-                        let err_str = format!(
-                            "Failed to generate test for opcode {:02X} after {} attempts: {}",
-                            opcode,
-                            test_attempt_ct,
-                            test_result.as_ref().err().unwrap()
-                        );
-                        trace_error!(context, "{}", err_str);
-
-                        gen_num += 1;
-                        if gen_num < config.test_exec.max_gen as usize {
-                            trace_log!(context, "Retrying with new instruction generation: {}", gen_num);
-                        }
-                        else {
-                            trace_error!(context, "Max generation attempts reached for test number {}", test_num);
-                        }
-
-                        // Generate a new random instruction.
-                        test_instruction = TestInstruction::new(
-                            context,
-                            &config.test_gen,
-                            InstructionSize::Sixteen,
-                            opcode,
-                            have_group_ext.then_some(opcode_ext),
-                            &test_registers,
-                            test_num,
-                            gen_num,
-                        )?;
-                        test_registers = TestRegisters::new(context, &config, opcode, test_num, gen_num);
-                    }
-
-                    test_result = generate_test(
-                        context,
-                        config,
-                        test_num,
-                        gen_num,
-                        opcode,
-                        have_group_ext.then_some(opcode_ext),
-                        &test_instruction,
-                        &mut test_registers,
-                    );
-                }
-
-                // Validate the test result matches the saved test.
-
-                if let Ok(test) = test_result {
-                    // Check if the test matches the saved test.
-                    if test.final_regs() != tests[test_num].final_regs() {
-                        trace_error!(
-                            context,
-                            "Register mismatch for opcode {:02X} at test number {}!",
-                            opcode,
-                            test_num,
-                        );
-                        compare_registers(&test.final_regs(), tests[test_num].final_regs());
-                        return Err(anyhow::anyhow!(
-                            "Register mismatch for opcode {:02X} at test number {}",
-                            opcode,
-                            test_num
-                        ));
-                    }
-                    else {
-                        trace_log!(context, "{:02X}:{:05X} registers validated.", opcode, test_num);
-                    }
-                }
-                else {
-                    trace_error!(
-                        context,
-                        "Failed to validate test for opcode {:02X} at test number {}",
-                        opcode,
-                        test_num,
-                    );
-                    return Err(test_result.err().unwrap());
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 pub fn compare_registers(regs0: &MooRegisters, regs1: &MooRegisters) {
@@ -547,7 +306,18 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     let mut last_opcode = opcode_range_start;
 
     for opcode in opcode_range_start..=opcode_range_end {
-        for size in &config.test_gen.gen_widths {
+        let extended_opcode = opcode as u16;
+
+        for size_prefix in TestOpcodeSizePrefix::iter(
+            config.test_gen.cpu_type,
+            extended_opcode,
+            &config.test_gen.disable_operand_size_prefix,
+            &config.test_gen.disable_address_size_prefix,
+        ) {
+            context.file_gen_ct = 0;
+            context.exceptions.clear();
+            context.test_opcode_size_prefix = size_prefix;
+
             let mut op_ext_start = 0;
             let mut op_ext_end = 0;
             let mut have_group_ext = false;
@@ -579,12 +349,14 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
 
                 // Create the output file path.
                 let mut file_path = config.test_gen.test_output_dir.clone();
-                let filename = OsString::from(format!("{:02X}{}.MOO", opcode, op_ext_str));
+                let size_prefix_base = size_prefix.to_filename_prefix();
+                let filename = OsString::from(format!("{}{:02X}{}.MOO", size_prefix_base, opcode, op_ext_str));
                 file_path.push(filename.clone());
 
                 // Create the trace file.
                 let trace_filename = OsString::from(format!(
-                    "{:02X}{}{}",
+                    "{}{:02X}{}{}",
+                    size_prefix_base,
                     opcode,
                     op_ext_str,
                     config.test_gen.trace_file_suffix.display()
@@ -666,7 +438,6 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                         context,
                         config,
                         test_num,
-                        *size,
                         opcode,
                         have_group_ext,
                         opcode_ext,
@@ -688,6 +459,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                         // Add the test to the test file.
                         let test = test_result?;
                         test_file.add_test(test);
+                        context.file_gen_ct += 1;
                         context.gen_ct += 1;
                     }
                 }
@@ -705,13 +477,39 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     );
                 }
 
+                trace_banner!(context);
+                trace_log!(
+                    context,
+                    "### Test generation complete for opcode {:02X} ({} tests) ###",
+                    opcode,
+                    context.file_gen_ct
+                );
+
                 // Adjust final metadata with count...
                 test_metadata = test_metadata.with_test_count(context.gen_ct as u32);
                 // ... and with the most frequently seen mnemonic (to handle some tests that have invalid forms icedx86 won't decode).
                 if let Some((mnemonic, count)) = context.mnemonic_set.iter().max_by_key(|entry| entry.1) {
-                    log::debug!("Most frequent mnemonic: {} ({} times)", mnemonic, count);
+                    let mnemonic_stats = format!("Most frequent mnemonic: {} ({} times)", mnemonic, count);
+                    trace_log!(context, "{}", mnemonic_stats);
+                    log::debug!("{}", mnemonic_stats);
                     test_metadata = test_metadata.with_mnemonic(mnemonic.to_string());
                 }
+
+                trace_log!(context, "Exceptions seen:");
+
+                let total = context.file_gen_ct * config.test_exec.validate_count as usize;
+                for exception in &context.exceptions {
+                    trace_log!(
+                        context,
+                        "{}: {:5}/{:5} ({:.2}%)",
+                        exception.0,
+                        exception.1,
+                        total,
+                        (*exception.1 as f64 / total as f64) * 100.0
+                    );
+                }
+
+                trace_banner!(context);
 
                 test_file.set_metadata(test_metadata);
 
@@ -735,7 +533,6 @@ fn generate_consistent_test(
     context: &mut TestContext,
     config: &Config,
     test_num: usize,
-    size: InstructionSize,
     opcode: u8,
     have_group_ext: bool,
     opcode_ext: u8,
@@ -759,16 +556,84 @@ fn generate_consistent_test(
     while gen_num < config.test_exec.max_gen as usize {
         // Generate a fresh Register & Instruction pair.
         let mut test_registers = TestRegisters::new(context, config, opcode, test_num, gen_num);
-        let test_instruction = TestInstruction::new(
+
+        context.code_segment_size = test_registers.regs.segment_size(iced_x86::Register::CS);
+
+        let mut test_instruction = TestInstruction::new(
             context,
             &config.test_gen,
-            size,
             opcode,
             have_group_ext.then_some(opcode_ext),
             &test_registers,
             test_num,
             gen_num,
         )?;
+
+        trace_banner!(context);
+        trace_log!(context, "Code segment is size {:?}", context.code_segment_size);
+
+        let mut segments = test_instruction.segments();
+        let mut segment_limit = 0xFFFF_FFFF;
+
+        for segment in &segments {
+            trace_log!(
+                context,
+                "Test instruction accesses segment {:?} with limit {:X}, size {:?}",
+                segment,
+                test_registers.regs.segment_limit(*segment).unwrap_or(0),
+                test_registers.regs.segment_size(*segment)
+            );
+
+            segment_limit &= test_registers.regs.segment_limit(*segment).unwrap_or(0xFFFF_FFFF);
+        }
+
+        let mut ea_registers = &test_instruction.ea_registers();
+        for register in ea_registers {
+            trace_log!(context, "Test instruction uses EA register {:?}", register);
+        }
+
+        if !ea_registers.is_empty() {
+            trace_log!(
+                context,
+                "Masking EA registers: {:?} with limit {:08X}",
+                ea_registers,
+                segment_limit
+            );
+
+            test_registers.regs.mask_registers32(segments[0], ea_registers);
+        }
+
+        if let Some(displacement_size) = test_instruction.displacement_size() {
+            trace_log!(
+                context,
+                "Test instruction uses displacement of size {} bytes",
+                displacement_size,
+            );
+
+            if displacement_size == 4 {
+                if segments.len() > 1 {
+                    trace_error!(
+                        context,
+                        "Multiple segments found with displacement - unexpected condition."
+                    );
+                    bail!("Multiple segments found with displacement - unexpected condition.");
+                }
+                else {
+                    let segment = segments[0];
+                    trace_log!(
+                        context,
+                        "Masking displacement with segment limit {:08X} (sign-extended)",
+                        segment_limit
+                    );
+                    test_instruction.mask_displacement32(
+                        context,
+                        &config.test_gen,
+                        test_registers.regs.segment_size(segment).into(),
+                        segment_limit,
+                    )?;
+                }
+            }
+        }
 
         let mut test_attempt_ct = 0;
         let mut prev_test: Option<MooTest> = None;
@@ -1356,10 +1221,16 @@ pub fn generate_test(
 
     // Detect any exceptions from bus operations.
     // ---------------------------------------------------------------------------------------------
-    let exception = bus_ops.detect_exception(context.server_cpu.into());
+    let exception = bus_ops.detect_exception(context, context.server_cpu.into());
 
     if let Some(exception) = &exception {
         log::trace!("Detected exception: {}", exception.exception_num);
+
+        context
+            .exceptions
+            .entry(exception.exception_num)
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
 
         trace_log!(context, "Detected exception: {}", exception.exception_num);
         trace_log!(context, "Flags on stack at {:06X}", exception.flag_address);
@@ -1476,8 +1347,21 @@ pub fn log_bus_ops(context: &mut TestContext, bus_ops: &[BusOp]) {
 }
 
 pub fn log_cycle_states(context: &mut TestContext, cycles: &[MooCycleState]) {
+    let mut address_latch = 0;
     for cycle in cycles {
-        trace_log!(context, "{}", cycle);
+        if cycle.pins0 & MooCycleState::PIN_ALE != 0 {
+            address_latch = cycle.address_bus;
+        }
+
+        trace_log!(
+            context,
+            "{}",
+            MooCycleStatePrinter {
+                cpu_type: context.server_cpu.into(),
+                address_latch,
+                state: cycle.clone(),
+            }
+        );
     }
 }
 

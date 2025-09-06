@@ -32,13 +32,9 @@ mod instruction;
 mod modrm;
 mod registers;
 mod state;
+mod validate_tests;
 
-use anyhow::Context;
-//use iced_x86::{Decoder, DecoderOptions};
-use arduinox86_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
-use clap::Parser;
-use moo::types::MooCpuType;
-use serde::Deserialize;
+use arduinox86_client::registers_common::SegmentSize;
 use std::{
     collections::HashMap,
     fs,
@@ -47,6 +43,13 @@ use std::{
     path::PathBuf,
     time::Instant,
 };
+
+use arduinox86_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
+use moo::types::MooCpuType;
+
+use anyhow::Context;
+use clap::Parser;
+use serde::Deserialize;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub enum InstructionSize {
@@ -74,6 +77,82 @@ pub enum CpuMode {
 pub enum TerminationCondition {
     Queue,
     Halt,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TestOpcodeSizePrefix {
+    None,
+    OperandSize,
+    AddressSize,
+    OperandAndAddressSize,
+}
+
+impl TestOpcodeSizePrefix {
+    pub fn to_filename_prefix(&self) -> &'static str {
+        match self {
+            TestOpcodeSizePrefix::None => "",
+            TestOpcodeSizePrefix::OperandSize => "66",
+            TestOpcodeSizePrefix::AddressSize => "67",
+            TestOpcodeSizePrefix::OperandAndAddressSize => "6766",
+        }
+    }
+
+    /// Returns an iterator over all valid prefixes for the given CPU.
+    pub fn iter(
+        cpu_type: MooCpuType,
+        extended_opcode: u16,
+        disable_operand_size_opcodes: &[u16],
+        disable_address_size_opcodes: &[u16],
+    ) -> Box<dyn Iterator<Item = TestOpcodeSizePrefix>> {
+        match cpu_type {
+            MooCpuType::Intel80386Ex => {
+                let mut iter_vec = vec![TestOpcodeSizePrefix::None];
+
+                let use_operand_size = !disable_operand_size_opcodes.contains(&extended_opcode);
+                let use_address_size = !disable_address_size_opcodes.contains(&extended_opcode);
+
+                if use_operand_size {
+                    iter_vec.push(TestOpcodeSizePrefix::OperandSize);
+                }
+                if use_address_size {
+                    iter_vec.push(TestOpcodeSizePrefix::AddressSize);
+                }
+                if use_operand_size && use_address_size {
+                    iter_vec.push(TestOpcodeSizePrefix::OperandAndAddressSize);
+                }
+                Box::new(iter_vec.into_iter())
+            }
+            _ => Box::new(std::iter::empty()),
+        }
+    }
+
+    pub fn relative_size(&self, size: SegmentSize) -> InstructionSize {
+        match size {
+            SegmentSize::Sixteen => match self {
+                TestOpcodeSizePrefix::None => InstructionSize::Sixteen,
+                TestOpcodeSizePrefix::OperandSize => InstructionSize::ThirtyTwo,
+                TestOpcodeSizePrefix::AddressSize => InstructionSize::Sixteen,
+                TestOpcodeSizePrefix::OperandAndAddressSize => InstructionSize::ThirtyTwo,
+            },
+            SegmentSize::ThirtyTwo => match self {
+                TestOpcodeSizePrefix::None => InstructionSize::ThirtyTwo,
+                TestOpcodeSizePrefix::OperandSize => InstructionSize::Sixteen,
+                TestOpcodeSizePrefix::AddressSize => InstructionSize::ThirtyTwo,
+                TestOpcodeSizePrefix::OperandAndAddressSize => InstructionSize::Sixteen,
+            },
+        }
+    }
+}
+
+impl From<TestOpcodeSizePrefix> for Vec<u8> {
+    fn from(prefix: TestOpcodeSizePrefix) -> Self {
+        match prefix {
+            TestOpcodeSizePrefix::None => vec![],
+            TestOpcodeSizePrefix::OperandSize => vec![0x66],
+            TestOpcodeSizePrefix::AddressSize => vec![0x67],
+            TestOpcodeSizePrefix::OperandAndAddressSize => vec![0x66, 0x67],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -113,8 +192,8 @@ pub struct GroupExtensionOverride {
 #[derive(Clone, Debug, Deserialize)]
 pub struct StackPointerOverride {
     opcode: u8,
-    min:    u16,
-    max:    u16,
+    min:    u32,
+    max:    u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -190,17 +269,23 @@ pub struct TestGen {
     lock_prefix_opcode: u8,
     rep_prefix_chance:  f32,
 
-    reg_zero_chance:  f32,
-    reg_ones_chance:  f32,
-    imm_zero_chance:  f32,
-    imm_ones_chance:  f32,
+    reg_zero_chance: f32,
+    reg_ones_chance: f32,
+    reg_inject_chance: f32,
+    imm_zero_chance: f32,
+    imm_ones_chance: f32,
+    imm_inject_chance: f32,
     imm8s_min_chance: f32,
     imm8s_max_chance: f32,
-    near_branch_ban:  u16,
+    imm8s_inject_chance: f32,
+
+    inject_values: Vec<u32>,
+
+    near_branch_ban: u16,
 
     sp_odd_chance: f32,
-    sp_min_value: u16,
-    sp_max_value: u16,
+    sp_min_value: u32,
+    sp_max_value: u32,
     mem_zero_chance: f32,
     mem_ones_chance: f32,
     mem_strategy_start: u32,
@@ -213,8 +298,8 @@ pub struct TestGen {
     flow_control_opcodes: Vec<u8>,
     prefixes: Vec<u8>,
     segment_prefixes: Vec<u8>,
-    operand_size_prefix: Option<u8>,
-    address_size_prefix: Option<u8>,
+    disable_operand_size_prefix: Vec<u16>,
+    disable_address_size_prefix: Vec<u16>,
     rep_prefixes: Vec<u8>,
     rep_opcodes: Vec<u8>,
     rep_cx_mask: u16,
@@ -252,16 +337,20 @@ pub struct TestContext {
     store_register_buffer: Vec<u8>,
     server_cpu: ServerCpuType,
     register_set_type: RegisterSetType,
-
+    test_opcode_size_prefix: TestOpcodeSizePrefix,
+    code_segment_size: SegmentSize,
     file_seed: u64,
     gen_start: Instant,
     gen_stop: Instant,
     gen_ct: usize,
+    file_gen_ct: usize,
     trace_log: BufWriter<File>,
     mnemonic_set: HashMap<String, usize>,
 
     dry_run: bool,
     last_program_state: Option<ProgramState>,
+
+    exceptions: HashMap<u8, usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -280,7 +369,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize the random number generator
 
     // Create a cpu_client connection to cpu_server.
-    let mut cpu_client = match CpuClient::init(cli.com_port.clone(), Some(config.test_exec.serial_timeout as u64)) {
+    let cpu_client = match CpuClient::init(cli.com_port.clone(), Some(config.test_exec.serial_timeout as u64)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -333,14 +422,18 @@ fn main() -> anyhow::Result<()> {
         store_register_buffer,
         server_cpu,
         register_set_type: RegisterSetType::from(server_cpu),
+        test_opcode_size_prefix: TestOpcodeSizePrefix::None,
+        code_segment_size: SegmentSize::Sixteen,
         file_seed: 0,
         gen_start: Instant::now(),
         gen_stop: Instant::now(),
         gen_ct: 0,
+        file_gen_ct: 0,
         trace_log,
         mnemonic_set: Default::default(),
         dry_run: cli.dry_run,
         last_program_state: None,
+        exceptions: Default::default(),
     };
 
     if config.test_gen.exclude_esc_opcodes {
@@ -351,7 +444,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.validate {
-        gen_tests::validate_tests(&mut context, &config)?;
+        validate_tests::validate_tests(&mut context, &config)?;
     }
     else {
         gen_tests::gen_tests(&mut context, &config)?;

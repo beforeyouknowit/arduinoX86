@@ -1095,7 +1095,6 @@ bool CommandServer<BoardType, ShieldType>::cmd_store(void) {
             INBAND_SERIAL.write((uint8_t)3);
             // Write the registers in the V3B format.
             SmmDump386 smm386 = ArduinoX86::Bus->smm_dump386_regs();
-            controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## STORE: AX is %04X\n\r", smm386.eax & 0xFFFF);
             smm386.normalize_flags();
             write_len = INBAND_SERIAL.write((uint8_t *)&smm386, sizeof(SmmDump386));
             controller_.getBoard().debugPrintf(

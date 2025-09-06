@@ -18,8 +18,11 @@ modular-bitfield.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 thiserror.workspace = true
-moo-rs = { workspace = true, optional = true }
 strum_macros.workspace = true
+
+moo-rs = { workspace = true, optional = true }
+iced-x86 = { workspace = true, optional = true }
 
 [features]
 use_moo = ["dep:moo-rs"]
+use_iced = ["iced-x86"]

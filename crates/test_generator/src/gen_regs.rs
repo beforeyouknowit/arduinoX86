@@ -204,7 +204,7 @@ pub fn randomize_v2(_context: &mut TestContext, config: TestGen, opcode: u8, rng
     let mut reg_beta = Beta::new(config.register_beta[0], config.register_beta[1])
         .expect("Couldn't create beta function for register randomization");
 
-    regs.randomize(&random_opts, rng, &mut reg_beta);
+    regs.randomize(&random_opts, rng, &mut reg_beta, &config.inject_values);
 }
 
 pub fn randomize_v3a(_context: &mut TestContext, config: TestGen, opcode: u8, rng: &mut StdRng, regs: &mut Registers) {
@@ -222,11 +222,11 @@ pub fn randomize_v3a(_context: &mut TestContext, config: TestGen, opcode: u8, rn
     let random_opts = RandomizeOpts {
         weight_zero: config.reg_zero_chance,
         weight_ones: config.reg_ones_chance,
+        weight_inject: config.reg_inject_chance,
         weight_sp_odd: config.sp_odd_chance,
         sp_min_value: sp_min,
         sp_max_value: sp_max,
-        sp_min_value32: sp_min as u32,
-        sp_max_value32: sp_max as u32,
+        sp_use_ss_limit: true,
         randomize_flags: true,
         clear_trap_flag: true,
         clear_interrupt_flag: true,
@@ -240,10 +240,11 @@ pub fn randomize_v3a(_context: &mut TestContext, config: TestGen, opcode: u8, rn
         randomize_ldt: false,
         randomize_segment_descriptors: false,
         randomize_table_descriptors: false,
+        mask_eac_registers: false,
     };
 
     let mut reg_beta = Beta::new(config.register_beta[0], config.register_beta[1])
         .expect("Couldn't create beta function for register randomization");
 
-    regs.randomize(&random_opts, rng, &mut reg_beta);
+    regs.randomize(&random_opts, rng, &mut reg_beta, &config.inject_values);
 }

@@ -21,7 +21,10 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use arduinox86_client::{registers_common::RandomizeOpts, Registers32};
+use arduinox86_client::{
+    registers_common::{RandomizeOpts, SegmentSize},
+    Registers32,
+};
 use moo::{
     prelude::{MooRegisters16Init, MooRegisters32Init},
     types::{MooRegisters, MooRegisters16, MooRegisters32, MooRegistersInit},
@@ -233,13 +236,19 @@ impl TryFrom<&Registers> for MooRegisters32 {
 }
 
 impl Registers {
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>) {
+    pub fn randomize(
+        &mut self,
+        opts: &RandomizeOpts,
+        rand: &mut rand::rngs::StdRng,
+        beta: &mut Beta<f64>,
+        inject_values: &[u32],
+    ) {
         match self {
             Registers::V1(_regs) => {
                 //gen_regs::randomize_v1(&self.context, &self.config.test_gen, regs);
             }
-            Registers::V2(regs) => regs.randomize(opts, rand, beta),
-            Registers::V3A(regs) => regs.randomize(opts, rand, beta),
+            Registers::V2(regs) => regs.randomize(opts, rand, beta, inject_values),
+            Registers::V3A(regs) => regs.randomize(opts, rand, beta, inject_values),
             Registers::V3B(_) => {
                 // B registers don't need randomization as they are output
             }
@@ -325,6 +334,44 @@ impl Registers {
             Registers::V3B(regs) => regs.ss_desc.base_address(),
         }
     }
+    pub fn segment_limit(&self, segment: iced_x86::Register) -> Option<u32> {
+        match self {
+            Registers::V1(_regs) => None,
+            Registers::V2(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds_desc.limit() as u32),
+                iced_x86::Register::ES => Some(regs.es_desc.limit() as u32),
+                iced_x86::Register::SS => Some(regs.ss_desc.limit() as u32),
+                iced_x86::Register::CS => Some(regs.cs_desc.limit() as u32),
+                _ => None,
+            },
+            Registers::V3A(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds_desc.limit()),
+                iced_x86::Register::ES => Some(regs.es_desc.limit()),
+                iced_x86::Register::FS => Some(regs.fs_desc.limit()),
+                iced_x86::Register::GS => Some(regs.gs_desc.limit()),
+                iced_x86::Register::SS => Some(regs.ss_desc.limit()),
+                iced_x86::Register::CS => Some(regs.cs_desc.limit()),
+                _ => None,
+            },
+            Registers::V3B(regs) => None,
+        }
+    }
+    pub fn segment_size(&self, segment: iced_x86::Register) -> SegmentSize {
+        match self {
+            Registers::V1(_regs) => SegmentSize::Sixteen,
+            Registers::V2(_regs) => SegmentSize::Sixteen,
+            Registers::V3A(regs) => match segment {
+                iced_x86::Register::DS => regs.ds_desc.segment_size(),
+                iced_x86::Register::ES => regs.es_desc.segment_size(),
+                iced_x86::Register::FS => regs.fs_desc.segment_size(),
+                iced_x86::Register::GS => regs.gs_desc.segment_size(),
+                iced_x86::Register::SS => regs.ss_desc.segment_size(),
+                iced_x86::Register::CS => regs.cs_desc.segment_size(),
+                _ => SegmentSize::Sixteen,
+            },
+            Registers::V3B(_regs) => unimplemented!("Segment size for V3B registers is not implemented"),
+        }
+    }
     pub fn cx(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.cx,
@@ -355,6 +402,14 @@ impl Registers {
             Registers::V2(regs) => regs.ss_desc.base_address() + regs.sp as u32,
             Registers::V3A(regs) => regs.ss_desc.base_address() + regs.esp,
             Registers::V3B(regs) => regs.ss_desc.base_address() + regs.esp,
+        }
+    }
+    pub fn mask_registers32(&mut self, segment: iced_x86::Register, ea_registers: &[iced_x86::Register]) {
+        match self {
+            Registers::V1(_regs) => {}
+            Registers::V2(_regs) => {}
+            Registers::V3A(regs) => regs.mask_registers(segment, ea_registers),
+            Registers::V3B(_regs) => {}
         }
     }
 }

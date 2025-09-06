@@ -33,6 +33,7 @@ use crate::{trace_log, InstructionSize, TerminationCondition, TestContext, TestG
 
 use crate::gen_regs::TestRegisters;
 use anyhow::bail;
+
 use iced_x86::{Decoder, DecoderOptions, Formatter, NasmFormatter, OpKind};
 use moo::types::MooCpuType;
 
@@ -92,7 +93,6 @@ impl TestInstruction {
     pub fn new(
         context: &mut TestContext,
         config: &TestGen,
-        size: InstructionSize,
         opcode: u8,
         opcode_ext: Option<u8>,
         test_registers: &TestRegisters,
@@ -160,6 +160,11 @@ impl TestInstruction {
         for _ in 0..6 {
             let byte = rng.random();
             instruction_bytes.push_back(byte);
+        }
+
+        // Append specified opcode size prefixes.
+        for byte in Vec::<u8>::from(context.test_opcode_size_prefix) {
+            instruction_bytes.push_front(byte);
         }
 
         // Roll for prefix count.
@@ -314,7 +319,7 @@ impl TestInstruction {
         }
 
         if modified_iced {
-            let mut encoder = iced_x86::Encoder::new(config.cpu_type.reg_bitness());
+            let mut encoder = iced_x86::Encoder::new(context.code_segment_size.into());
             encoder.encode(&iced_i, 0)?;
             let buffer = encoder.take_buffer();
 
@@ -325,7 +330,7 @@ impl TestInstruction {
             // prefix whenever we override an immediate, but this is an acceptable limitation.
 
             instruction_bytes = buffer.to_vec();
-            decoder = Decoder::new(config.cpu_type.reg_bitness(), &instruction_bytes, decoder_opts);
+            decoder = Decoder::new(context.code_segment_size.into(), &instruction_bytes, decoder_opts);
             iced_i = decoder.decode();
             instr_text = iced_i.to_string();
             instruction_byte_ct = iced_i.len();
@@ -355,9 +360,10 @@ impl TestInstruction {
             else {
                 // Bad condition
                 bail!(
-                    "Invalid instruction length: {} for opcode {:02X}",
+                    "Invalid instruction length: {} for opcode {:02X} (have {} instruction bytes)",
                     instruction_byte_ct,
-                    opcode
+                    opcode,
+                    instruction_bytes.len()
                 );
             }
         }
@@ -370,6 +376,8 @@ impl TestInstruction {
             &mut mnemonic_string,
             iced_x86::FormatMnemonicOptions::NO_PREFIXES,
         );
+
+        let size = context.test_opcode_size_prefix.relative_size(context.code_segment_size);
 
         Ok(TestInstruction {
             name: instr_text,
@@ -394,6 +402,196 @@ impl TestInstruction {
             op0_kind,
             op1_kind,
         })
+    }
+
+    pub fn mask_displacement32(
+        &mut self,
+        context: &mut TestContext,
+        config: &TestGen,
+        bitness: u32,
+        mask: u32,
+    ) -> anyhow::Result<()> {
+        let mut modified_disp = false;
+
+        let mut decoder_opts = DecoderOptions::NO_INVALID_CHECK;
+        if matches!(config.cpu_type, MooCpuType::Intel80286) {
+            decoder_opts |= DecoderOptions::LOADALL286;
+        }
+
+        if self.iced_i.memory_displ_size() == 4 {
+            let mut disp32 = self.iced_i.memory_displacement32();
+            let negative = disp32 & 0x8000_0000 != 0;
+
+            disp32 &= mask;
+            if negative {
+                // Sign extend the masked displacement.
+                disp32 |= !mask;
+            }
+
+            if disp32 != self.iced_i.memory_displacement32() {
+                trace_log!(
+                    context,
+                    "Replacing Displacement32 value. Old: {:08X} New: {:08X}",
+                    self.iced_i.memory_displacement32(),
+                    disp32
+                );
+                self.iced_i.set_memory_displacement32(disp32);
+                modified_disp = true;
+            }
+        }
+
+        if modified_disp {
+            let mut encoder = iced_x86::Encoder::new(bitness);
+            encoder.encode(&self.iced_i, 0)?;
+            let buffer = encoder.take_buffer();
+
+            // Iced will not encode multiple prefixes. If we generated multiple prefixes for this
+            // instruction, it would be a pain to try to copy the iced-encoded instruction at the
+            // correct spot, so instead we'll just replace the entire instruction bytes vector
+            // with the new bytes. This means that we have a maximum of one segment override
+            // prefix whenever we override an immediate, but this is an acceptable limitation.
+
+            trace_log!(
+                context,
+                "Old instruction bytes: {:02X?} ct:{}",
+                self.bytes,
+                self.iced_i.len()
+            );
+
+            let instruction_bytes = buffer.to_vec();
+            self.bytes = instruction_bytes.clone();
+            let mut decoder = Decoder::new(bitness, &instruction_bytes, decoder_opts);
+            self.iced_i = decoder.decode();
+            let instruction_byte_ct = self.iced_i.len();
+            let mut sequence_bytes = instruction_byte_ct;
+
+            if matches!(config.termination_condition, TerminationCondition::Halt) {
+                // Insert a HALT instruction at the end of the sequence.
+                if instruction_byte_ct == instruction_bytes.len() {
+                    log::trace!("Appending HALT instruction");
+                    // Decoded instruction uses all available bytes, so push a new HALT opcode.
+                    sequence_bytes += 1;
+                    self.bytes.push(0xF4); // HALT instruction for Intel 8086/8088.
+                }
+                else if instruction_byte_ct < instruction_bytes.len() {
+                    log::trace!("Injecting HALT instruction at offset {}", instruction_byte_ct);
+                    sequence_bytes += 1;
+                    // Decoded bytes are less than instruction bytes, insert HALT opcode inline.
+                    self.bytes[instruction_byte_ct] = 0xF4; // HALT instruction for Intel 8086/8088.
+                }
+                else {
+                    // Bad condition
+                    bail!(
+                        "Invalid instruction length: {} for opcode {:02X} (have {} instruction bytes)",
+                        instruction_byte_ct,
+                        self.opcode,
+                        instruction_bytes.len()
+                    );
+                }
+            }
+
+            self.name = self.iced_i.to_string();
+
+            self.instr_range = Range {
+                start: 0,
+                end:   instruction_byte_ct,
+            };
+            self.sequence_range = Range {
+                start: 0,
+                end:   sequence_bytes,
+            };
+
+            trace_log!(
+                context,
+                "New instruction bytes: {:02X?} ct:{}",
+                self.bytes,
+                instruction_byte_ct
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn mask_immediate32(
+        &mut self,
+        context: &mut TestContext,
+        config: &TestGen,
+        bitness: u32,
+        mask: u32,
+    ) -> anyhow::Result<()> {
+        let mut modified_imm = false;
+        let op1_kind = self.iced_i.op1_kind();
+
+        let mut decoder_opts = DecoderOptions::NO_INVALID_CHECK;
+        if matches!(config.cpu_type, MooCpuType::Intel80286) {
+            decoder_opts |= DecoderOptions::LOADALL286;
+        }
+
+        match op1_kind {
+            OpKind::Immediate32 => {
+                log::debug!("Have Immediate32 to mask...");
+                let mut imm32 = self.iced_i.immediate32();
+                let negative = imm32 & 0x8000_0000 != 0;
+
+                imm32 &= mask;
+                if negative {
+                    // Sign extend the masked immediate.
+                    imm32 |= !mask;
+                }
+
+                if imm32 != self.iced_i.immediate32() {
+                    log::debug!("Setting new Immediate32 value: {:08X}", imm32);
+                    self.iced_i.set_immediate32(imm32);
+                    modified_imm = true;
+                }
+            }
+            _ => {
+                return Ok(()); // Nothing to do
+            }
+        }
+
+        if modified_imm {
+            let mut encoder = iced_x86::Encoder::new(bitness);
+            encoder.encode(&self.iced_i, 0)?;
+            let buffer = encoder.take_buffer();
+
+            // Iced will not encode multiple prefixes. If we generated multiple prefixes for this
+            // instruction, it would be a pain to try to copy the iced-encoded instruction at the
+            // correct spot, so instead we'll just replace the entire instruction bytes vector
+            // with the new bytes. This means that we have a maximum of one segment override
+            // prefix whenever we override an immediate, but this is an acceptable limitation.
+
+            trace_log!(
+                context,
+                "Old instruction bytes: {:X?} ct:{}",
+                self.bytes,
+                self.iced_i.len()
+            );
+
+            let instruction_bytes = buffer.to_vec();
+            self.bytes = instruction_bytes.clone();
+            let mut decoder = Decoder::new(bitness, &instruction_bytes, decoder_opts);
+
+            self.iced_i = decoder.decode();
+            self.name = self.iced_i.to_string();
+            let instruction_byte_ct = self.iced_i.len();
+            self.instr_range = Range {
+                start: 0,
+                end:   instruction_byte_ct,
+            };
+            self.sequence_range = Range {
+                start: 0,
+                end:   instruction_byte_ct,
+            };
+
+            trace_log!(
+                context,
+                "New instruction bytes: {:X?} ct:{}",
+                self.bytes,
+                instruction_byte_ct
+            );
+        }
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -430,5 +628,41 @@ impl TestInstruction {
 
     pub fn mnemonic(&self) -> &str {
         &self.mnemonic
+    }
+
+    pub fn ea_registers(&self) -> Vec<iced_x86::Register> {
+        let mut info_factory = iced_x86::InstructionInfoFactory::new();
+        let info = info_factory.info(&self.iced_i);
+
+        let mut ea_regs = Vec::new();
+        for m in info.used_memory() {
+            if m.base() != iced_x86::Register::None && !ea_regs.contains(&m.base()) {
+                ea_regs.push(m.base());
+            }
+            if m.index() != iced_x86::Register::None && !ea_regs.contains(&m.index()) {
+                ea_regs.push(m.index());
+            }
+        }
+
+        ea_regs
+    }
+
+    pub fn segments(&self) -> Vec<iced_x86::Register> {
+        let mut info_factory = iced_x86::InstructionInfoFactory::new();
+        let info = info_factory.info(&self.iced_i);
+
+        let mut segments = Vec::new();
+        for m in info.used_memory() {
+            segments.push(m.segment());
+        }
+
+        segments
+    }
+
+    pub fn displacement_size(&self) -> Option<usize> {
+        match self.iced_i.memory_displ_size() {
+            0 => None,
+            _ => Some(self.iced_i.memory_displ_size() as usize),
+        }
     }
 }

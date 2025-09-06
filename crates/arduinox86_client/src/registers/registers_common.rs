@@ -25,10 +25,10 @@ use crate::registers::register_traits::Registers32;
 use binrw::BinWrite;
 use std::io::{Seek, Write};
 
-#[cfg(feature = "use_moo")]
-use moo::prelude::MooRegisters16Init;
-#[cfg(feature = "use_moo")]
-use moo::types::MooRegisters16;
+// #[cfg(feature = "use_moo")]
+// use moo::prelude::MooRegisters16Init;
+// #[cfg(feature = "use_moo")]
+// use moo::types::MooRegisters16;
 
 use crate::{
     RemoteCpuRegistersV1,
@@ -176,15 +176,30 @@ impl RemoteCpuRegisters {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SegmentSize {
+    Sixteen,
+    ThirtyTwo,
+}
+
+impl From<SegmentSize> for u32 {
+    fn from(size: SegmentSize) -> Self {
+        match size {
+            SegmentSize::Sixteen => 16,
+            SegmentSize::ThirtyTwo => 32,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct RandomizeOpts {
     pub weight_zero: f32,
     pub weight_ones: f32,
+    pub weight_inject: f32,
     pub weight_sp_odd: f32,
-    pub sp_min_value: u16,
-    pub sp_max_value: u16,
-    pub sp_min_value32: u32,
-    pub sp_max_value32: u32,
+    pub sp_min_value: u32,
+    pub sp_max_value: u32,
+    pub sp_use_ss_limit: bool,
     pub randomize_flags: bool,
     pub clear_trap_flag: bool,
     pub clear_interrupt_flag: bool,
@@ -198,4 +213,6 @@ pub struct RandomizeOpts {
     pub randomize_ldt: bool,
     pub randomize_segment_descriptors: bool,
     pub randomize_table_descriptors: bool,
+
+    pub mask_eac_registers: bool,
 }
