@@ -793,6 +793,12 @@ impl RemoteCpuRegistersV3A {
             self.esp |= 1; // Set the least significant bit to 1 to make it odd
         }
 
+        // Mask ESP with SS descriptor limit if enabled.
+        if opts.sp_use_ss_limit {
+            let ss_limit = self.ss_desc.limit();
+            self.esp = self.esp & ss_limit;
+        }
+
         // Set sp to minimum value if beneath.
         if self.esp < opts.sp_min_value {
             self.esp = opts.sp_min_value;
@@ -801,12 +807,6 @@ impl RemoteCpuRegistersV3A {
         // Set sp to maximum value if above.
         if self.esp > opts.sp_max_value {
             self.esp = opts.sp_max_value;
-        }
-
-        // Mask ESP with SS descriptor limit if enabled.
-        if opts.sp_use_ss_limit {
-            let ss_limit = self.ss_desc.limit();
-            self.esp = self.esp & ss_limit;
         }
 
         if opts.randomize_msw {
