@@ -38,6 +38,7 @@ pub struct ClientWindow {
     use_smm: bool,
     resolve_bus_stepping: bool,
     ale_interrupt_enabled: bool,
+    halt_after_jump: bool,
     debug_enabled: bool,
     last_status_time: Option<Instant>,
     last_cycle_ct: u64,
@@ -57,6 +58,7 @@ impl Default for ClientWindow {
             use_smm: false,
             resolve_bus_stepping: false,
             ale_interrupt_enabled: false,
+            halt_after_jump: false,
             debug_enabled: false,
             last_status_time: None,
             last_cycle_ct: 0,
@@ -87,6 +89,7 @@ impl ClientWindow {
         self.use_sdram_backend = flags & ServerFlags::USE_SDRAM_BACKEND != 0;
         self.debug_enabled = flags & ServerFlags::ENABLE_DEBUG != 0;
         self.use_smm = flags & ServerFlags::USE_SMM != 0;
+        self.halt_after_jump = flags & ServerFlags::HALT_AFTER_JUMP != 0;
     }
 
     pub fn set_server_status(&mut self, c_ctx: &mut ClientContext, server_status: ServerStatus) {
@@ -273,6 +276,27 @@ impl ClientWindow {
                                     }
                                     Err(e) => {
                                         let toggle_str = format!("Failed to set bus resolution control state: {}", e);
+                                        log::error!("{}", toggle_str);
+                                        toasts.error(toggle_str);
+                                        self.sync_flags(c_ctx);
+                                    }
+                                }
+                            }
+
+                            if ui.checkbox(&mut self.halt_after_jump, "HALT after jump").changed() {
+                                match c_ctx.set_flag_state(ServerFlags::HALT_AFTER_JUMP, self.halt_after_jump) {
+                                    Ok(true) => {
+                                        let toggle_str = "HALT after jump enabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Ok(false) => {
+                                        let toggle_str = "Halt after jump disabled!".to_string();
+                                        log::debug!("{}", toggle_str);
+                                        toasts.success(toggle_str);
+                                    }
+                                    Err(e) => {
+                                        let toggle_str = format!("Failed to set Halt after jump state: {}", e);
                                         log::error!("{}", toggle_str);
                                         toasts.error(toggle_str);
                                         self.sync_flags(c_ctx);
