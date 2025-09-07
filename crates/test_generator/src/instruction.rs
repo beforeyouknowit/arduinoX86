@@ -29,18 +29,18 @@ use rand::{
 };
 use rand_distr::{Beta, Distribution};
 
-use crate::{trace_log, InstructionSize, TerminationCondition, TestContext, TestGen};
+use crate::{trace_log, InstructionSize, Opcode, TerminationCondition, TestContext, TestGen};
 
 use crate::gen_regs::TestRegisters;
 use anyhow::bail;
 
-use iced_x86::{Decoder, DecoderOptions, Formatter, NasmFormatter, OpKind};
+use iced_x86::{Decoder, DecoderOptions, Formatter, NasmFormatter, OpCodeTableKind, OpKind};
 use moo::types::MooCpuType;
 
 pub struct TestInstruction {
     name: String,
     size: InstructionSize,
-    opcode: u8,
+    opcode: Opcode,
     bytes: Vec<u8>,
     test_seed: u64,
     instr_range: Range<usize>,
@@ -59,7 +59,7 @@ impl From<(InstructionSize, &[u8])> for TestInstruction {
         let iced_i = Decoder::new(data.0.into(), data.1, DecoderOptions::NO_INVALID_CHECK).decode();
         let instr_range = 0..iced_i.len();
         let sequence_range = 0..data.1.len();
-        let prefix_range = 0..0; // Ignore prefixes for now.
+        let prefix_range = 0..0; // TODO: Ignore prefixes for now.
         let mut mnemonic_string = String::new();
 
         let mut formatter = NasmFormatter::new();
@@ -69,12 +69,18 @@ impl From<(InstructionSize, &[u8])> for TestInstruction {
             iced_x86::FormatMnemonicOptions::NO_PREFIXES,
         );
 
-        let opcode = iced_i.op_code().op_code() as u8;
+        let info = iced_i.op_code();
+        let low = info.op_code() as u16; // low opcode byte (xx)
+
+        let opcode = match info.table() {
+            OpCodeTableKind::T0F => 0x0F00 | low, // 2-byte opcode:  0F xx  -> 0x0Fxx
+            _ => low,
+        };
 
         TestInstruction {
             name: iced_i.to_string(),
             size: data.0,
-            opcode,
+            opcode: opcode.into(),
             bytes: data.1.to_vec(),
             test_seed: 0, // No seed for static instructions
             instr_range,
@@ -93,7 +99,7 @@ impl TestInstruction {
     pub fn new(
         context: &mut TestContext,
         config: &TestGen,
-        opcode: u8,
+        opcode: Opcode,
         opcode_ext: Option<u8>,
         test_registers: &TestRegisters,
         test_num: usize,
@@ -106,22 +112,22 @@ impl TestInstruction {
         // Create a new rng seeded by the base seed XOR test seed for repeatability.
         let mut rng = StdRng::seed_from_u64(test_seed);
 
-        let mut instruction_bytes = VecDeque::new();
+        let mut instruction_bytes: VecDeque<u8> = VecDeque::new();
 
         // Check opcode is valid.
-        if config.excluded_opcodes.contains(&opcode) {
+        if config.excluded_opcodes.contains(&opcode.into()) {
             bail!("Opcode {} is excluded from generation", opcode);
         }
 
-        if config.prefixes.contains(&opcode) {
+        if !opcode.is_extended() && config.prefixes.contains(&opcode.into()) {
             bail!("Opcode {} is a prefix and cannot be generated", opcode);
         }
 
         // Of course we need the opcode itself...
-        instruction_bytes.push_back(opcode);
+        instruction_bytes.extend(opcode.to_bytes());
 
         // Generate a random modrm.
-        let mut modrm = rng.random();
+        let mut modrm: u8 = rng.random();
         // If the opcode has an extension, set it in the modrm reg field.
         modrm = if let Some(ext) = opcode_ext {
             // Set the reg field of the modrm to the extension value.
@@ -133,12 +139,12 @@ impl TestInstruction {
 
         // Check for modrm overrides.
         for mod_override in &config.modrm_overrides {
-            if mod_override.opcode == opcode {
+            if mod_override.opcode == opcode.into() {
                 // Apply the specified modrm mask unless 'invalid_chance' is rolled.
                 let valid_chance: f32 = rng.random();
                 if valid_chance > mod_override.invalid_chance {
                     // Apply the modrm mask.
-                    trace_log!(context, "Applying modrm override for opcode {:02X}", opcode);
+                    trace_log!(context, "Applying modrm override for opcode {}", opcode);
                     modrm &= mod_override.mask;
                 }
             }
@@ -175,7 +181,7 @@ impl TestInstruction {
         let mut prefix_ct = (beta_out * config.max_prefixes as f64).round() as usize;
 
         // Set prefix count to zero if opcode is on the list of opcodes excluded from segment prefixes.
-        if config.disable_seg_overrides.contains(&opcode) {
+        if config.disable_seg_overrides.contains(&opcode.into()) {
             prefix_ct = 0;
         };
 
@@ -188,7 +194,7 @@ impl TestInstruction {
             instruction_bytes.push_front(*segment_prefix);
         }
 
-        if !config.disable_lock_prefix.contains(&opcode) {
+        if !config.disable_lock_prefix.contains(&opcode.into()) {
             // Roll for lock prefix chance.
             let lock_prefix_roll = rng.random_range(0.0..1.0);
             if lock_prefix_roll < config.lock_prefix_chance {
@@ -207,7 +213,7 @@ impl TestInstruction {
             }
         }
 
-        if config.rep_opcodes.contains(&opcode) {
+        if config.rep_opcodes.contains(&opcode.into()) {
             // Roll for REP prefix chance.
             let rep_prefix_roll = rng.random_range(0.0..1.0);
             if rep_prefix_roll < config.rep_prefix_chance {
@@ -280,6 +286,13 @@ impl TestInstruction {
                         iced_i.set_immediate8(0xFF);
                         modified_iced = true;
                     }
+                    else if immediate_roll < config.imm_inject_chance {
+                        let index = rng.random_range(0..config.inject_values.len());
+                        let inject_value = config.inject_values[index] as u8;
+                        trace_log!(context, "Injecting immediate value {:02X}", inject_value);
+                        iced_i.set_immediate8(inject_value);
+                        modified_iced = true;
+                    }
                 }
             }
             OpKind::Immediate8to16 => {
@@ -300,6 +313,18 @@ impl TestInstruction {
                     iced_i.set_immediate8to16(i16::MAX);
                     modified_iced = true;
                 }
+                else if immediate_roll
+                    < config.imm_zero_chance
+                        + config.imm8s_min_chance
+                        + config.imm8s_max_chance
+                        + config.imm8s_inject_chance
+                {
+                    let index = rng.random_range(0..config.inject_values.len());
+                    let inject_value = config.inject_values[index] as i8;
+                    trace_log!(context, "Injecting immediate8s value {:02X}", inject_value);
+                    iced_i.set_immediate8to16(inject_value as i16);
+                    modified_iced = true;
+                }
             }
             OpKind::Immediate16 => {
                 // Roll for immediate override.
@@ -312,6 +337,34 @@ impl TestInstruction {
                 else if immediate_roll < config.imm_zero_chance + config.imm_ones_chance {
                     trace_log!(context, "Overriding immediate to all-ones");
                     iced_i.set_immediate16(0xFFFF);
+                    modified_iced = true;
+                }
+                else if immediate_roll < config.imm_zero_chance + config.imm_ones_chance + config.imm_inject_chance {
+                    let index = rng.random_range(0..config.inject_values.len());
+                    let inject_value = config.inject_values[index] as u16;
+                    trace_log!(context, "Injecting immediate value {:04X}", inject_value);
+                    iced_i.set_immediate16(inject_value);
+                    modified_iced = true;
+                }
+            }
+            OpKind::Immediate32 => {
+                // Roll for immediate override.
+                let immediate_roll = rng.random_range(0.0..1.0);
+                if immediate_roll < config.imm_zero_chance {
+                    trace_log!(context, "Overriding immediate to zero");
+                    iced_i.set_immediate32(0x0000_0000);
+                    modified_iced = true;
+                }
+                else if immediate_roll < config.imm_zero_chance + config.imm_ones_chance {
+                    trace_log!(context, "Overriding immediate to all-ones");
+                    iced_i.set_immediate32(0xFFFF_FFFF);
+                    modified_iced = true;
+                }
+                else if immediate_roll < config.imm_zero_chance + config.imm_ones_chance + config.imm_inject_chance {
+                    let index = rng.random_range(0..config.inject_values.len());
+                    let inject_value = config.inject_values[index];
+                    trace_log!(context, "Injecting immediate value {:08X}", inject_value);
+                    iced_i.set_immediate32(inject_value);
                     modified_iced = true;
                 }
             }
@@ -360,7 +413,7 @@ impl TestInstruction {
             else {
                 // Bad condition
                 bail!(
-                    "Invalid instruction length: {} for opcode {:02X} (have {} instruction bytes)",
+                    "Invalid instruction length: {} for opcode {} (have {} instruction bytes)",
                     instruction_byte_ct,
                     opcode,
                     instruction_bytes.len()
@@ -482,7 +535,7 @@ impl TestInstruction {
                 else {
                     // Bad condition
                     bail!(
-                        "Invalid instruction length: {} for opcode {:02X} (have {} instruction bytes)",
+                        "Invalid instruction length: {} for opcode {} (have {} instruction bytes)",
                         instruction_byte_ct,
                         self.opcode,
                         instruction_bytes.len()

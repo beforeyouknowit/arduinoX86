@@ -34,18 +34,17 @@ mod registers;
 mod state;
 mod validate_tests;
 
-use arduinox86_client::registers_common::SegmentSize;
+use arduinox86_client::{registers_common::SegmentSize, CpuClient, ProgramState, RegisterSetType, ServerCpuType};
+use moo::types::MooCpuType;
 use std::{
     collections::HashMap,
+    fmt::Display,
     fs,
     fs::File,
     io::{BufWriter, Cursor},
     path::PathBuf,
     time::Instant,
 };
-
-use arduinox86_client::{CpuClient, ProgramState, RegisterSetType, ServerCpuType};
-use moo::types::MooCpuType;
 
 use anyhow::Context;
 use clap::Parser;
@@ -100,7 +99,7 @@ impl TestOpcodeSizePrefix {
     /// Returns an iterator over all valid prefixes for the given CPU.
     pub fn iter(
         cpu_type: MooCpuType,
-        extended_opcode: u16,
+        opcode: Opcode,
         disable_operand_size_opcodes: &[u16],
         disable_address_size_opcodes: &[u16],
     ) -> Box<dyn Iterator<Item = TestOpcodeSizePrefix>> {
@@ -108,8 +107,9 @@ impl TestOpcodeSizePrefix {
             MooCpuType::Intel80386Ex => {
                 let mut iter_vec = vec![TestOpcodeSizePrefix::None];
 
-                let use_operand_size = !disable_operand_size_opcodes.contains(&extended_opcode);
-                let use_address_size = !disable_address_size_opcodes.contains(&extended_opcode);
+                let opcode_u16: u16 = opcode.into();
+                let use_operand_size = !disable_operand_size_opcodes.contains(&opcode_u16);
+                let use_address_size = !disable_address_size_opcodes.contains(&opcode_u16);
 
                 if use_operand_size {
                     iter_vec.push(TestOpcodeSizePrefix::OperandSize);
@@ -155,6 +155,65 @@ impl From<TestOpcodeSizePrefix> for Vec<u8> {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Opcode {
+    extended: u16,
+}
+
+impl From<u8> for Opcode {
+    fn from(value: u8) -> Self {
+        Opcode { extended: value as u16 }
+    }
+}
+
+impl From<u16> for Opcode {
+    fn from(value: u16) -> Self {
+        Opcode { extended: value }
+    }
+}
+
+impl From<Opcode> for u16 {
+    fn from(opcode: Opcode) -> Self {
+        opcode.extended
+    }
+}
+
+impl From<Opcode> for u8 {
+    fn from(opcode: Opcode) -> Self {
+        opcode.extended as u8
+    }
+}
+
+impl Display for Opcode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.extended <= 0xFF {
+            write!(f, "{:02X}", self.extended)
+        }
+        else {
+            write!(f, "{:04X}", self.extended)
+        }
+    }
+}
+
+impl Opcode {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        if self.extended <= 0xFF {
+            vec![self.extended as u8]
+        }
+        else {
+            vec![(self.extended >> 8) as u8, (self.extended & 0xFF) as u8]
+        }
+    }
+
+    pub fn is_extended(&self) -> bool {
+        self.extended > 0xFF
+    }
+
+    pub fn base_opcode(&self) -> u8 {
+        (self.extended & 0xFF) as u8
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct OpcodeMetadata {
     status: String,
@@ -180,25 +239,25 @@ pub struct TestMetadata {
 #[derive(Clone, Debug, Deserialize)]
 pub struct CountOverride {
     count: usize,
-    opcode_range: [u8; 2],
+    opcode_range: [u16; 2],
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct GroupExtensionOverride {
-    opcode: u8,
+    opcode: u16,
     group_extension_range: [u8; 2],
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct StackPointerOverride {
-    opcode: u8,
+    opcode: u16,
     min:    u32,
     max:    u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ModRmOverride {
-    opcode: u8,
+    opcode: u16,
     mask: u8,
     invalid_chance: f32,
 }
@@ -248,11 +307,13 @@ pub struct TestGen {
     instruction_address_range: [u32; 2],
 
     extended_opcode: bool,
-    opcode_range: Vec<u8>,
+    opcode_range: [u16; 2],
+    opcode_override: Option<u16>,
     group_extension_range: [u8; 2],
     group_extension_overrides: Vec<GroupExtensionOverride>,
 
-    excluded_opcodes:    Vec<u8>,
+    valid_opcodes: Vec<u16>,
+    excluded_opcodes: Vec<u16>,
     exclude_esc_opcodes: bool,
 
     test_count:  usize,
@@ -291,21 +352,20 @@ pub struct TestGen {
     mem_strategy_start: u32,
     mem_strategy_end: u32,
 
-    extended_prefix: u8,
-    group_opcodes: Vec<u8>,
-    extended_group_opcodes: Vec<u8>,
-    esc_opcodes: Vec<u8>,
-    flow_control_opcodes: Vec<u8>,
+    extended_prefix: u16,
+    group_opcodes: Vec<u16>,
+    esc_opcodes: Vec<u16>,
+    flow_control_opcodes: Vec<u16>,
     prefixes: Vec<u8>,
     segment_prefixes: Vec<u8>,
     disable_operand_size_prefix: Vec<u16>,
     disable_address_size_prefix: Vec<u16>,
     rep_prefixes: Vec<u8>,
-    rep_opcodes: Vec<u8>,
+    rep_opcodes: Vec<u16>,
     rep_cx_mask: u16,
 
-    disable_seg_overrides: Vec<u8>,
-    disable_lock_prefix:   Vec<u8>,
+    disable_seg_overrides: Vec<u16>,
+    disable_lock_prefix:   Vec<u16>,
 
     sp_overrides:    Vec<StackPointerOverride>,
     modrm_overrides: Vec<ModRmOverride>,

@@ -20,7 +20,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 */
-use crate::{display::print_regs, registers::Registers, Config, CpuMode, TestContext, TestGen};
+use crate::{display::print_regs, registers::Registers, Config, CpuMode, Opcode, TestContext, TestGen};
 use arduinox86_client::{
     registers_common::RandomizeOpts,
     Registers32,
@@ -108,7 +108,7 @@ impl From<&MooRegisters16> for TestRegisters {
 }
 
 impl TestRegisters {
-    pub fn new(context: &mut TestContext, config: &Config, opcode: u8, test_num: usize, gen_number: usize) -> Self {
+    pub fn new(context: &mut TestContext, config: &Config, opcode: Opcode, test_num: usize, gen_number: usize) -> Self {
         // Put the gen_number into the top 8 bits of the test seed.
         // This allows us to generate tests based off the test number and gen count together.
         let reg_seed = context.file_seed ^ ((test_num as u64) | ((gen_number as u64) << 24) | 0x8000_0000);
@@ -168,12 +168,18 @@ impl TestRegisters {
     }
 }
 
-pub fn randomize_v2(_context: &mut TestContext, config: TestGen, opcode: u8, rng: &mut StdRng, regs: &mut Registers) {
+pub fn randomize_v2(
+    _context: &mut TestContext,
+    config: TestGen,
+    opcode: Opcode,
+    rng: &mut StdRng,
+    regs: &mut Registers,
+) {
     let mut sp_min = config.sp_min_value;
     let mut sp_max = config.sp_max_value;
 
     for sp_override in &config.sp_overrides {
-        if sp_override.opcode == opcode {
+        if sp_override.opcode == opcode.into() {
             sp_min = sp_override.min;
             sp_max = sp_override.max;
             break;
@@ -207,12 +213,18 @@ pub fn randomize_v2(_context: &mut TestContext, config: TestGen, opcode: u8, rng
     regs.randomize(&random_opts, rng, &mut reg_beta, &config.inject_values);
 }
 
-pub fn randomize_v3a(_context: &mut TestContext, config: TestGen, opcode: u8, rng: &mut StdRng, regs: &mut Registers) {
+pub fn randomize_v3a(
+    _context: &mut TestContext,
+    config: TestGen,
+    opcode: Opcode,
+    rng: &mut StdRng,
+    regs: &mut Registers,
+) {
     let mut sp_min = config.sp_min_value;
     let mut sp_max = config.sp_max_value;
 
     for sp_override in &config.sp_overrides {
-        if sp_override.opcode == opcode {
+        if sp_override.opcode == opcode.into() {
             sp_min = sp_override.min;
             sp_max = sp_override.max;
             break;

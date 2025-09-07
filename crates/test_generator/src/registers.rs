@@ -388,6 +388,22 @@ impl Registers {
             Registers::V3B(regs) => regs.ecx = (regs.ecx & 0xFFFF_0000) | value as u32,
         }
     }
+    pub fn ecx(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => regs.cx as u32,
+            Registers::V2(regs) => regs.cx as u32,
+            Registers::V3A(regs) => regs.ecx,
+            Registers::V3B(regs) => regs.ecx,
+        }
+    }
+    pub fn set_ecx(&mut self, value: u32) {
+        match self {
+            Registers::V1(regs) => regs.cx = value as u16,
+            Registers::V2(regs) => regs.cx = value as u16,
+            Registers::V3A(regs) => regs.ecx = value,
+            Registers::V3B(regs) => regs.ecx = value,
+        }
+    }
     pub fn sp(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.sp,

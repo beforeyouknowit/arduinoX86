@@ -31,6 +31,7 @@ use crate::{
     trace_log,
     Config,
     InstructionSize,
+    Opcode,
     TestContext,
 };
 use anyhow::{bail, Context};
@@ -38,15 +39,15 @@ use arduinox86_client::ServerFlags;
 use moo::prelude::MooTestFile;
 
 pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<()> {
-    let mut opcode_range_start: u8 = 0;
-    let mut opcode_range_end: u8 = 0xFF;
+    let mut opcode_range_start: u16 = 0;
+    let mut opcode_range_end: u16 = 0x0FFF;
 
     if config.test_gen.opcode_range.len() > 1 {
         opcode_range_start = config.test_gen.opcode_range[0];
         opcode_range_end = config.test_gen.opcode_range[1];
 
         println!(
-            "Generating tests for opcodes from [{:02x} to {:02x}]",
+            "Validating tests for opcodes from [{} to {}]",
             opcode_range_start, opcode_range_end
         );
     }
@@ -61,26 +62,30 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
     context.client.enable_debug(config.test_exec.serial_debug_default)?;
 
     let mut last_opcode = opcode_range_start;
-    for opcode in opcode_range_start..=opcode_range_end {
+    for opcode_raw in opcode_range_start..=opcode_range_end {
+        let opcode_u8 = opcode_raw as u8;
+        let opcode: Opcode = opcode_raw.into();
+
         let mut op_ext_start = 0;
         let mut op_ext_end = 0;
         let mut have_group_ext = false;
-        if config.test_gen.group_opcodes.contains(&opcode) {
+        if config.test_gen.group_opcodes.contains(&opcode_raw) {
             have_group_ext = true;
             (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode);
         }
 
-        if config.test_gen.excluded_opcodes.contains(&opcode) {
-            log::debug!("Skipping excluded opcode: {:02X}", opcode);
+        if config.test_gen.excluded_opcodes.contains(&opcode_raw) {
+            log::debug!("Skipping excluded opcode: {}", opcode);
             continue;
         }
-        if config.test_gen.prefixes.contains(&opcode) {
-            log::debug!("Skipping prefix: {:02X}", opcode);
+
+        if !opcode.is_extended() && config.test_gen.prefixes.contains(&opcode_u8) {
+            log::debug!("Skipping prefix: {}", opcode);
             continue;
         }
 
         for opcode_ext in op_ext_start..=op_ext_end {
-            last_opcode = opcode;
+            last_opcode = opcode_raw;
 
             let mut op_ext_str = "".to_string();
             if have_group_ext {
@@ -90,12 +95,12 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
 
             // Create the file path.
             let mut file_path = config.test_gen.test_output_dir.clone();
-            let filename = OsString::from(format!("{:02X}{}.MOO", opcode, op_ext_str));
+            let filename = OsString::from(format!("{}{}.MOO", opcode, op_ext_str));
             file_path.push(filename.clone());
 
             // Create the trace file.
             let trace_filename = OsString::from(format!(
-                "{:02X}{}{}",
+                "{}{}{}",
                 opcode,
                 op_ext_str,
                 config.test_gen.trace_file_suffix.display()
@@ -175,12 +180,12 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                 write_initial_mem(context, &initial_mem.entries)?;
 
                 // Set flow control end condition
-                if config.test_gen.flow_control_opcodes.contains(&opcode) {
+                if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
                     let flags = context.client.get_flags()?;
                     if flags & ServerFlags::HALT_AFTER_JUMP == 0 {
                         // Enable halt after jump if not already set.
                         context.client.set_flags(flags | ServerFlags::HALT_AFTER_JUMP)?;
-                        log::debug!("Enabled HALT_AFTER_JUMP for opcode {:02X}", opcode);
+                        log::debug!("Enabled HALT_AFTER_JUMP for opcode {}", opcode);
                     }
                 }
 
@@ -200,7 +205,7 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                     test_attempt_ct += 1;
                     trace_error!(
                         context,
-                        "Failed to generate test for opcode {:02X}, attempt {}/{}: {}",
+                        "Failed to generate test for opcode {}, attempt {}/{}: {}",
                         opcode,
                         test_attempt_ct,
                         config.test_exec.test_retry,
@@ -209,7 +214,7 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
 
                     if test_attempt_ct >= config.test_exec.test_retry {
                         let err_str = format!(
-                            "Failed to generate test for opcode {:02X} after {} attempts: {}",
+                            "Failed to generate test for opcode {} after {} attempts: {}",
                             opcode,
                             test_attempt_ct,
                             test_result.as_ref().err().unwrap()
@@ -256,25 +261,25 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                     if test.final_regs() != tests[test_num].final_regs() {
                         trace_error!(
                             context,
-                            "Register mismatch for opcode {:02X} at test number {}!",
+                            "Register mismatch for opcode {} at test number {}!",
                             opcode,
                             test_num,
                         );
                         compare_registers(&test.final_regs(), tests[test_num].final_regs());
                         return Err(anyhow::anyhow!(
-                            "Register mismatch for opcode {:02X} at test number {}",
+                            "Register mismatch for opcode {} at test number {}",
                             opcode,
                             test_num
                         ));
                     }
                     else {
-                        trace_log!(context, "{:02X}:{:05X} registers validated.", opcode, test_num);
+                        trace_log!(context, "{}:{:05X} registers validated.", opcode, test_num);
                     }
                 }
                 else {
                     trace_error!(
                         context,
-                        "Failed to validate test for opcode {:02X} at test number {}",
+                        "Failed to validate test for opcode {} at test number {}",
                         opcode,
                         test_num,
                     );

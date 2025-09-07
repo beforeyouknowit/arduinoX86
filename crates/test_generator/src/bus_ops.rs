@@ -26,6 +26,7 @@ use crate::{
     registers::Registers,
     trace_log,
     Config,
+    Opcode,
     TestContext,
 };
 use arduinox86_client::ServerCpuType;
@@ -93,7 +94,7 @@ impl BusOps {
         &self,
         config: &Config,
         registers: &Registers,
-        opcode: u8,
+        opcode: Opcode,
         instruction: &iced_x86::Instruction,
         op0: OpKind,
         op1: OpKind,
@@ -105,7 +106,7 @@ impl BusOps {
             OpKind::Memory => {
                 if !has_memory_read {
                     if matches!(config.test_gen.cpu_type, MooCpuType::Intel80286)
-                        && config.test_gen.esc_opcodes.contains(&opcode)
+                        && config.test_gen.esc_opcodes.contains(&opcode.into())
                     {
                         // 80286 ESC instructions do not automatically read memory.
                     }
@@ -119,7 +120,7 @@ impl BusOps {
 
                 if !has_memory_write {
                     if matches!(config.test_gen.cpu_type, MooCpuType::Intel80286)
-                        && config.test_gen.esc_opcodes.contains(&opcode)
+                        && config.test_gen.esc_opcodes.contains(&opcode.into())
                     {
                         // Okay
                     }

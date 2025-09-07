@@ -23,7 +23,7 @@
 
 use std::{ffi::OsString, io::BufWriter, time::Instant};
 
-use super::{Config, TestContext, TestOpcodeSizePrefix};
+use super::{Config, Opcode, TestContext, TestOpcodeSizePrefix};
 use crate::{
     bus_ops::BusOps,
     cpu_common::BusOp,
@@ -61,6 +61,7 @@ use arduinox86_client::{
     RegisterSetType,
     RemoteCpuRegistersV2,
     RemoteCpuRegistersV3B,
+    ServerCpuType,
     ServerFlags,
 };
 
@@ -263,8 +264,8 @@ pub fn write_initial_mem(context: &mut TestContext, initial_mem: &[MooRamEntry])
 }
 
 pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<()> {
-    let mut opcode_range_start: u8 = 0;
-    let mut opcode_range_end: u8 = 0xFF;
+    let mut opcode_range_start = 0;
+    let mut opcode_range_end = 0x0FFF;
 
     context.gen_ct = 0;
     context.gen_start = Instant::now();
@@ -280,6 +281,11 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     if config.test_gen.opcode_range.len() > 1 {
         opcode_range_start = config.test_gen.opcode_range[0];
         opcode_range_end = config.test_gen.opcode_range[1];
+
+        if let Some(opcode_override) = config.test_gen.opcode_override {
+            opcode_range_start = opcode_override;
+            opcode_range_end = opcode_override;
+        }
 
         println!(
             "Generating tests for opcodes from [{:02x} to {:02x}]",
@@ -305,12 +311,16 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     let prefix_byte: Option<u8> = None;
     let mut last_opcode = opcode_range_start;
 
-    for opcode in opcode_range_start..=opcode_range_end {
-        let extended_opcode = opcode as u16;
+    for opcode_raw in opcode_range_start..=opcode_range_end {
+        if !config.test_gen.valid_opcodes.contains(&opcode_raw) {
+            continue;
+        }
 
+        let opcode_u8 = opcode_raw as u8;
+        let opcode = Opcode::from(opcode_raw);
         for size_prefix in TestOpcodeSizePrefix::iter(
             config.test_gen.cpu_type,
-            extended_opcode,
+            opcode,
             &config.test_gen.disable_operand_size_prefix,
             &config.test_gen.disable_address_size_prefix,
         ) {
@@ -321,23 +331,24 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
             let mut op_ext_start = 0;
             let mut op_ext_end = 0;
             let mut have_group_ext = false;
-            if config.test_gen.group_opcodes.contains(&opcode) {
+            if config.test_gen.group_opcodes.contains(&opcode_raw) {
                 have_group_ext = true;
-                (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode);
+                (op_ext_start, op_ext_end) = get_group_extension_range(config, opcode.into());
             }
 
             for opcode_ext in op_ext_start..=op_ext_end {
-                last_opcode = opcode;
+                last_opcode = opcode_raw;
 
                 // Reset mnemonic hashmap.
                 context.mnemonic_set.clear();
 
-                if config.test_gen.excluded_opcodes.contains(&opcode) {
-                    log::debug!("Skipping excluded opcode: {:02X}", opcode);
+                if config.test_gen.excluded_opcodes.contains(&opcode_raw) {
+                    log::debug!("Skipping excluded opcode: {}", opcode);
                     continue;
                 }
-                if config.test_gen.prefixes.contains(&opcode) {
-                    log::debug!("Skipping prefix: {:02X}", opcode);
+
+                if (opcode_raw < 0x100) && config.test_gen.prefixes.contains(&opcode_u8) {
+                    log::debug!("Skipping prefix: {:02X}", opcode_raw);
                     continue;
                 }
 
@@ -350,12 +361,12 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 // Create the output file path.
                 let mut file_path = config.test_gen.test_output_dir.clone();
                 let size_prefix_base = size_prefix.to_filename_prefix();
-                let filename = OsString::from(format!("{}{:02X}{}.MOO", size_prefix_base, opcode, op_ext_str));
+                let filename = OsString::from(format!("{}{}{}.MOO", size_prefix_base, opcode, op_ext_str));
                 file_path.push(filename.clone());
 
                 // Create the trace file.
                 let trace_filename = OsString::from(format!(
-                    "{}{:02X}{}{}",
+                    "{}{}{}{}",
                     size_prefix_base,
                     opcode,
                     op_ext_str,
@@ -367,7 +378,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 context.trace_log = BufWriter::new(trace_file);
 
                 // Create the file seed.
-                let mut file_seed: u64 = opcode as u64;
+                let mut file_seed: u64 = opcode_raw as u64;
                 if let Some(prefix_byte) = prefix_byte {
                     file_seed = file_seed | ((prefix_byte as u64) << 8);
                 }
@@ -388,7 +399,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     config.test_gen.set_version_major,
                     config.test_gen.set_version_minor,
                     config.test_gen.cpu_type.into(),
-                    opcode as u32,
+                    opcode_raw as u32,
                 )
                 .with_file_seed(context.file_seed);
 
@@ -429,7 +440,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     continue;
                 }
 
-                let test_count = get_test_count(config, opcode);
+                let test_count = get_test_count(config, opcode.into());
                 for test_num in test_start_num..test_count {
                     // Create unique instruction and initial register set for each test.
                     // These should not change regardless of test attempt count.
@@ -447,7 +458,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     if !context.dry_run {
                         if test_result.is_err() {
                             let err_msg = format!(
-                                "Failed to generate test for opcode {:02X} at test number {}: {}",
+                                "Failed to generate test for opcode {} at test number {}: {}",
                                 opcode,
                                 test_num,
                                 test_result.as_ref().err().unwrap()
@@ -480,8 +491,8 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 trace_banner!(context);
                 trace_log!(
                     context,
-                    "### Test generation complete for opcode {:02X} ({} tests) ###",
-                    opcode,
+                    "### Test generation complete for opcode {} ({} tests) ###",
+                    opcode_raw,
                     context.file_gen_ct
                 );
 
@@ -533,7 +544,7 @@ fn generate_consistent_test(
     context: &mut TestContext,
     config: &Config,
     test_num: usize,
-    opcode: u8,
+    opcode: Opcode,
     have_group_ext: bool,
     opcode_ext: u8,
     required_matches: usize,
@@ -541,12 +552,12 @@ fn generate_consistent_test(
     let mut gen_num = 0;
 
     // Set flow control end condition
-    if config.test_gen.flow_control_opcodes.contains(&opcode) {
+    if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
         let flags = context.client.get_flags()?;
         if flags & ServerFlags::HALT_AFTER_JUMP == 0 {
             // Enable halt after jump if not already set.
             context.client.set_flags(flags | ServerFlags::HALT_AFTER_JUMP)?;
-            log::debug!("Enabled HALT_AFTER_JUMP for opcode {:02X}", opcode);
+            log::debug!("Enabled HALT_AFTER_JUMP for opcode {}", opcode);
         }
     }
 
@@ -573,6 +584,9 @@ fn generate_consistent_test(
         trace_log!(context, "Code segment is size {:?}", context.code_segment_size);
 
         let mut segments = test_instruction.segments();
+        //segments.sort();
+        //segments.dedup();
+
         let mut segment_limit = 0xFFFF_FFFF;
 
         for segment in &segments {
@@ -611,14 +625,21 @@ fn generate_consistent_test(
             );
 
             if displacement_size == 4 {
-                if segments.len() > 1 {
-                    trace_error!(
-                        context,
-                        "Multiple segments found with displacement - unexpected condition."
-                    );
-                    bail!("Multiple segments found with displacement - unexpected condition.");
+                // Handle POP.  POP will touch multiple segments, with the last segment being SS.
+                // This isn't the segment we care about for masking so pop it.
+                if matches!(test_instruction.iced_instruction().mnemonic(), Mnemonic::Pop) && segments.len() > 1 {
+                    segments.pop();
                 }
-                else {
+
+                if segments.len() > 1 {
+                    let error_msg = format!(
+                        "Multiple segments found with displacement: {:?} - unexpected condition.",
+                        segments
+                    );
+                    trace_error!(context, "{}", error_msg);
+                    bail!(error_msg);
+                }
+                else if !segments.is_empty() {
                     let segment = segments[0];
                     trace_log!(
                         context,
@@ -631,6 +652,10 @@ fn generate_consistent_test(
                         test_registers.regs.segment_size(segment).into(),
                         segment_limit,
                     )?;
+                }
+                else if !matches!(test_instruction.iced_instruction().mnemonic(), Mnemonic::Lea) {
+                    trace_error!(context, "No segment found with displacement and not LEA");
+                    bail!("No segment found with displacement - unexpected condition.");
                 }
             }
         }
@@ -748,7 +773,7 @@ fn generate_consistent_test(
                 Err(e) => {
                     trace_error!(
                         context,
-                        "Failed to generate test for opcode {:02X}, attempt {}: {}",
+                        "Failed to generate test for opcode {}, attempt {}: {}",
                         opcode,
                         test_attempt_ct + 1,
                         e
@@ -771,25 +796,22 @@ fn generate_consistent_test(
     }
 
     let error_msg = format!(
-        "Failed to generate consistent test for opcode {:02X} after {} instruction generations",
+        "Failed to generate consistent test for opcode {} after {} instruction generations",
         opcode, config.test_exec.max_gen
     );
     trace_error!(context, "{}", error_msg);
     Err(anyhow::anyhow!(error_msg).into())
 }
 
-pub fn get_test_count(config: &Config, opcode: u8) -> usize {
+pub fn get_test_count(config: &Config, opcode: Opcode) -> usize {
     for ct_override in &config.test_gen.count_overrides {
         let [min, max] = &ct_override.opcode_range[..]
         else {
             continue;
         };
-        if opcode >= *min && opcode <= *max {
-            log::debug!(
-                "Using test count override for opcode {:02X}: {}",
-                opcode,
-                ct_override.count
-            );
+        let opcode_u16: u16 = opcode.into();
+        if opcode_u16 >= *min && opcode_u16 <= *max {
+            log::debug!("Using test count override for opcode {}: {}", opcode, ct_override.count);
             return std::cmp::min(config.test_gen.test_count, ct_override.count);
         }
     }
@@ -797,9 +819,9 @@ pub fn get_test_count(config: &Config, opcode: u8) -> usize {
     config.test_gen.test_count
 }
 
-pub fn get_group_extension_range(config: &Config, opcode: u8) -> (u8, u8) {
+pub fn get_group_extension_range(config: &Config, opcode: Opcode) -> (u8, u8) {
     for ext_override in &config.test_gen.group_extension_overrides {
-        if ext_override.opcode == opcode {
+        if ext_override.opcode == opcode.into() {
             return (
                 ext_override.group_extension_range[0],
                 ext_override.group_extension_range[1],
@@ -816,7 +838,7 @@ pub fn log_instruction(
     context: &mut TestContext,
     config: &Config,
     test_num: usize,
-    opcode: u8,
+    opcode: Opcode,
     op_ext: Option<u8>,
     test_instruction: &TestInstruction,
     test_registers: &TestRegisters,
@@ -828,7 +850,7 @@ pub fn log_instruction(
     }
 
     let instruction_log_string = format!(
-        "{:05} | {:04X}:{:04X} | {:02X}{} {:<35} │ {:02X?}",
+        "{:05} | {:04X}:{:04X} | {}{} {:<35} │ {:02X?}",
         test_num,
         test_registers.regs.cs(),
         test_registers.regs.ip(),
@@ -900,7 +922,7 @@ pub fn generate_test(
     config: &Config,
     test_num: usize,
     gen_num: usize,
-    opcode: u8,
+    opcode: Opcode,
     op_ext: Option<u8>,
     test_instruction: &TestInstruction,
     test_registers: &mut TestRegisters,
@@ -930,8 +952,16 @@ pub fn generate_test(
             config.test_gen.rep_cx_mask
         );
 
-        let cx = test_registers.regs.cx();
-        test_registers.regs.set_cx(cx & config.test_gen.rep_cx_mask);
+        match context.server_cpu {
+            ServerCpuType::Intel80386 => {
+                let ecx = test_registers.regs.ecx();
+                test_registers.regs.set_ecx(ecx & config.test_gen.rep_cx_mask as u32);
+            }
+            _ => {
+                let cx = test_registers.regs.cx();
+                test_registers.regs.set_cx(cx & config.test_gen.rep_cx_mask);
+            }
+        }
     }
 
     // Enable serial debug if configured.
@@ -1076,13 +1106,12 @@ pub fn generate_test(
 
         let millis = start_time.elapsed().as_millis() as u32;
         if millis > config.test_exec.test_timeout {
-            log::error!(
+            let error_str = format!(
                 "Test timeout reached after {} ms, program state is: {:?}",
-                millis,
-                state
+                millis, state
             );
-            test_timeout = true;
-            break;
+            trace_error!(context, "{}", error_str);
+            bail!("{}", error_str);
         }
         state = context.client.get_program_state()?;
     }
@@ -1271,9 +1300,14 @@ pub fn generate_test(
     let final_ram = final_state_from_ops(initial_state.initial_state, &bus_ops)?;
 
     // Create the initial test state.
-    let initial_state = create_state(&test_registers.regs, None, &initial_state.initial_ram);
+    let initial_state = create_state(
+        MooStateType::Initial,
+        &test_registers.regs,
+        None,
+        &initial_state.initial_ram,
+    )?;
     // Create the final test state.
-    let final_state = create_state(&test_registers.regs, Some(&final_regs), &final_ram);
+    let final_state = create_state(MooStateType::Final, &test_registers.regs, Some(&final_regs), &final_ram)?;
 
     // Add the mnemonic to the hash map.
     context
@@ -1365,7 +1399,12 @@ pub fn log_cycle_states(context: &mut TestContext, cycles: &[MooCycleState]) {
     }
 }
 
-pub fn create_state(initial_regs: &Registers, final_regs: Option<&Registers>, ram: &Vec<[u32; 2]>) -> MooTestState {
+pub fn create_state(
+    state_type: MooStateType,
+    initial_regs: &Registers,
+    final_regs: Option<&Registers>,
+    ram: &Vec<[u32; 2]>,
+) -> anyhow::Result<MooTestState> {
     let initial_reg_init = MooRegistersInit::from(initial_regs);
     let final_reg_init = final_regs.map(MooRegistersInit::from);
 
@@ -1384,13 +1423,6 @@ pub fn create_state(initial_regs: &Registers, final_regs: Option<&Registers>, ra
         });
     }
 
-    let state_type = if final_regs.is_some() {
-        MooStateType::Final
-    }
-    else {
-        MooStateType::Initial
-    };
-
     let test_state = MooTestState::new(
         state_type,
         &initial_reg_init,
@@ -1401,10 +1433,10 @@ pub fn create_state(initial_regs: &Registers, final_regs: Option<&Registers>, ra
 
     if !test_state.regs().is_valid() {
         log::error!("Invalid registers in test state!");
-        panic!("Invalid registers in test state");
+        bail!("Invalid registers in test state");
     }
 
-    test_state
+    Ok(test_state)
 }
 
 pub fn validate_regs(registers: &Registers) -> anyhow::Result<()> {
