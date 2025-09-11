@@ -66,7 +66,7 @@ use arduinox86_client::{
 };
 
 use anyhow::{anyhow, bail, Context, Error};
-use iced_x86::Mnemonic;
+use iced_x86::{Mnemonic, OpKind};
 use moo::types::MooCycleStatePrinter;
 use rand::{Rng, SeedableRng};
 
@@ -92,6 +92,17 @@ macro_rules! trace_log {
         // write the formatted text plus a newline
         writeln!($ctx.trace_log, $($arg)*)
             .expect("failed to write to trace_log!");
+    }};
+}
+
+#[macro_export]
+macro_rules! trace_flush {
+    // take a mutable Context (or &mut Context) and a format+args
+    ($ctx:expr) => {{
+        // bring Write into scope so write!/writeln! work
+        use std::io::Write;
+        // write the formatted text plus a newline
+        $ctx.trace_log.flush().expect("failed to flush trace_log!");
     }};
 }
 
@@ -373,8 +384,16 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     config.test_gen.trace_file_suffix.display()
                 ));
                 let trace_file_path = config.test_gen.trace_output_dir.join(trace_filename);
-                let trace_file = std::fs::File::create(&trace_file_path)
-                    .with_context(|| format!("Creating trace file: {}", trace_file_path.display()))?;
+                let trace_file = match config.test_gen.append_file {
+                    true => std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&trace_file_path)
+                        .with_context(|| format!("Opening trace file: {}", trace_file_path.display()))?,
+                    false => std::fs::File::create(&trace_file_path)
+                        .with_context(|| format!("Creating trace file: {}", trace_file_path.display()))?,
+                };
+
                 context.trace_log = BufWriter::new(trace_file);
 
                 // Create the file seed.
@@ -389,11 +408,9 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 context.file_seed = file_seed;
                 let mut test_start_num = 0;
 
-                let mut test_file = MooTestFile::new(
-                    config.test_gen.moo_version,
-                    config.test_gen.moo_arch.clone(),
-                    config.test_gen.test_count,
-                );
+                let moo_arch = MooCpuType::from(context.client.cpu_type()?.0);
+
+                let mut test_file = MooTestFile::new(config.test_gen.moo_version, moo_arch, config.test_gen.test_count);
 
                 let mut test_metadata = MooFileMetadata::new(
                     config.test_gen.set_version_major,
@@ -550,8 +567,11 @@ fn generate_consistent_test(
     required_matches: usize,
 ) -> Result<MooTest, Error> {
     let mut gen_num = 0;
+    let mut sieved = false;
+    let mut sieve_ct = 0;
 
     // Set flow control end condition
+
     if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
         let flags = context.client.get_flags()?;
         if flags & ServerFlags::HALT_AFTER_JUMP == 0 {
@@ -560,16 +580,25 @@ fn generate_consistent_test(
             log::debug!("Enabled HALT_AFTER_JUMP for opcode {}", opcode);
         }
     }
+    else {
+        let flags = context.client.get_flags()?;
+        if flags & ServerFlags::HALT_AFTER_JUMP != 0 {
+            // Disable halt after jump if set.
+            context.client.set_flags(flags & !ServerFlags::HALT_AFTER_JUMP)?;
+            log::debug!("Disabled HALT_AFTER_JUMP for opcode {}", opcode);
+        }
+    }
 
     // We'll attempt to generate a test up to 'max_gen' times before giving up.
     // If we can't generate a test after that point, something has gone very wrong, like the
     // ArduinoX86 has crashed, the opcode is invalid, or we hit a major bug.
-    while gen_num < config.test_exec.max_gen as usize {
+    while (sieved && sieve_ct < config.test_exec.max_sieve) || gen_num < config.test_exec.max_gen as usize {
         // Generate a fresh Register & Instruction pair.
         let mut test_registers = TestRegisters::new(context, config, opcode, test_num, gen_num);
 
         context.code_segment_size = test_registers.regs.segment_size(iced_x86::Register::CS);
 
+        //log::trace!("Generating new instruction!");
         let mut test_instruction = TestInstruction::new(
             context,
             &config.test_gen,
@@ -606,17 +635,59 @@ fn generate_consistent_test(
             trace_log!(context, "Test instruction uses EA register {:?}", register);
         }
 
+        let scale_shift = match test_instruction.iced_instruction().memory_index_scale() {
+            8 => 3,
+            4 => 2,
+            2 => 1,
+            _ => 0,
+        };
+
         if !ea_registers.is_empty() {
             trace_log!(
                 context,
                 "Masking EA registers: {:?} with limit {:08X}",
                 ea_registers,
-                segment_limit
+                segment_limit >> scale_shift
             );
 
             test_registers.regs.mask_registers32(segments[0], ea_registers);
         }
 
+        if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
+            if matches!(test_instruction.iced_instruction().op0_kind(), OpKind::NearBranch32) {
+                segment_limit &= test_registers
+                    .regs
+                    .segment_limit(iced_x86::Register::CS)
+                    .unwrap_or(0xFFFF_FFFF);
+                trace_log!(context, "Test instruction is flow control operation with 32-bit near branch. Masking branch target with segment limit {:08X} (sign-extended)", segment_limit);
+
+                test_instruction.mask_nearbranch32(
+                    context,
+                    &config.test_gen,
+                    test_registers.regs.segment_size(iced_x86::Register::CS).into(),
+                    segment_limit,
+                )?;
+            }
+        }
+
+        if let Some(immediate_size) = test_instruction.immediate_size() {
+            trace_log!(
+                context,
+                "Test instruction uses immediate of size {} bytes",
+                immediate_size,
+            );
+
+            // if immediate_size > 2 &&
+            //     trace_log!(
+            //         context,
+            //         "Instruction is a flow control operation with large immediate. Masking immediate with segment limit {:08X} (sign-extended)",
+            //         segment_limit
+            //     )
+            // }
+        }
+
+        // Handle displacement masking.
+        // 32-bit displacements are too large to fully randomize, so we need to mask them to the segment limit.
         if let Some(displacement_size) = test_instruction.displacement_size() {
             trace_log!(
                 context,
@@ -629,6 +700,16 @@ fn generate_consistent_test(
                 // This isn't the segment we care about for masking so pop it.
                 if matches!(test_instruction.iced_instruction().mnemonic(), Mnemonic::Pop) && segments.len() > 1 {
                     segments.pop();
+                }
+
+                // Handle 0xFF opcodes
+                if matches!(
+                    test_instruction.iced_instruction().mnemonic(),
+                    Mnemonic::Call | Mnemonic::Jmp | Mnemonic::Push | Mnemonic::Pop
+                ) && segments.len() > 1
+                {
+                    log::debug!("Have multiple segments, keeping first : {:?}", segments);
+                    segments = vec![segments[0]];
                 }
 
                 if segments.len() > 1 {
@@ -646,11 +727,18 @@ fn generate_consistent_test(
                         "Masking displacement with segment limit {:08X} (sign-extended)",
                         segment_limit
                     );
+
+                    let scale_shift = match test_instruction.iced_instruction().memory_index_scale() {
+                        8 => 3,
+                        4 => 2,
+                        2 => 1,
+                        _ => 0,
+                    };
                     test_instruction.mask_displacement32(
                         context,
                         &config.test_gen,
                         test_registers.regs.segment_size(segment).into(),
-                        segment_limit,
+                        segment_limit >> scale_shift,
                     )?;
                 }
                 else if !matches!(test_instruction.iced_instruction().mnemonic(), Mnemonic::Lea) {
@@ -664,7 +752,7 @@ fn generate_consistent_test(
         let mut prev_test: Option<MooTest> = None;
         let mut match_count = 0;
 
-        while test_attempt_ct < config.test_exec.test_retry {
+        'gen: while test_attempt_ct < config.test_exec.test_retry {
             if context.dry_run {
                 return Err(anyhow!("Don't generate tests in dry run mode").into());
             }
@@ -682,6 +770,66 @@ fn generate_consistent_test(
 
             match test_result {
                 Ok(test) => {
+                    // Did test generate an exception?
+                    if let Some(exception) = test.exception() {
+                        // Handle exception sieving.
+                        // To reduce the number of exceptions in exception-heavy instructions like BOUND,
+                        // we reject tests that otherwise are good but generated an exception, at some
+                        // predefined rate.
+                        for es_entry in &config.test_gen.exception_sieve {
+                            if es_entry.opcode == opcode.into() && es_entry.exception == exception.exception_num {
+                                log::debug!(
+                                    "Opcode {} has sieve for exception {} at rate {}",
+                                    opcode,
+                                    exception.exception_num,
+                                    es_entry.exception_rate
+                                );
+
+                                let mut rng = rand::rngs::StdRng::seed_from_u64(
+                                    context.file_seed + test_num as u64 + sieve_ct as u64,
+                                );
+                                let roll: f32 = rng.random();
+                                if roll < es_entry.exception_rate {
+                                    log::warn!(
+                                        "Sieve matched - accepting exception {} for opcode {}",
+                                        exception.exception_num,
+                                        opcode
+                                    );
+                                    trace_log!(
+                                        context,
+                                        "Sieve matched - accepting exception {} for opcode {}",
+                                        exception.exception_num,
+                                        opcode
+                                    );
+                                    sieved = false;
+                                    sieve_ct = 0;
+                                }
+                                else {
+                                    sieved = true;
+                                    sieve_ct += 1;
+                                    log::warn!(
+                                        "Sieving exception {} for opcode {}, sieve_ct: {} gen_num: {}",
+                                        exception.exception_num,
+                                        opcode,
+                                        sieve_ct,
+                                        gen_num
+                                    );
+                                    trace_log!(
+                                        context,
+                                        "Sieve did not match (roll was {}) - rejecting exception {} for opcode {}, sieve_ct: {}",
+                                        roll,
+                                        exception.exception_num,
+                                        opcode,
+                                        sieve_ct
+                                    );
+                                    match_count = 0;
+                                    prev_test = None;
+                                    break 'gen;
+                                }
+                            }
+                        }
+                    }
+
                     if let Some(prev) = &prev_test {
                         let comparison = prev.compare(&test);
                         let mut matched = false;
@@ -834,6 +982,38 @@ pub fn get_group_extension_range(config: &Config, opcode: Opcode) -> (u8, u8) {
     )
 }
 
+pub fn validate_disassembly(context: &mut TestContext, test_instruction: &TestInstruction) {
+    let name = test_instruction.name();
+    if let (Some(start), Some(end)) = (name.find('['), name.find(']')) {
+        if start < end {
+            let iced_addr = &name[start..=end];
+
+            if test_instruction.addressing_mode().is_none() {
+                log::error!(
+                    "Instruction disassembly {} has addressing mode but no addressing mode was set",
+                    name
+                );
+                return;
+            }
+
+            let marty_addr = test_instruction.addressing_mode().unwrap().to_string();
+
+            if iced_addr != marty_addr {
+                log::error!("Disassembly mismatch! Iced: {}  Marty: {}", iced_addr, marty_addr);
+                trace_error!(
+                    context,
+                    "Disassembly mismatch! Iced: {}  Marty: {}",
+                    iced_addr,
+                    marty_addr
+                );
+
+                trace_flush!(context);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
 pub fn log_instruction(
     context: &mut TestContext,
     config: &Config,
@@ -864,8 +1044,7 @@ pub fn log_instruction(
         println!("{}", instruction_log_string);
     }
 
-    let bar = "----------------------------------------------------------------------------------------------------";
-    trace_log!(context, ">>> {}", bar);
+    trace_banner!(context);
     trace_log!(context, ">>> Generating test {}", instruction_log_string);
     trace_log!(
         context,
@@ -873,7 +1052,7 @@ pub fn log_instruction(
         test_instruction.op0_kind(),
         test_instruction.op1_kind()
     );
-    trace_log!(context, ">>> {}", bar);
+    trace_banner!(context);
 
     // trace_log!(
     //     context,
@@ -927,6 +1106,7 @@ pub fn generate_test(
     test_instruction: &TestInstruction,
     test_registers: &mut TestRegisters,
 ) -> anyhow::Result<MooTest> {
+    // Log the start of instruction execution.
     log_instruction(
         context,
         config,
@@ -936,6 +1116,8 @@ pub fn generate_test(
         test_instruction,
         test_registers,
     );
+
+    validate_disassembly(context, test_instruction);
 
     if context.dry_run {
         bail!("Dry run mode enabled, skipping test generation.");
@@ -1022,6 +1204,11 @@ pub fn generate_test(
     context
         .client
         .set_memory(test_registers.instruction_address, test_instruction.sequence_bytes())?;
+
+    let end_address = test_registers.instruction_address + test_instruction.sequence_bytes().len() as u32;
+    context
+        .client
+        .set_program_bounds(test_registers.instruction_address, end_address)?;
 
     // Fix up memory if necessary.
     adjust_memory(context, test_seed, test_instruction, test_registers)?;

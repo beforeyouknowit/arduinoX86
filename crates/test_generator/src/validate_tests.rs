@@ -29,6 +29,7 @@ use crate::{
     instruction::TestInstruction,
     trace_error,
     trace_log,
+    AddressSize,
     Config,
     InstructionSize,
     Opcode,
@@ -36,7 +37,7 @@ use crate::{
 };
 use anyhow::{bail, Context};
 use arduinox86_client::ServerFlags;
-use moo::prelude::MooTestFile;
+use moo::{prelude::MooTestFile, types::MooCpuType};
 
 pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<()> {
     let mut opcode_range_start: u16 = 0;
@@ -122,11 +123,9 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
             };
             context.trace_log = BufWriter::new(trace_file);
 
-            let mut test_file = MooTestFile::new(
-                config.test_gen.moo_version,
-                "C286".to_string(),
-                config.test_gen.test_count,
-            );
+            // TODO: Fix for non-286 CPUs.
+            let moo_arch = MooCpuType::Intel80286;
+            let mut test_file = MooTestFile::new(config.test_gen.moo_version, moo_arch, config.test_gen.test_count);
 
             // Open `file_path` for reading as a BufReader.
             match std::fs::File::open(&file_path) {
@@ -172,7 +171,8 @@ pub fn validate_tests(context: &mut TestContext, config: &Config) -> anyhow::Res
                 let instruction_bytes = tests[test_num].bytes();
 
                 let mut test_registers = TestRegisters::from(tests[test_num].initial_regs());
-                let mut test_instruction = TestInstruction::from((InstructionSize::Sixteen, instruction_bytes));
+                let mut test_instruction =
+                    TestInstruction::from((InstructionSize::Sixteen, AddressSize::Sixteen, instruction_bytes));
 
                 // Write initial memory state to device.
                 let initial_mem = tests[test_num].initial_mem_state();

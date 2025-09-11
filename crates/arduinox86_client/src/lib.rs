@@ -22,6 +22,7 @@
 */
 #![allow(dead_code, unused_variables)]
 
+mod commands;
 mod cycle_state;
 mod registers;
 
@@ -114,6 +115,7 @@ pub enum ServerCommand {
     CmdEraseMemory = 0x25,
     CmdGetServerStatus = 0x26,
     CmdClearCycleLog = 0x27,
+    CmdSetProgramBounds = 0x28,
     CmdInvalid,
 }
 
@@ -1447,5 +1449,15 @@ impl CpuClient {
     pub fn clear_cycle_log(&mut self) -> Result<bool, CpuClientError> {
         self.send_command_byte(ServerCommand::CmdClearCycleLog)?;
         self.read_result_code(ServerCommand::CmdClearCycleLog)
+    }
+
+    pub fn set_program_bounds(&mut self, start: u32, end: u32) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 8] = [0; 8];
+        buf[0..4].copy_from_slice(&start.to_le_bytes());
+        buf[4..8].copy_from_slice(&end.to_le_bytes());
+
+        self.send_command_byte(ServerCommand::CmdSetProgramBounds)?;
+        self.send_buf(&buf)?;
+        self.read_result_code(ServerCommand::CmdSetProgramBounds)
     }
 }

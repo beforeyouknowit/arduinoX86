@@ -203,6 +203,7 @@ pub struct RandomizeOpts {
     pub randomize_flags: bool,
     pub clear_trap_flag: bool,
     pub clear_interrupt_flag: bool,
+    pub clear_resume_flag: bool,
     pub randomize_general: bool,
     pub randomize_ip: bool,
     pub ip_mask: u16,

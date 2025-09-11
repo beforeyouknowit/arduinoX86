@@ -56,6 +56,12 @@ pub enum InstructionSize {
     ThirtyTwo,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum AddressSize {
+    Sixteen,
+    ThirtyTwo,
+}
+
 impl From<InstructionSize> for u32 {
     fn from(size: InstructionSize) -> Self {
         match size {
@@ -126,7 +132,7 @@ impl TestOpcodeSizePrefix {
         }
     }
 
-    pub fn relative_size(&self, size: SegmentSize) -> InstructionSize {
+    pub fn relative_opcode_size(&self, size: SegmentSize) -> InstructionSize {
         match size {
             SegmentSize::Sixteen => match self {
                 TestOpcodeSizePrefix::None => InstructionSize::Sixteen,
@@ -139,6 +145,23 @@ impl TestOpcodeSizePrefix {
                 TestOpcodeSizePrefix::OperandSize => InstructionSize::Sixteen,
                 TestOpcodeSizePrefix::AddressSize => InstructionSize::ThirtyTwo,
                 TestOpcodeSizePrefix::OperandAndAddressSize => InstructionSize::Sixteen,
+            },
+        }
+    }
+
+    pub fn relative_address_size(&self, size: SegmentSize) -> AddressSize {
+        match size {
+            SegmentSize::Sixteen => match self {
+                TestOpcodeSizePrefix::None => AddressSize::Sixteen,
+                TestOpcodeSizePrefix::OperandSize => AddressSize::Sixteen,
+                TestOpcodeSizePrefix::AddressSize => AddressSize::ThirtyTwo,
+                TestOpcodeSizePrefix::OperandAndAddressSize => AddressSize::ThirtyTwo,
+            },
+            SegmentSize::ThirtyTwo => match self {
+                TestOpcodeSizePrefix::None => AddressSize::ThirtyTwo,
+                TestOpcodeSizePrefix::OperandSize => AddressSize::ThirtyTwo,
+                TestOpcodeSizePrefix::AddressSize => AddressSize::Sixteen,
+                TestOpcodeSizePrefix::OperandAndAddressSize => AddressSize::Sixteen,
             },
         }
     }
@@ -256,8 +279,16 @@ pub struct StackPointerOverride {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct ExceptionSieveEntry {
+    opcode: u16,
+    exception: u8,
+    exception_rate: f32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct ModRmOverride {
     opcode: u16,
+    allow_reg_form: bool,
     mask: u8,
     invalid_chance: f32,
 }
@@ -273,6 +304,7 @@ pub struct Config {
 pub struct TestExec {
     polling_sleep: u32,
     validate_count: u32,
+    max_sieve: u32,
     max_gen: u32,
     test_retry: u32,
     load_retry: u32,
@@ -370,6 +402,7 @@ pub struct TestGen {
     sp_overrides:    Vec<StackPointerOverride>,
     modrm_overrides: Vec<ModRmOverride>,
     count_overrides: Vec<CountOverride>,
+    exception_sieve: Vec<ExceptionSieveEntry>,
 
     randomize_mem_interval: usize,
 }

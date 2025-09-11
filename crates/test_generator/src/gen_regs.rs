@@ -242,6 +242,7 @@ pub fn randomize_v3a(
         randomize_flags: true,
         clear_trap_flag: true,
         clear_interrupt_flag: true,
+        clear_resume_flag: true,
         randomize_general: true,
         randomize_ip: true,
         ip_mask: config.ip_mask,

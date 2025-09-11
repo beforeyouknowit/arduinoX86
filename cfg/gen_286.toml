@@ -203,11 +203,13 @@ sp_overrides = [
 ]
 
 modrm_overrides = [
-    { opcode = 0x8F, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC6, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC7, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0x8C, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x8E, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x8F, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC6, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC7, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0x8C, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x8E, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x62, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
+
 ]
 
 count_overrides = [

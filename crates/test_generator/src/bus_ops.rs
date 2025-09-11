@@ -110,7 +110,26 @@ impl BusOps {
                     {
                         // 80286 ESC instructions do not automatically read memory.
                     }
-                    else if !matches!(instruction.mnemonic(), Mnemonic::Mov) {
+                    else if !matches!(
+                        instruction.mnemonic(),
+                        Mnemonic::Mov
+                            | Mnemonic::Seto
+                            | Mnemonic::Setno
+                            | Mnemonic::Setb
+                            | Mnemonic::Setae
+                            | Mnemonic::Sete
+                            | Mnemonic::Setne
+                            | Mnemonic::Setbe
+                            | Mnemonic::Seta
+                            | Mnemonic::Sets
+                            | Mnemonic::Setns
+                            | Mnemonic::Setp
+                            | Mnemonic::Setnp
+                            | Mnemonic::Setl
+                            | Mnemonic::Setge
+                            | Mnemonic::Setle
+                            | Mnemonic::Setg
+                    ) {
                         // Mov just overwrites its operand, so we don't need a read.
                         return Err(anyhow::anyhow!(
                             "Expected memory read operation for Op0, but none found."
@@ -133,7 +152,11 @@ impl BusOps {
                             | Mnemonic::Mul
                             | Mnemonic::Imul
                             | Mnemonic::Div
-                            | Mnemonic::Idiv => {
+                            | Mnemonic::Idiv
+                            | Mnemonic::Bt
+                            | Mnemonic::Bts
+                            | Mnemonic::Btr
+                            | Mnemonic::Btc => {
                                 // These mnemonics have a memory operand0 without a write operation.
                             }
                             Mnemonic::Rcl
@@ -238,7 +261,7 @@ impl BusOps {
         if last_consecutive_writes.len() > 2 {
             trace_log!(
                 context,
-                "Have {} consecutive last writes from {:08X?} to {:08X?}. Likely exception stack frame.",
+                "Have {} consecutive last writes from {:08X?} to {:08X?}. Possible exception stack frame.",
                 last_consecutive_writes.len(),
                 last_consecutive_writes.first().map(|op| op.addr).unwrap_or(0),
                 last_consecutive_writes.last().map(|op| op.addr).unwrap_or(0)
@@ -284,9 +307,9 @@ impl BusOps {
         let have_two_consecutive_ivr_reads = self.ops.windows(2).rev().any(|window| {
             let have_exception = window[0].op_type == BusOpType::MemRead
                 && window[1].op_type == BusOpType::MemRead
-                && window[0].addr < 0x1024
+                && window[0].addr < 0x0400
                 && window[0].addr % 4 == 0
-                && window[1].addr < 0x1024;
+                && window[1].addr < 0x0400;
             if have_exception {
                 exception_num = window[0].addr / 4;
                 ivt_read_idx = window[0].idx;

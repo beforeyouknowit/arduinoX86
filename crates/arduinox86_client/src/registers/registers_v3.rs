@@ -668,6 +668,10 @@ impl RemoteCpuRegistersV3A {
         // Clear the interrupt flag (bit 9) in the flags register.
         self.eflags &= !0x0200; // Clear bit 9
     }
+    pub fn clear_resume_flag(&mut self) {
+        // Clear the resume flag (bit 16) in the flags register.
+        self.eflags &= !0x0001_0000; // Clear bit 16
+    }
 
     pub fn weighted_u16(
         weight_zero: f32,
@@ -762,6 +766,9 @@ impl RemoteCpuRegistersV3A {
         }
         if opts.clear_interrupt_flag {
             self.clear_interrupt_flag();
+        }
+        if opts.clear_resume_flag {
+            self.clear_resume_flag();
         }
 
         if opts.randomize_general {

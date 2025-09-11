@@ -20,8 +20,18 @@ ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
 
 extended_opcode = false # Use extended opcodes (0x0F)
-opcode_range = [0x00, 0x0E]
+opcode_range = [0x00, 0x0FFF]
+#opcode_override = 0x5c
 group_extension_range = [0, 7] # Range for group extensions
+
+# Overrides for specific group opcodes. These groups may not be valid for the full 0-7 range.
+group_extension_overrides = [
+    { opcode = 0xFE, group_extension_range = [0, 1] },
+    { opcode = 0xFF, group_extension_range = [0, 6] },
+    { opcode = 0x0F00, group_extension_range = [0, 5] },
+    { opcode = 0x0F01, group_extension_range = [0, 6] }, # 5 isn't valid but we can't skip it
+    { opcode = 0x0FBA, group_extension_range = [4, 7] },
+]
 
 valid_opcodes = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, # ADD
@@ -97,22 +107,46 @@ valid_opcodes = [
     0xF6, 0xF7,
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD,
     0xFE, 0xFF,
-]
-
-group_extension_overrides = [
-    { opcode = 0xFE, group_extension_range = [0, 1] },
-    { opcode = 0xFF, group_extension_range = [0, 6] },
+    # Begin extended opcodes
+    0xFF00,
+    0xFF01,
+    0x0F02, # LAR
+    0x0F03, # LSL
+    0x0F06, # CLTS
+    #0x0F07, # LOADALL (386)
+    0x0F20, 0x0F21, 0x0F22, 0x0F23, # MOV
+    # Big skip here
+    0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
+    0x0F90, 0x0F91, 0x0F92, 0x0F93, 0x0F94, 0x0F95, 0x0F96, 0x0F97, 0x0F98, 0x0F99, 0x0F9A, 0x0F9B, 0x0F9C, 0x0F9D, 0x0F9E, 0x0F9F, # SETcc
+    0x0FA0, 0x0FA1, # PUSH/POP
+    0x0FA3, # BT
+    0x0FA4, 0x0FA5, # SHLD
+    0x0FA8, 0x0FA9, # PUSH/POP
+    #0x0FAA, # RSM - only supported in SMM
+    0x0FAB, # BTS
+    0x0FAC, 0x0FAD, # SHRD
+    0x0FAF, # IMUL
+    0x0FB2, # LSS
+    0x0FB3, # BTR
+    0x0FB4, 0x0FB5, # LFS, LGS
+    0x0FB6, 0x0FB7, # MOVZX
+    0x0FBA, # Group 8
+    0x0FBB, # BTC
+    0x0FBC, 0x0FBD, # BSF, BSR
+    0x0FBE, 0x0FBF, # MOVSX
 ]
 
 excluded_opcodes = [
     0xF1, # LOCK prefix
     0x63, # ARPL, not valid in real mode
-    0x64, 0x65, 0x66, 0x67, # Undefined
+    0x0F22, # MOV to/from control registers
+    0x0F23, # MOV to/from debug registers
+
 ]
 exclude_esc_opcodes = true
 
 test_count = 100
-append_file = false
+append_file = true
 
 # shift/rotate mask
 writeless_null_shifts = true # CPU will skip writing operand if shift is 0
@@ -126,18 +160,18 @@ lock_prefix_chance = 0.025 # Chance of LOCK prefix
 lock_prefix_opcode = 0xF0
 rep_prefix_chance = 0.25 # Chance of REP prefix
 
-reg_zero_chance = 0.00 # Chance of zeroed register
+reg_zero_chance = 0.05 # Chance of zeroed register
 reg_ones_chance = 0.00 # Chance of an all-bit-set register
 reg_inject_chance = 0.25 # Chance of injecting a special value into a register
 
-imm_zero_chance = 0.00 # Chance of zeroed immediate value
+imm_zero_chance = 0.05 # Chance of zeroed immediate value
 imm_ones_chance = 0.00 # Chance of an all-bit-set immediate value
-imm_inject_chance = 0.25 # Chance of injecting a special value into a register
+imm_inject_chance = 0.10 # Chance of injecting a special value into a register
 
-imm8s_zero_chance = 0.00 # Chance of zeroed 8-bit immediate value
+imm8s_zero_chance = 0.05 # Chance of zeroed 8-bit immediate value
 imm8s_min_chance = 0.00 # Chance of minimum 8-bit signed immediate value
 imm8s_max_chance = 0.00 # Chance of maximum 8-bit signed immediate value
-imm8s_inject_chance = 0.25 # Chance of injecting a special value into an 8-bit signed immediate value
+imm8s_inject_chance = 0.10 # Chance of injecting a special value into an 8-bit signed immediate value
 
 sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
@@ -163,12 +197,12 @@ group_opcodes = [
     0xC0, 0xC1, # Group 2a: ROL, ROR, RCL, RCR, SHL, SHR, SAL, SAR
     0xD0, 0xD1, 0xD2, 0xD3, # Group 2b: ROL, ROR, RCL, RCR, SHL, SHR, SAL, SAR
     0xF6, 0xF7, # Group 3: MUL, IMUL, DIV, IDIV
-    0xFE, 0xFF, # Group 4: INC, DEC, CALL, JMP, PUSH, POP
-]
+    0xFE, 0xFF, # Group 4 & 5: INC, DEC, CALL, JMP, PUSH, POP
+    0x0F00, # Group 6: SLDT, STR, LLDT, LTR, VERR, VERW
+    0x0F01, # Group 7: SGDT, SIDT, LGDT, LIDT, SMSW, LMSW
+    0x0FBA, # Group 8: BT, BTS, BTR, BTC
 
-extended_group_opcodes = [
-    0x00, # SLDT, STR, LLDT, LTR, VERR, VERW
-    0x01, # SGDT, SIDT, LGDT, LIDT, SMSW, LMSW
+
 ]
 
 esc_opcodes = [
@@ -184,6 +218,8 @@ flow_control_opcodes = [
     0xE0, 0xE1, 0xE2, 0xE3, # LOOPNE, LOOPE, LOOP, JCXZ
     0xE8, 0xE9, 0xEA, 0xEB, # CALL, JMP, JMP FAR, JMP SHORT
     0xFE, 0xFF, # CALL, JMP,
+    0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
+
 ]
 
 # These opcodes are prefixes and should not be generated as standalone instructions.
@@ -255,6 +291,7 @@ disable_seg_overrides = [
     0xF4, # HLT
     0xF5, # CMC
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, # CLC, STC, CLI, STI, CLD, STD
+    0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
 ]
 
 # Disable LOCK prefixes on instructions that can't access the bus
@@ -271,6 +308,7 @@ disable_lock_prefix = [
     0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, # MOV imm8 to register
     0xF5, # CMC
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, # CLC, STC, CLI, STI, CLD, STD
+    0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
 ]
 
 disable_operand_size_prefix = [
@@ -337,11 +375,12 @@ sp_overrides = [
 ]
 
 modrm_overrides = [
-    { opcode = 0x8F, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC6, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC7, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0x8C, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x8E, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x8F, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC6, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC7, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0x8C, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x8E, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
+    { opcode = 0x62, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
 ]
 
 count_overrides = [
@@ -353,6 +392,9 @@ count_overrides = [
     { count = 1000, opcode_range = [0xF4, 0xF4] }, # HALT
 ]
 
+exception_sieve = [
+    { opcode = 0x62, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+]
 
 inject_values = [
     0x00000000,
@@ -592,8 +634,9 @@ inject_values = [
 [test_exec]
 serial_timeout = 5000
 serial_debug_default = false
-#serial_debug_test = 9
+#serial_debug_test = 2
 validate_count = 2 # Number of identical tests required to accept test
+max_sieve = 100 # Maximum number of times to sieve a test before giving up.
 max_gen = 10 # Maximum number of times to regenerate a failed instruction.
 test_retry = 5 # Number of retries per single test generation.
 load_retry = 5 # Number of retries for LOADALL.
