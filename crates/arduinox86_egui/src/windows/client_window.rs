@@ -94,7 +94,7 @@ impl ClientWindow {
             // Calculate the effective MHz based on the time since the last update
             let elapsed_secs = update_time.duration_since(last_update).as_secs_f32();
             if elapsed_secs > 0.0 {
-                self.effective_mhz = (server_status.cycle_ct - self.last_cycle_ct) as f32 / elapsed_secs / 1_000_000.0;
+                self.effective_mhz = (server_status.cycle_ct.saturating_sub(self.last_cycle_ct)) as f32 / elapsed_secs / 1_000_000.0;
             }
             else {
                 self.effective_mhz = 0.0; // Avoid division by zero
