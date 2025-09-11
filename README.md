@@ -45,7 +45,8 @@ This project has three main components:
 - The CPU client software, which runs on your computer and controls the CPU after the CPU server has set up initial
   register state as desired, or uploads an entire program to be run automatically with register state collected at the
   end of execution;
-- The CPU socket PCB HAT(s), which seat on top of the Arduino, and provide a physical interface between the CPU and GPIO
+- The CPU socket PCB shields, which seat on top of the Arduino, and provide a physical interface between the CPU and
+  GPIO
   lines.
 
 The original "Arduino8088" project utilized an Arduino MEGA, but this board no longer supported.
@@ -58,22 +59,22 @@ your Arduino that occurs attempting to use a 5V CPU with your Arduino.
 
 ### 8088,8086,V20,V30 Support
 
-Revision 1.1 of the 808X HAT supports the 8086 and NEC V30 by adding a connection for the 8086's BHE pin.
+Revision 1.1 of the 808X shield supports the 8086 and NEC V30 by adding a connection for the 8086's BHE pin.
 
-The Due can operate the 8088, 8086, V20 and V30, despite these chips being 5V. The current 8088 hat feeds those CPUs
+The Due can operate the 8088, 8086, V20 and V30, despite these chips being 5V. The current 8088 shield feeds those CPUs
 3.3V which they tolerate quite well at low clock speeds.
 
-The GIGA can operate the 8088, 8086, V20 and V30 directly at 5V if desired. The GIGA requires the 3V supply pin to be
-cut off the HAT's pin headers and external power supplied due to the lower available overall power budget.
+The Giga can operate the 8088, 8086, V20 and V30 directly at 5V if desired. The Giga requires the 3V supply pin to be
+cut off the shield's pin headers and external power supplied due to the lower available overall power budget.
 
 > [!WARNING]  
-> Do not attempt to use the 8088 hat with a GIGA without using external power, or you may damage your Arduino.
+> Do not attempt to use the 8088 shield with a Giga without using external power, or you may damage your Arduino.
 
 ### 80186 Support
 
 The ArduinoX86 cpu_server sketch supports operation of a low-voltage 80L186 on an Arduino Due.
 
-There is no HAT yet for the 80186, you will need to use a breakout board and connect directly to the Arduino Due's
+There is no shield yet for the 80186, you will need to use a breakout board and connect directly to the Arduino Due's
 headers. See [Using an 80186](https://github.com/dbalsom/arduinoX86/wiki/Using-an-80186) for more information.
 
 <img width="349" height="620" alt="image" src="https://github.com/user-attachments/assets/c7e5fa0e-8c6f-4119-a0f4-7b936193ac5e" />
@@ -139,9 +140,9 @@ execute the specified program binary.
 
 A program that generates CPU tests for emulator authors.
 
-### /hats
+### /shields
 
-Contains the KiCad project files and Gerber files for the various ArduinoX86 HATs. See the README.md in each HAT
+Contains the KiCad project files and Gerber files for the various ArduinoX86 shields. See the README.md in each shield
 directory for more information and BOMs for building each.
 
 ### /platformio/ArduinoX86
