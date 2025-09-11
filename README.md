@@ -1,3 +1,5 @@
+![arduinox86_logo](/images/arduinox86_logo_transparent_01.png)
+
 ### About ArduinoX86
 
 I've written a blog article that gives an overview of this project and how it is used.
@@ -78,25 +80,27 @@ headers. See [Using an 80186](https://github.com/dbalsom/arduinoX86/wiki/Using-a
 
 ### 80286 Support
 
-A HAT for the 80C286 is in the design phase, located in `/hats/286_5V`
+A shield for the 80C286 is in the design phase, located in `/shields/286_5V`
 
 Current support for the 80286 has been performed via breadboard.
 
-<img width="2000" height="1125" alt="image" src="https://github.com/user-attachments/assets/2d5ffa03-ebcf-48c8-bfe2-1574fdb0de2b" />
+<img width="800" height="480" alt="image" src="https://github.com/user-attachments/assets/2d5ffa03-ebcf-48c8-bfe2-1574fdb0de2b" />
 
 ### 80386 Support
 
-A HAT for the 80386EX CPU is provided in `/hats/386EX`
+A shield for the 80386EX CPU is provided in `/shields/386EX_V4`
 
-![386ex_hat](/hats/386EX/images/386ex_hat.jpg)
+![386ex_shield_v4](/shields/386EX_V4/images/386ex_v4_render_01.png)
+
+## Can the CPU be clocked fast enough with an Arduino?
 
 In short, no. We are well past the published minimum cycle times when executing programs via a serial protocol, cycle by
 cycle. Some chips tolerate this better than others. When working with an Intel branded 8088, I noticed that effective
 address calculations were failing to add the displacement or index register, but otherwise functioned. I have had more
-luck with the AMD second-source 8088 CPUs, which seem to function perfectly under slow clocks although they will hang
+luck with the AMD second-source 8088 CPUs, which seem to function perfectly under slow clocks, although they will hang
 and need to be reset if not cycled for a several milliseconds. The issue is "dynamic logic" - logic gates that lose
-their state if not refrehsed electrically within a frequent enough interval. To be absolutely safe, it is best to use a
-fully CMOS process CPU such as the 80C88.
+their state if not refreshed electrically within a frequent enough interval. To be absolutely safe, it is best to use a
+fully CMOS process CPU such as the 80C88. CMOS versions of most x86 chips are available.
 
 ## To use
 
@@ -121,12 +125,17 @@ A library crate that implements a client for the ArduinoX86's serial protocol.
 A library crate built on top of the `arduinox86_client` crate, this provides a `RemoteCpu` struct that models CPU state
 and can execute programs.
 
+## /crates/arduinox86_gui
+
+A GUI (written in egui) for ArduinoX86, supporting the 386EX. It allows you to write and assemble assembly-language
+programs and execute them on the CPU with an easy-to-use interface.
+
 ## /crates/exec_program
 
 A binary implementing an interface for the `arduinox86_cpu` crate that will load a provided register state binary and
 execute the specified program binary.
 
-### /crates/test_generator
+## /crates/test_generator
 
 A program that generates CPU tests for emulator authors.
 
