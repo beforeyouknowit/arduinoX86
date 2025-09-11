@@ -49,7 +49,7 @@ impl Assembler {
             PathBuf::from(p)
         }
         else {
-            PathBuf::from("nasm")
+            PathBuf::from("./nasm")
         };
 
         Assembler {
@@ -102,12 +102,17 @@ impl Assembler {
         self.stdout_str = String::from_utf8_lossy(&output.stdout).into_owned();
         self.stderr_str = String::from_utf8_lossy(&output.stderr).into_owned();
 
-        if !output.status.success() {
-            self.stderr_str = format!(
+        if output.status.success() {
+            log::debug!("assemble_str(): nasm call succeeded!");
+        }
+        else {
+            let error_str = format!(
                 "nasm failed with exit code {}: {}",
                 output.status.code().unwrap_or(-1),
                 self.stderr_str
             );
+            log::error!("{}", error_str);
+            self.stderr_str = error_str;
 
             return Err(self.stderr_str.clone().into());
         }
