@@ -13,6 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-ard808x_cpu = { path = "../ard808x_cpu" }
+arduinox86_cpu = { path = "../arduinox86_cpu" }
 env_logger.workspace = true
 log.workspace = true

@@ -4,7 +4,9 @@
 /asm/*.bin
 /sketches/convert_me/
 /sketches/cpu_server_old/
+/sketches/cpu_server_last/
 /sketches/due_test/
+/json/
 
 # Arduino stuff
 
@@ -26,13 +28,32 @@ Arduino_Pro_Mini_Socket.kicad_mod
 Arduino_Uno_Shield.kicad_mod
 Arduino_Zero_Shield.kicad_mod
 Pro_Mini_Clone_Socket.kicad_mod
-pcb/kicad/ard8088-backups/
-pcb/kicad/gerbers*
-pcb/kicad/ard8088.wrl
+# 808X HAT
+shields/**/*.lck
+shields/**/*.bak
+shields/**/*.kicad_pcb.zip
+shields/**/*-backups/
+shields/808x/kicad/gerbers*
+shields/808x/gerbers/*.zip
+shields/808x/kicad/ard8088.wrl
+# 286 HAT
+shields/286_5V/kicad/gerbers
+shields/286_5V/kicad/arduino_286_5v-backups
+shields/286_5V/kicad/arduino*bak
+shields/286_5V/kicad/Package_LCC.pretty/*
+!shields/286_5V/kicad/Package_LCC.pretty/286-plcc.pretty
+# 386EX HAT
+shields/386EX/kicad/gerbers
+shields/386EX/kicad/arduino_386-backups
+shields/386EX_V3
+shields/387SX
+
 \#auto_saved_files#
 _autosave*
-gerbers/
-kicad/ard8088.wrl
+rescue-backup
+
+# ASM
+/asm/test
 
 # Rust stuff
 

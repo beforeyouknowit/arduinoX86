@@ -1,15 +1,19 @@
 use std::path::PathBuf;
 
-use ard808x_client::*;
-use ard808x_cpu::ard808x_client;
-use ard808x_cpu::*;
+use arduinox86_client::*;
+use arduinox86_cpu::{arduinox86_client, *};
 use clap::Parser;
+
+const SCREEN_INIT_TIME: u64 = 3; // Seconds to wait for the screen to initialize.
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[arg(long)]
     com_port: Option<String>,
+
+    #[arg(long, default_value_t = false)]
+    storeall: bool,
 
     // The binary file containing the register data. Produced from an assembly
     // file 'program_regs.asm'
@@ -20,10 +24,19 @@ struct Args {
     #[arg(long, required(true))]
     bin_file: PathBuf,
 
-    // Specify the address in memory to mount the bin file. This should typically
-    // match the address specified by CS:IP, but doesn't have to...
-    #[arg(long, required(true))]
-    mount_addr: String,
+    // Specify the address in memory to mount the bin file. Typically, you would prefer to use
+    // the `automount` option to mount the binary at CS:IP, but this option allows you to mount it
+    // at arbitrary addresses.
+    #[arg(long)]
+    mount_addr: Option<String>,
+
+    // Automatically mount the binary file at CS:IP.
+    #[arg(long)]
+    automount: bool,
+
+    // Offset the automount address by the specified value.
+    #[arg(long)]
+    mount_offset: Option<String>,
 
     // Specify the number of wait states for every bus transfer.
     // TODO: Currently no division between memory and IO, should change...
@@ -47,8 +60,23 @@ struct Args {
     intr_on: u32,
 
     // Raise the NMI line on the specified cycle #.
-    #[arg(long, default_value_t = 0)]
-    nmi_on: u32,
+    #[arg(long)]
+    nmi_on: Option<u32>,
+
+    // Run the CPU for a single instruction.
+    #[arg(long, default_value_t = false)]
+    single_step: bool,
+
+    #[arg(long, default_value_t = false)]
+    reset_only: bool,
+
+    // Run the CPU in automatic execution mode.
+    #[arg(long)]
+    automatic: bool,
+
+    // Enable serial debugging.
+    #[arg(long)]
+    serial_debug: bool,
 }
 
 fn main() {
@@ -62,18 +90,35 @@ fn main() {
         std::process::exit(1);
     });
 
+    // Capture initial regs before adjustment.
+    let initial_regs = match RemoteCpuRegisters::try_from(reg_bytes.as_slice()) {
+        Ok(regs) => regs,
+        Err(e) => {
+            eprintln!("Error parsing register binary: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let bin_bytes = std::fs::read(args.bin_file.clone()).unwrap_or_else(|e| {
         eprintln!("Couldn't read binary file {:?}: {}", args.bin_file, e);
         std::process::exit(1);
     });
 
-    let mount_addr = u32::from_str_radix(&args.mount_addr, 16).unwrap_or_else(|e| {
-        eprintln!(
-            "Couldn't parse code mount address '{}': {}",
-            args.mount_addr, e
-        );
+    let mount_addr = if let Some(mount_addr) = &args.mount_addr {
+        let addr = u32::from_str_radix(mount_addr, 16).unwrap_or_else(|e| {
+            eprintln!("Couldn't parse code mount address '{}': {}", mount_addr, e);
+            std::process::exit(1);
+        });
+        println!("Mounting code at address [{:08X}]", addr);
+        addr
+    }
+    else if args.automount {
+        initial_regs.code_address()
+    }
+    else {
+        eprintln!("Either --mount_addr or --automount must be specified.");
         std::process::exit(1);
-    });
+    };
 
     if (mount_addr as usize) > (0xFFFFFusize - bin_bytes.len()) {
         eprintln!("Specified mount point out of range.");
@@ -81,7 +126,7 @@ fn main() {
     }
 
     // Create a cpu_client connection to cpu_server.
-    let cpu_client = match CpuClient::init(args.com_port.clone()) {
+    let mut cpu_client = match CpuClient::init(args.com_port.clone(), Some(5000)) {
         Ok(ard_client) => {
             println!("Opened connection to Arduino_8088 server!");
             ard_client
@@ -92,6 +137,54 @@ fn main() {
         }
     };
 
+    if args.storeall {
+        // Just do STOREALL and exit.
+        if let Err(e) = cpu_client.storeall() {
+            eprintln!("Error executing STOREALL: {e}");
+            std::process::exit(1);
+        }
+        else {
+            println!("STOREALL executed successfully.");
+            return;
+        }
+    }
+
+    if args.nmi_on.is_some() && args.single_step {
+        eprintln!("Cannot use NMI with single step mode!");
+        std::process::exit(1);
+    }
+
+    let nmi_on = if let Some(nmi_cycle) = args.nmi_on {
+        nmi_cycle
+    }
+    else {
+        if args.single_step {
+            // If single step mode is enabled, we can use NMI on cycle 1.
+            1
+        }
+        else {
+            // Otherwise, we don't use NMI.
+            0
+        }
+    };
+
+    match cpu_client.init_screen() {
+        Ok(screen_present) if screen_present => {
+            println!(
+                "Display screen detected, waiting ({}) seconds for initialization...",
+                SCREEN_INIT_TIME
+            );
+            // Wait for the screen to initialize.
+            std::thread::sleep(std::time::Duration::from_secs(SCREEN_INIT_TIME));
+        }
+        Ok(_) => {
+            println!("No display screen detected.");
+        }
+        Err(e) => {
+            eprintln!("Error initializing screen: {e}");
+        }
+    }
+
     // Create a remote cpu instance using the cpu_client which should now be connected.
     let mut cpu = RemoteCpu::new(
         cpu_client,
@@ -100,18 +193,33 @@ fn main() {
         args.wait_states,
         args.intr_on,
         args.intr_after,
-        args.nmi_on,
+        nmi_on,
     );
 
     let cpu_type = cpu.cpu_type();
-    log::debug!("Detected CPU type: {:?}", cpu_type);
+    println!("Detected CPU type: {:?}", cpu_type);
 
-    // Capture initial regs before adjustment.
-    let initial_regs = RemoteCpuRegisters::from(reg_bytes.as_slice());
+    let have_fpu = cpu.have_fpu();
+    if have_fpu {
+        println!("Detected FPU!");
+    }
+
+    if args.reset_only {
+        println!("Reset only flag passed, exiting.");
+        return;
+    }
 
     // Copy the binary to memory
     log::debug!("Mounting program code at: {:05X}", mount_addr);
-    cpu.mount_bin(&bin_bytes, mount_addr as usize);
+    match cpu.mount_bin(args.automatic, &bin_bytes, mount_addr as usize) {
+        Ok(_) => {
+            log::debug!("Program code mounted successfully.");
+        }
+        Err(e) => {
+            eprintln!("Error mounting program code: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     // Set up IVR table
     cpu.setup_ivt();
@@ -123,7 +231,15 @@ fn main() {
 
         println!("Initial register state:");
 
-        RemoteCpu::print_regs(&initial_regs, cpu_type);
+        println!(
+            "{}",
+            RegisterPrinter {
+                regs: &initial_regs,
+                final_regs: None,
+                cpu_type,
+                options: 0,
+            }
+        );
 
         let print_opts = PrintOptions {
             print_pgm: true,
@@ -131,17 +247,33 @@ fn main() {
             print_finalize: false,
         };
 
-        //cpu.test();
-        match cpu.run(Some(10_000), &print_opts) {
+        let run_options = RunOptions {
+            automatic: args.automatic,
+            cycle_limit: Some(10_000),
+            wait_states: None,
+            print_opts,
+            ..Default::default()
+        };
+
+        match cpu.run(&run_options) {
             Ok(regs) => {
                 println!("Final register state:");
-                RemoteCpu::print_regs_delta(&initial_regs, &regs, cpu_type);
+                println!(
+                    "{}",
+                    RegisterPrinter {
+                        regs: &initial_regs,
+                        final_regs: Some(&regs),
+                        cpu_type,
+                        options: 0,
+                    }
+                );
             }
-            Err(_) => {
-                log::error!("Program execution failed!");
+            Err(e) => {
+                log::error!("Program execution failed: {}", e);
             }
         }
-    } else {
+    }
+    else {
         log::error!("Register setup failed: {}", cpu.get_last_error());
     }
 }

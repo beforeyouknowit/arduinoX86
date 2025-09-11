@@ -1,0 +1,8 @@
+     1                                  ; loadall_386.asm
+     2                                  
+     3                                  cpu	386
+     4                                  org	0h
+     5                                  
+     6 00000000 66BF00080000                mov edi, 0800h
+     7 00000006 0F07                        loadall
+     7          ******************       warning: instruction obsolete but valid on the target CPU [-w+obsolete-valid]

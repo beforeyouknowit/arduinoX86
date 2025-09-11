@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "486")(type "KiCad")(uri "${KIPRJMOD}/80486.kicad_sym")(options "")(descr ""))
+  (lib (name "giga")(type "KiCad")(uri "${KIPRJMOD}/arduino-library.kicad_sym")(options "")(descr ""))
+)

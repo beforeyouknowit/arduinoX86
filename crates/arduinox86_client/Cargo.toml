@@ -1,0 +1,28 @@
+[package]
+name = "arduinox86_client"
+description = "A library crate that implements a client for the ArduinoX86 serial protocol."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "arduinox86_client"
+path = "src/lib.rs"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+log.workspace = true
+serialport.workspace = true
+binrw.workspace = true
+modular-bitfield.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+thiserror.workspace = true
+strum_macros.workspace = true
+
+moo-rs = { workspace = true, optional = true }
+iced-x86 = { workspace = true, optional = true }
+
+[features]
+use_moo = ["dep:moo-rs"]
+use_iced = ["iced-x86"]

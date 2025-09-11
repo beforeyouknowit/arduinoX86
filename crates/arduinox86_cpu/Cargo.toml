@@ -1,0 +1,18 @@
+[package]
+name = "arduinox86_cpu"
+description = "A library crate that leverages the ArduinoX86 serial protocol to control various Intel CPUs."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "arduinox86_cpu"
+path = "src/lib.rs"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+arduinox86_client = { path = "../arduinox86_client" }
+env_logger.workspace = true
+log.workspace = true
