@@ -45,9 +45,15 @@ shields/286_5V/kicad/Package_LCC.pretty/*
 # 386EX HAT
 shields/386EX/kicad/gerbers
 shields/386EX/kicad/arduino_386-backups
+shields/386EX_V3
+shields/387SX
+
 \#auto_saved_files#
 _autosave*
 rescue-backup
+
+# ASM
+/asm/test
 
 # Rust stuff
 
