@@ -124,7 +124,19 @@ public:
     address_latch_ = address;
   }
 
+  void set_program_bounds(uint32_t start, uint32_t end) {
+    program_start_ = start;
+    program_end_ = end;
+  }
+
+  bool is_address_in_program(uint32_t address) const {
+    return (address >= program_start_) && (address < program_end_);
+  }
+
 private:
+
+  uint32_t program_start_ = 0;
+  uint32_t program_end_ = 0;
   bool use_smm_ = false; // Use SMM for register readout on 386/486 CPUs
   bool is_shutdown_ = false; // Whether the CPU is in a shutdown state.
   uint64_t cycle_ct_ = 0; // Number of cycles executed since reset.

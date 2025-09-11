@@ -220,6 +220,7 @@ const char* CommandServer<BoardType, ShieldType>::get_command_name(ServerCommand
       case ServerCommand::CmdEraseMemory: return "CmdEraseMemory";
       case ServerCommand::CmdServerStatus: return "CmdServerStatus";
       case ServerCommand::CmdClearCycleLog: return "CmdClearCycleLog";
+      case ServerCommand::CmdSetProgramBounds: return "CmdSetProgramBounds";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -270,6 +271,7 @@ char CommandServer<BoardType, ShieldType>::get_state_char(ServerState state) {
       case ServerState::EmuExit: return '9';
       case ServerState::Store: return 'S';
       case ServerState::StoreDone: return 'T';
+      case ServerState::StoreDoneSmm: return 'U';
       case ServerState::StoreAll: return 'A';
       case ServerState::Done: return 'D';
       case ServerState::Error: return '!';
@@ -366,6 +368,8 @@ bool CommandServer<BoardType, ShieldType>::dispatch_command(ServerCommand cmd) {
         return cmd_server_status();
     case ServerCommand::CmdClearCycleLog:
         return cmd_clear_cycle_log();
+    case ServerCommand::CmdSetProgramBounds:
+        return cmd_set_program_bounds();        
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -440,6 +444,7 @@ uint8_t CommandServer<BoardType, ShieldType>::get_command_input_bytes(ServerComm
         case ServerCommand::CmdEraseMemory: return 0;
         case ServerCommand::CmdServerStatus: return 0;
         case ServerCommand::CmdClearCycleLog: return 0; // No parameters needed to clear cycle log
+        case ServerCommand::CmdSetProgramBounds: return 8; // Parameters: start_addr (4 bytes), end_addr (4 bytes).
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -1706,6 +1711,24 @@ template<typename BoardType, typename ShieldType>
 bool CommandServer<BoardType, ShieldType>::cmd_clear_cycle_log(){
   ArduinoX86::CycleLogger->reset();
   controller_.getBoard().debugPrintln(DebugType::CMD, "## cmd_clear_cycle_log(): Cycle log cleared.");
+  return true;
+}
+
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_program_bounds() {
+    uint32_t start = commandBuffer_[0] | 
+                      (static_cast<uint32_t>(commandBuffer_[1]) << 8) |
+                      (static_cast<uint32_t>(commandBuffer_[2]) << 16) |
+                      (static_cast<uint32_t>(commandBuffer_[3]) << 24);
+
+    uint32_t end = commandBuffer_[4] | 
+                    (static_cast<uint32_t>(commandBuffer_[5]) << 8) |
+                    (static_cast<uint32_t>(commandBuffer_[6]) << 16) |
+                    (static_cast<uint32_t>(commandBuffer_[7]) << 24);
+
+  controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_program_bounds(): Setting bounds from start: %08lX to end: %08lX\n\r", start, end);
+
+  CPU.set_program_bounds(start, end);
   return true;
 }
 

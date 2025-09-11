@@ -22,6 +22,8 @@
 */
 #pragma once
 
+#define OPCODE_HALT 0xF4
+#define OPCODE_DOUBLE_HALT 0xF4F4 // For 386, which only fetches at even addresses
 #define OPCODE_NOP 0x90
 #define OPCODE_80NOP 0x00
 #define OPCODE_DOUBLENOP 0x9090

@@ -1966,7 +1966,7 @@ void handle_execute_state() {
   if (Controller.readALEPin() && CPU.bus_state == MEMR) {
     Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: ALE high and MEMR cycle detected.");
     // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
-    if (CPU.address_latch() == 0x00008) {
+    if ((READ_NMI_PIN) && (CPU.address_latch() == 0x00008)) {
       Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...");
       CPU.nmi_terminate = true;
       ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);
@@ -2000,8 +2000,8 @@ void handle_execute_automatic() {
   static bool far_call_flag = false;
   static bool exception_address_odd = false;
   
-  static uint16_t exception_offset = 0;
   static uint32_t next_exception_address = 0;
+  uint32_t exception_number = 0;
 
   bool print = Controller.getBoard().isDebugEnabled();
 
@@ -2096,21 +2096,30 @@ void handle_execute_automatic() {
   }
 
   if (CPU.bus_state == HALT) {
-    Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
     
-    if (CPU.use_smm()) {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM enabled.");
-      if (READ_SMI_PIN) {
-        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
-        Controller.writePin(OutputPin::Smi, false);
+    if (CPU.address_latch() & 0x00002) {
+
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT detected - Ending program execution.", true);
+      
+      if (CPU.use_smm()) {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM enabled.");
+        if (READ_SMI_PIN) {
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
+          Controller.writePin(OutputPin::Smi, false);
+        }
+      }
+      else {
+        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM disabled.");
+        if (!READ_NMI_PIN){
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing NMI pin high.", true);
+          Controller.writePin(OutputPin::Nmi, true);
+        }
       }
     }
     else {
-      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM disabled.");
-      if (!READ_NMI_PIN){
-        Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing NMI pin high.", true);
-        Controller.writePin(OutputPin::Nmi, true);
-      }
+      Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: SHUTDOWN detected - Ending program execution.", true);
+      ArduinoX86::Server.change_state(ServerState::Shutdown);
+      return;
     }
 
   }
@@ -2134,8 +2143,19 @@ void handle_execute_automatic() {
         Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: CODE fetch not at predicted address. Flow control change detected!", true);
 
         if (ArduinoX86::Server.halt_after_jump()) {
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Injecting halt opcode.", false);
-          ArduinoX86::Bus->mem_write_u8(CPU.address_latch(), OPCODE_HALT);
+          if (CPU.is_address_in_program(CPU.address_latch())) {
+            Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Suppressing HALT injection within program bounds", false);
+          }
+          else {
+            Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: Injecting HALT opcode at %08X\n\r after detecting jump.", CPU.address_latch());
+            if (CPU.cpu_type == CpuType::i80386) {
+              // The 386 only fetches at even addresses. Writing two NOPs is a bit of a hack to cover jumping to an odd address.
+              ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), OPCODE_DOUBLE_HALT, true, false);
+            }
+            else {
+              ArduinoX86::Bus->mem_write_u8(CPU.address_latch(), OPCODE_HALT);
+            }
+          }
         }
 
         CPU.predicted_fetch = 0;  // Reset predicted fetch
@@ -2163,7 +2183,9 @@ void handle_execute_automatic() {
           next_exception_address = CPU.address_latch() + 2;
         }
         if ((CPU.exception_stage == 1) && (CPU.address_latch() == next_exception_address)) {
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Detected Exception/Interrupt!", true);
+
+          exception_number = (uint32_t)((next_exception_address - 2) / 4);
+          Controller.getBoard().debugPrintf(DebugType::EXECUTE, true, "## EXECUTE: Detected Exception/Interrupt #%d!\n\r", exception_number);
           CPU.exception_armed = true;
           CPU.exception_stage = 0;
           next_exception_address = 0;
@@ -2171,7 +2193,7 @@ void handle_execute_automatic() {
       }
 
       // NMI is active and CPU is starting a memory bus cycle. Let's check if it is the NMI handler.
-      if (CPU.address_latch() == 0x00008) {
+      if ((READ_NMI_PIN) && (CPU.address_latch() == 0x00008)) {
         Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: NMI high and fetching NMI handler. Entering ExecuteFinalize...", true);
         CPU.nmi_terminate = true;
         ArduinoX86::Server.change_state(ServerState::ExecuteFinalize);

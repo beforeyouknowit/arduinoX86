@@ -113,6 +113,7 @@ public:
     CmdEraseMemory     = 0x25,
     CmdServerStatus    = 0x26,
     CmdClearCycleLog   = 0x27,
+    CmdSetProgramBounds = 0x28,
     CmdInvalid
   };
 
@@ -271,5 +272,6 @@ private:
   bool cmd_erase_memory(void);
   bool cmd_server_status(void);
   bool cmd_clear_cycle_log(void);
+  bool cmd_set_program_bounds(void);
   bool cmd_null(void);
 };

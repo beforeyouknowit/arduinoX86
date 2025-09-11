@@ -164,8 +164,6 @@ static const uint8_t BIT_REVERSE_TABLE[256] =
     R6(0), R6(2), R6(1), R6(3)
 };
 
-#define OPCODE_NOP 0x90
-#define OPCODE_HALT 0xF4
 // --------------------- Function declarations --------------------------------
 
 // main.cpp
