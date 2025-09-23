@@ -1666,24 +1666,61 @@ bool CommandServer<BoardType, ShieldType>::cmd_read_memory() {
       mem_size
     );
     set_error("Invalid address range: %08lX - %08lX", address, address + size);
-    return false;
+    //return false;
   }
 
-  uint8_t *ptr = ArduinoX86::Bus->get_ptr(address);
+  // Special-case 1, 2, and 4 bytes.
+  switch (size) {
+    case 1:
+    {
+      uint8_t value = ArduinoX86::Bus->mem_read_u8(address, false);
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 1 byte from address: %08lX to client: %02X\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write(&value, 1);
+      break;
+    }
+    case 2:
+    {
+      uint16_t value = ArduinoX86::Bus->mem_read_u16(address, false);
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 2 bytes from address: %08lX to client: %04X\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write((uint8_t *)&value, 2);
+      break;
+    }
+    case 4:
+    {
+      uint32_t value0 = ArduinoX86::Bus->mem_read_u16(address, false);
+      uint32_t value1 = ArduinoX86::Bus->mem_read_u16(address + 2, false);
+      uint32_t value = (value1 << 16) | value0;
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 4 bytes from address: %08lX to client: %08lX\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write((uint8_t *)&value, 4);
+      break;
+    }
+    default:
+    {
+      uint8_t *ptr = ArduinoX86::Bus->get_ptr(address);
 
-  if (ptr == nullptr) {
-    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_read_memory(): Invalid address: %08lX\n\r", address);
-    set_error("Invalid address: %08lX", address);
-    return false;
+      if (ptr == nullptr) {
+        controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_read_memory(): Invalid address: %08lX\n\r", address);
+        set_error("Invalid address: %08lX", address);
+        return false;
+      }
+
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
+      set_error("No error");
+
+      // Send an initial success byte, so that the client knows we are sending data.
+      // Otherwise it doesn't know if the command failed and will have to time out.
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write(ptr, size);
+      break;
+    }
   }
 
-  controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
-  set_error("No error");
-
-  // Send an initial success byte, so that the client knows we are sending data.
-  // Otherwise it doesn't know if the command failed and will have to time out.
-  proto_write((uint8_t *)"\x01", 1);
-  proto_write(ptr, size);
   return true;
 }
 
