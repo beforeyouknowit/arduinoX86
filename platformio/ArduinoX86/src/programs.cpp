@@ -50,8 +50,13 @@ InlineProgram SETUP_PROGRAM_386EX("SETUP_386EX", {
   0xBA, 0x3C, 0xF4,  // mov dx, 0f43ch
   0xB8, 0x01, 0x00, // mov ax, 0001h
   0xEF, // out dx, ax
+
+  0xBA, 0x20, 0xF8, // mov dx, 0f820h (P1CFG)
+  0xB0, 0xFF, // mov al, 0ffh
+  0xEE, // out dx, al
+
   0xEA, 0x00, 0x00, 0x00, 0x00 // FAR JUMP to [patched segment:0000]
-}, 46);
+}, 52);
 
 // Register load routine. This program gets patched with the client supplied register values.
 // It uses MOVs and POPs to set the register state as specified before the main program execution

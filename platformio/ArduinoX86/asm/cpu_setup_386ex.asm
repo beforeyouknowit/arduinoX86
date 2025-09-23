@@ -19,3 +19,7 @@ start:
     mov   ax, 1         ; Enable the chip select channel
     mov   dx, 0F43Ch    ; UCSMSKL - Chip-select Low Mask
     out   dx, ax
+
+    mov   dx, 0F820H    ; P1CFG
+    mov   al, 0FFH      ; Connect all pins.
+    out   dx, al
