@@ -21,6 +21,7 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+use crate::cpu_common::{Register16, Register32};
 use arduinox86_client::{
     registers_common::{RandomizeOpts, SegmentSize},
     Registers32,
@@ -318,6 +319,38 @@ impl Registers {
             Registers::V3B(regs) => regs.cs_desc.base_address(),
         }
     }
+    pub fn ds_base(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => (regs.ds as u32) << 4,
+            Registers::V2(regs) => regs.ds_desc.base_address(),
+            Registers::V3A(regs) => regs.ds_desc.base_address(),
+            Registers::V3B(regs) => regs.ds_desc.base_address(),
+        }
+    }
+    pub fn es_base(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => (regs.es as u32) << 4,
+            Registers::V2(regs) => regs.es_desc.base_address(),
+            Registers::V3A(regs) => regs.es_desc.base_address(),
+            Registers::V3B(regs) => regs.es_desc.base_address(),
+        }
+    }
+    pub fn fs_base(&self) -> u32 {
+        match self {
+            Registers::V1(_regs) => 0,
+            Registers::V2(_regs) => 0,
+            Registers::V3A(regs) => regs.fs_desc.base_address(),
+            Registers::V3B(regs) => regs.fs_desc.base_address(),
+        }
+    }
+    pub fn gs_base(&self) -> u32 {
+        match self {
+            Registers::V1(_regs) => 0,
+            Registers::V2(_regs) => 0,
+            Registers::V3A(regs) => regs.gs_desc.base_address(),
+            Registers::V3B(regs) => regs.gs_desc.base_address(),
+        }
+    }
     pub fn ss(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.ss,
@@ -356,6 +389,68 @@ impl Registers {
             Registers::V3B(regs) => None,
         }
     }
+    pub fn segment_base(&self, segment: iced_x86::Register) -> Option<u32> {
+        match self {
+            Registers::V1(_regs) => None,
+            Registers::V2(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds_desc.base_address()),
+                iced_x86::Register::ES => Some(regs.es_desc.base_address()),
+                iced_x86::Register::SS => Some(regs.ss_desc.base_address()),
+                iced_x86::Register::CS => Some(regs.cs_desc.base_address()),
+                _ => None,
+            },
+            Registers::V3A(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds_desc.base_address()),
+                iced_x86::Register::ES => Some(regs.es_desc.base_address()),
+                iced_x86::Register::FS => Some(regs.fs_desc.base_address()),
+                iced_x86::Register::GS => Some(regs.gs_desc.base_address()),
+                iced_x86::Register::SS => Some(regs.ss_desc.base_address()),
+                iced_x86::Register::CS => Some(regs.cs_desc.base_address()),
+                _ => None,
+            },
+            Registers::V3B(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds_desc.base_address()),
+                iced_x86::Register::ES => Some(regs.es_desc.base_address()),
+                iced_x86::Register::FS => Some(regs.fs_desc.base_address()),
+                iced_x86::Register::GS => Some(regs.gs_desc.base_address()),
+                iced_x86::Register::SS => Some(regs.ss_desc.base_address()),
+                iced_x86::Register::CS => Some(regs.cs_desc.base_address()),
+                _ => None,
+            },
+        }
+    }
+
+    pub fn segment_selector(&self, segment: iced_x86::Register) -> Option<u16> {
+        match self {
+            Registers::V1(_regs) => None,
+            Registers::V2(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds),
+                iced_x86::Register::ES => Some(regs.es),
+                iced_x86::Register::SS => Some(regs.ss),
+                iced_x86::Register::CS => Some(regs.cs),
+                _ => None,
+            },
+            Registers::V3A(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds),
+                iced_x86::Register::ES => Some(regs.es),
+                iced_x86::Register::FS => Some(regs.fs),
+                iced_x86::Register::GS => Some(regs.gs),
+                iced_x86::Register::SS => Some(regs.ss),
+                iced_x86::Register::CS => Some(regs.cs),
+                _ => None,
+            },
+            Registers::V3B(regs) => match segment {
+                iced_x86::Register::DS => Some(regs.ds),
+                iced_x86::Register::ES => Some(regs.es),
+                iced_x86::Register::FS => Some(regs.fs),
+                iced_x86::Register::GS => Some(regs.gs),
+                iced_x86::Register::SS => Some(regs.ss),
+                iced_x86::Register::CS => Some(regs.cs),
+                _ => None,
+            },
+        }
+    }
+
     pub fn segment_size(&self, segment: iced_x86::Register) -> SegmentSize {
         match self {
             Registers::V1(_regs) => SegmentSize::Sixteen,
@@ -412,20 +507,56 @@ impl Registers {
             Registers::V3B(regs) => regs.esp as u16,
         }
     }
-    pub fn stack_address(&self) -> u32 {
+    pub fn flags(&self) -> u16 {
         match self {
-            Registers::V1(regs) => ((regs.ss as u32) << 4) + regs.sp as u32,
-            Registers::V2(regs) => regs.ss_desc.base_address() + regs.sp as u32,
-            Registers::V3A(regs) => regs.ss_desc.base_address() + regs.esp,
-            Registers::V3B(regs) => regs.ss_desc.base_address() + regs.esp,
+            Registers::V1(regs) => regs.flags,
+            Registers::V2(regs) => regs.flags,
+            Registers::V3A(regs) => regs.eflags as u16,
+            Registers::V3B(regs) => regs.eflags as u16,
         }
     }
-    pub fn mask_registers32(&mut self, segment: iced_x86::Register, ea_registers: &[iced_x86::Register]) {
+    pub fn stack_address(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => ((regs.ss as u32) << 4).wrapping_add(regs.sp as u32),
+            Registers::V2(regs) => regs.ss_desc.base_address().wrapping_add(regs.sp as u32),
+            Registers::V3A(regs) => regs.ss_desc.base_address().wrapping_add(regs.esp),
+            Registers::V3B(regs) => regs.ss_desc.base_address().wrapping_add(regs.esp),
+        }
+    }
+    pub fn mask_registers32(
+        &mut self,
+        segment: iced_x86::Register,
+        ea_registers: &[iced_x86::Register],
+        mask_shift: u32,
+    ) {
         match self {
             Registers::V1(_regs) => {}
             Registers::V2(_regs) => {}
-            Registers::V3A(regs) => regs.mask_registers(segment, ea_registers),
+            Registers::V3A(regs) => regs.mask_registers(segment, ea_registers, mask_shift),
             Registers::V3B(_regs) => {}
+        }
+    }
+
+    pub fn segment_base16(&self, segment: Register16) -> u32 {
+        match segment {
+            Register16::CS => self.cs_base(),
+            Register16::DS => self.ds_base(),
+            Register16::ES => self.es_base(),
+            Register16::SS => self.ss_base(),
+            Register16::FS => self.fs_base(),
+            Register16::GS => self.gs_base(),
+            _ => 0,
+        }
+    }
+    pub fn segment_base32(&self, segment: Register32) -> u32 {
+        match segment {
+            Register32::CS => self.cs_base(),
+            Register32::DS => self.ds_base(),
+            Register32::ES => self.es_base(),
+            Register32::SS => self.ss_base(),
+            Register32::FS => self.fs_base(),
+            Register32::GS => self.gs_base(),
+            _ => 0,
         }
     }
 }

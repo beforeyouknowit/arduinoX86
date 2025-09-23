@@ -25,17 +25,19 @@ mod bus_ops;
 mod cpu_common;
 mod cycles;
 mod display;
+mod file;
 mod flags;
 mod gen_regs;
 mod gen_tests;
+mod generation_stats;
+mod hash_memory;
 mod instruction;
 mod modrm;
 mod registers;
 mod state;
+mod trace_macros;
 mod validate_tests;
 
-use arduinox86_client::{registers_common::SegmentSize, CpuClient, ProgramState, RegisterSetType, ServerCpuType};
-use moo::types::MooCpuType;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -46,6 +48,10 @@ use std::{
     time::Instant,
 };
 
+use arduinox86_client::{registers_common::SegmentSize, CpuClient, ProgramState, RegisterSetType, ServerCpuType};
+use moo::types::MooCpuType;
+
+use crate::{file::timestamped_filename, generation_stats::GenerationStats};
 use anyhow::Context;
 use clap::Parser;
 use serde::Deserialize;
@@ -76,6 +82,16 @@ pub enum CpuMode {
     Real,
     Unreal,
     Protected,
+}
+
+impl CpuMode {
+    pub fn to_path_suffix(&self) -> &'static str {
+        match self {
+            CpuMode::Real => "real",
+            CpuMode::Unreal => "unreal",
+            CpuMode::Protected => "protected",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -281,13 +297,23 @@ pub struct StackPointerOverride {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ExceptionSieveEntry {
     opcode: u16,
+    extension: u8,
     exception: u8,
     exception_rate: f32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct ExceptionOverride {
+    opcode: u16,
+    extension: u8,
+    allow_all: bool,
+    exceptions: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct ModRmOverride {
     opcode: u16,
+    extension: u8,
     allow_reg_form: bool,
     mask: u8,
     invalid_chance: f32,
@@ -360,7 +386,8 @@ pub struct TestGen {
 
     lock_prefix_chance: f32,
     lock_prefix_opcode: u8,
-    rep_prefix_chance:  f32,
+    rep_prefix_chance: f32,
+    sib_chance: Option<f32>,
 
     reg_zero_chance: f32,
     reg_ones_chance: f32,
@@ -374,7 +401,7 @@ pub struct TestGen {
 
     inject_values: Vec<u32>,
 
-    near_branch_ban: u16,
+    near_branch_ban: Vec<u32>,
 
     sp_odd_chance: f32,
     sp_min_value: u32,
@@ -386,8 +413,13 @@ pub struct TestGen {
 
     extended_prefix: u16,
     group_opcodes: Vec<u16>,
+    protected_mode_opcodes: Vec<u16>,
     esc_opcodes: Vec<u16>,
     flow_control_opcodes: Vec<u16>,
+    bitfield_opcodes: Vec<u16>,
+    offset_opcodes: Vec<u16>,
+    ptr_opcodes: Vec<u16>,
+    far_indirect_opcodes: Vec<u16>,
     prefixes: Vec<u8>,
     segment_prefixes: Vec<u8>,
     disable_operand_size_prefix: Vec<u16>,
@@ -399,9 +431,11 @@ pub struct TestGen {
     disable_seg_overrides: Vec<u16>,
     disable_lock_prefix:   Vec<u16>,
 
-    sp_overrides:    Vec<StackPointerOverride>,
+    sp_overrides: Vec<StackPointerOverride>,
     modrm_overrides: Vec<ModRmOverride>,
     count_overrides: Vec<CountOverride>,
+    allowed_exceptions: Vec<u8>,
+    exception_overrides: Vec<ExceptionOverride>,
     exception_sieve: Vec<ExceptionSieveEntry>,
 
     randomize_mem_interval: usize,
@@ -414,6 +448,12 @@ struct Cli {
     #[arg(long, value_name = "FILE")]
     config_file: PathBuf,
 
+    #[arg(long, default_value = "1")]
+    num_boards: usize,
+
+    #[arg(long, default_value = "0")]
+    board_number: usize,
+
     #[arg(long)]
     com_port: Option<String>,
 
@@ -424,11 +464,18 @@ struct Cli {
     validate: bool,
 }
 
+#[derive(Copy, Clone, Debug, Default, Hash, PartialEq, Eq)]
+pub struct ExceptionSeenEntry {
+    exception_number: u8,
+    sib: bool,
+}
+
 pub struct TestContext {
     client: CpuClient,
     load_register_buffer: Cursor<Vec<u8>>,
     store_register_buffer: Vec<u8>,
     server_cpu: ServerCpuType,
+    cpu_mode: CpuMode,
     register_set_type: RegisterSetType,
     test_opcode_size_prefix: TestOpcodeSizePrefix,
     code_segment_size: SegmentSize,
@@ -437,13 +484,15 @@ pub struct TestContext {
     gen_stop: Instant,
     gen_ct: usize,
     file_gen_ct: usize,
+    output_path: PathBuf,
+    trace_path: PathBuf,
     trace_log: BufWriter<File>,
-    mnemonic_set: HashMap<String, usize>,
+    global_trace_log: BufWriter<File>,
 
     dry_run: bool,
     last_program_state: Option<ProgramState>,
 
-    exceptions: HashMap<u8, usize>,
+    stats: GenerationStats,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -451,6 +500,11 @@ fn main() -> anyhow::Result<()> {
 
     // Parse command‐line args
     let cli = Cli::parse();
+
+    if cli.board_number >= cli.num_boards {
+        eprintln!("Error: board_number must be less than num_boards (0-offset)");
+        std::process::exit(1);
+    }
 
     // Read the file into a string
     let text =
@@ -474,31 +528,64 @@ fn main() -> anyhow::Result<()> {
     };
 
     let server_cpu = ServerCpuType::from(config.test_gen.cpu_type);
+    let mode_suffix = config.test_gen.cpu_mode.to_path_suffix().to_string();
+
+    // Create the test output directory if it doesn't exist.
+    let output_dir_path = config.test_gen.test_output_dir.join(mode_suffix.clone());
+    if !output_dir_path.exists() {
+        log::warn!("Creating test output directory: {}", output_dir_path.display());
+        fs::create_dir_all(&output_dir_path)
+            .with_context(|| format!("Creating test output directory: {}", output_dir_path.display()))?;
+    }
 
     // Create the trace output directory if it doesn't exist.
-    if !config.test_gen.trace_output_dir.exists() {
-        fs::create_dir_all(&config.test_gen.trace_output_dir).with_context(|| {
+    let trace_dir_path = config
+        .test_gen
+        .test_output_dir
+        .join(mode_suffix.clone())
+        .join(config.test_gen.trace_output_dir.clone());
+    if !trace_dir_path.exists() {
+        fs::create_dir_all(&trace_dir_path)
+            .with_context(|| format!("Creating trace output directory: {}", trace_dir_path.display()))?;
+    }
+
+    let verify_trace_dir_path = config
+        .test_gen
+        .test_output_dir
+        .join(mode_suffix.clone())
+        .join(config.test_gen.verify_trace_output_dir.clone());
+    if !verify_trace_dir_path.exists() {
+        fs::create_dir_all(&verify_trace_dir_path).with_context(|| {
             format!(
-                "Creating trace output directory: {}",
-                config.test_gen.trace_output_dir.display()
+                "Creating verify trace output directory: {}",
+                verify_trace_dir_path.display()
             )
         })?;
     }
-    if !config.test_gen.verify_trace_output_dir.exists() {
-        fs::create_dir_all(&config.test_gen.verify_trace_output_dir).with_context(|| {
-            format!(
-                "Creating trace output directory: {}",
-                config.test_gen.verify_trace_output_dir.display()
-            )
-        })?;
-    }
+
     let trace_filename = PathBuf::from(format!("init{}", config.test_gen.trace_file_suffix.clone().display()));
 
     // Create a BufWriter using the trace log file.
-    let trace_log_path = config.test_gen.trace_output_dir.join(trace_filename);
+    let trace_log_path = trace_dir_path.join(trace_filename);
     let trace_log_file = File::create(&trace_log_path)
         .with_context(|| format!("Creating trace log file: {}", trace_log_path.display()))?;
     let trace_log = BufWriter::new(trace_log_file);
+
+    let global_trace_filename_prefix = format!("{}_", cli.board_number);
+    let global_trace_filename = timestamped_filename(
+        &global_trace_filename_prefix,
+        config
+            .test_gen
+            .trace_file_suffix
+            .clone()
+            .to_str()
+            .expect("Invalid trace file suffix"),
+    );
+
+    let global_trace_log_path = trace_dir_path.join(global_trace_filename);
+    let global_trace_log_file = File::create(&global_trace_log_path)
+        .with_context(|| format!("Creating global trace log file: {}", global_trace_log_path.display()))?;
+    let global_trace_log = BufWriter::new(global_trace_log_file);
 
     let (load_register_buffer, store_register_buffer) = match config.test_gen.cpu_type {
         MooCpuType::Intel80286 => (Cursor::new(vec![0; 102]), vec![0; 102]),
@@ -514,6 +601,7 @@ fn main() -> anyhow::Result<()> {
         load_register_buffer,
         store_register_buffer,
         server_cpu,
+        cpu_mode: config.test_gen.cpu_mode,
         register_set_type: RegisterSetType::from(server_cpu),
         test_opcode_size_prefix: TestOpcodeSizePrefix::None,
         code_segment_size: SegmentSize::Sixteen,
@@ -522,11 +610,13 @@ fn main() -> anyhow::Result<()> {
         gen_stop: Instant::now(),
         gen_ct: 0,
         file_gen_ct: 0,
+        output_path: output_dir_path,
+        trace_path: trace_dir_path,
         trace_log,
-        mnemonic_set: Default::default(),
+        global_trace_log,
         dry_run: cli.dry_run,
         last_program_state: None,
-        exceptions: Default::default(),
+        stats: Default::default(),
     };
 
     if config.test_gen.exclude_esc_opcodes {

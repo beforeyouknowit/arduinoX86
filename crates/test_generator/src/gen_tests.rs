@@ -23,7 +23,22 @@
 
 use std::{ffi::OsString, io::BufWriter, time::Instant};
 
-use super::{Config, Opcode, TestContext, TestOpcodeSizePrefix};
+use super::{
+    global_trace_banner,
+    global_trace_log,
+    trace_banner,
+    trace_error,
+    trace_flush,
+    trace_log,
+    AddressSize,
+    Config,
+    CpuMode,
+    GenerationStats,
+    InstructionSize,
+    Opcode,
+    TestContext,
+    TestOpcodeSizePrefix,
+};
 use crate::{
     bus_ops::BusOps,
     cpu_common::BusOp,
@@ -65,61 +80,11 @@ use arduinox86_client::{
     ServerFlags,
 };
 
+use crate::cpu_common::{AddressingMode, AddressingMode16, AddressingMode32, EffectiveAddress, SegmentRegister};
 use anyhow::{anyhow, bail, Context, Error};
 use iced_x86::{Mnemonic, OpKind};
-use moo::types::MooCycleStatePrinter;
+use moo::types::{effective_address::MooEffectiveAddress, MooCycleStatePrinter};
 use rand::{Rng, SeedableRng};
-
-#[macro_export]
-macro_rules! trace_banner {
-    ($ctx:expr) => {{
-        use std::io::Write;
-        writeln!(
-            $ctx.trace_log,
-            ">>> ----------------------------------------------------------------------------------------------------"
-        )
-        .expect("failed to write to trace_log!");
-    }};
-}
-
-// Trace print macro that writes to bufwriter
-#[macro_export]
-macro_rules! trace_log {
-    // take a mutable Context (or &mut Context) and a format+args
-    ($ctx:expr, $($arg:tt)*) => {{
-        // bring Write into scope so write!/writeln! work
-        use std::io::Write;
-        // write the formatted text plus a newline
-        writeln!($ctx.trace_log, $($arg)*)
-            .expect("failed to write to trace_log!");
-    }};
-}
-
-#[macro_export]
-macro_rules! trace_flush {
-    // take a mutable Context (or &mut Context) and a format+args
-    ($ctx:expr) => {{
-        // bring Write into scope so write!/writeln! work
-        use std::io::Write;
-        // write the formatted text plus a newline
-        $ctx.trace_log.flush().expect("failed to flush trace_log!");
-    }};
-}
-
-#[macro_export]
-macro_rules! trace_error {
-    ($ctx:expr, $($arg:tt)*) => {{
-        use std::io::Write;
-        // 1) prefix
-        write!($ctx.trace_log, "## ERROR: ")
-            .expect("failed to write error prefix to trace_log");
-        // 2) the user’s format + newline
-        writeln!($ctx.trace_log, $($arg)*)
-            .expect("failed to write to trace_log");
-        // 3) also log via log::error!
-        log::error!($($arg)*);
-    }};
-}
 
 pub fn compare_registers(regs0: &MooRegisters, regs1: &MooRegisters) {
     match (regs0, regs1) {
@@ -274,57 +239,55 @@ pub fn write_initial_mem(context: &mut TestContext, initial_mem: &[MooRamEntry])
     Ok(())
 }
 
+/// The top-level test generation function.
+/// Iterates through all opcodes specified by the configuration, generating tests for each one
+/// until the specified test count is reached or an unrecoverable error occurs.
 pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<()> {
-    let mut opcode_range_start = 0;
-    let mut opcode_range_end = 0x0FFF;
-
     context.gen_ct = 0;
     context.gen_start = Instant::now();
 
-    for count_override in &config.test_gen.count_overrides {
-        log::debug!(
-            "Opcode count override: {:X?} -> {}",
-            count_override.opcode_range,
-            count_override.count
-        );
+    // Set the opcode range to generate as specified by the configuration.
+    // `opcode_range` is now a two-element array so safe to index directly.
+    let mut opcode_range_start = config.test_gen.opcode_range[0];
+    let mut opcode_range_end = config.test_gen.opcode_range[1];
+
+    if let Some(opcode_override) = config.test_gen.opcode_override {
+        opcode_range_start = opcode_override;
+        opcode_range_end = opcode_override;
     }
 
-    if config.test_gen.opcode_range.len() > 1 {
-        opcode_range_start = config.test_gen.opcode_range[0];
-        opcode_range_end = config.test_gen.opcode_range[1];
-
-        if let Some(opcode_override) = config.test_gen.opcode_override {
-            opcode_range_start = opcode_override;
-            opcode_range_end = opcode_override;
-        }
-
-        println!(
-            "Generating tests for opcodes from [{:02x} to {:02x}]",
-            opcode_range_start, opcode_range_end
-        );
-    }
-    else {
-        log::error!("Invalid opcode range specified.");
-        bail!("Invalid opcode range specified.");
-    }
+    println!(
+        "Generating tests for opcodes from [{:02x} to {:02x}]",
+        opcode_range_start, opcode_range_end
+    );
 
     // Tell ArduinoX86 to execute instructions automatically.
     let mut server_flags = ServerFlags::EXECUTE_AUTOMATIC | ServerFlags::ENABLE_CYCLE_LOGGING;
 
+    // Enable SMM register loading if we have a 386 CPU.
+    // We can load registers as we exit SMM between tests - this avoids the lengthy 386EX setup
+    // routine to disable wait states.
     if let MooCpuType::Intel80386Ex = config.test_gen.cpu_type {
         server_flags |= ServerFlags::USE_SMM;
     }
 
     context.client.set_flags(server_flags)?;
-    // Set default serial debug state.
     context.client.enable_debug(config.test_exec.serial_debug_default)?;
 
-    let prefix_byte: Option<u8> = None;
     let mut last_opcode = opcode_range_start;
 
     for opcode_raw in opcode_range_start..=opcode_range_end {
         if !config.test_gen.valid_opcodes.contains(&opcode_raw) {
             continue;
+        }
+
+        match config.test_gen.cpu_mode {
+            CpuMode::Real | CpuMode::Unreal => {
+                if config.test_gen.protected_mode_opcodes.contains(&opcode_raw) {
+                    continue;
+                }
+            }
+            _ => {}
         }
 
         let opcode_u8 = opcode_raw as u8;
@@ -336,7 +299,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
             &config.test_gen.disable_address_size_prefix,
         ) {
             context.file_gen_ct = 0;
-            context.exceptions.clear();
+            context.stats = GenerationStats::default();
             context.test_opcode_size_prefix = size_prefix;
 
             let mut op_ext_start = 0;
@@ -351,7 +314,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 last_opcode = opcode_raw;
 
                 // Reset mnemonic hashmap.
-                context.mnemonic_set.clear();
+                context.stats.mnemonic_set.clear();
 
                 if config.test_gen.excluded_opcodes.contains(&opcode_raw) {
                     log::debug!("Skipping excluded opcode: {}", opcode);
@@ -370,7 +333,8 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 }
 
                 // Create the output file path.
-                let mut file_path = config.test_gen.test_output_dir.clone();
+                let mut file_path = context.output_path.clone();
+
                 let size_prefix_base = size_prefix.to_filename_prefix();
                 let filename = OsString::from(format!("{}{}{}.MOO", size_prefix_base, opcode, op_ext_str));
                 file_path.push(filename.clone());
@@ -383,7 +347,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     op_ext_str,
                     config.test_gen.trace_file_suffix.display()
                 ));
-                let trace_file_path = config.test_gen.trace_output_dir.join(trace_filename);
+                let trace_file_path = context.trace_path.join(trace_filename);
                 let trace_file = match config.test_gen.append_file {
                     true => std::fs::OpenOptions::new()
                         .create(true)
@@ -396,11 +360,8 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
 
                 context.trace_log = BufWriter::new(trace_file);
 
-                // Create the file seed.
+                // Create the file seed by combining the opcode and extension then XORing with the base seed.
                 let mut file_seed: u64 = opcode_raw as u64;
-                if let Some(prefix_byte) = prefix_byte {
-                    file_seed = file_seed | ((prefix_byte as u64) << 8);
-                }
                 file_seed <<= 3;
                 file_seed |= (opcode_ext & 0x07) as u64;
                 file_seed ^= config.test_gen.base_seed;
@@ -408,10 +369,13 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 context.file_seed = file_seed;
                 let mut test_start_num = 0;
 
+                // Capture the CPU type from the client for the test file.
                 let moo_arch = MooCpuType::from(context.client.cpu_type()?.0);
 
+                // Create the new empty MooTestFile to hold our generated tests.
                 let mut test_file = MooTestFile::new(config.test_gen.moo_version, moo_arch, config.test_gen.test_count);
 
+                // Create a new MooFileMetadata for this test file.
                 let mut test_metadata = MooFileMetadata::new(
                     config.test_gen.set_version_major,
                     config.test_gen.set_version_minor,
@@ -420,12 +384,17 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 )
                 .with_file_seed(context.file_seed);
 
-                // Open the file if append == true
+                // Open existing files if append == true
                 if config.test_gen.append_file {
                     // Open `filename` for reading as a BufReader.
                     match std::fs::File::open(&file_path) {
                         Ok(file) => {
                             log::debug!("Appending to existing test file: {}", file_path.to_string_lossy());
+                            global_trace_log!(
+                                context,
+                                "Appending to existing test file: {}",
+                                file_path.to_string_lossy()
+                            );
                             let mut file_reader = std::io::BufReader::new(file);
                             test_file = MooTestFile::read(&mut file_reader)?;
 
@@ -444,6 +413,7 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                                     "File {} not found, creating new test file.",
                                     file_path.to_string_lossy()
                                 );
+                                global_trace_log!(context, "Creating new test file: {}", file_path.to_string_lossy());
                             }
                             else {
                                 return Err(anyhow::anyhow!("Error opening test file: {}", e));
@@ -452,27 +422,34 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                     }
                 };
 
+                // Skip test files that are already complete.
                 if test_start_num >= config.test_gen.test_count {
                     println!("Test file {} is complete. Skipping...", file_path.to_string_lossy());
                     continue;
                 }
 
+                // Get the test count for this opcode, looking up any test count overrides.
+                // We override the test count for certain trivial opcodes.
+                // Nobody needs 10,000 tests of INC, after all.
                 let test_count = get_test_count(config, opcode.into());
                 for test_num in test_start_num..test_count {
-                    // Create unique instruction and initial register set for each test.
-                    // These should not change regardless of test attempt count.
-
+                    // Generate a test.
+                    // `generate_consistent_test` checks for consistency - that is it generates a
+                    // test `validate_count` times and ensures the results are the same each time.
+                    // This helps catch and reject errors caused by intermittent hardware faults.
                     let mut test_result = generate_consistent_test(
                         context,
                         config,
                         test_num,
                         opcode,
-                        have_group_ext,
-                        opcode_ext,
+                        have_group_ext.then_some(opcode_ext),
                         config.test_exec.validate_count as usize,
                     );
 
                     if !context.dry_run {
+                        // If test generation failed, log the error and return.
+                        // This is a fatal error as `generate_consistent_test` has built-in retries
+                        // and we must have exhausted the retry threshold.
                         if test_result.is_err() {
                             let err_msg = format!(
                                 "Failed to generate test for opcode {} at test number {}: {}",
@@ -514,30 +491,18 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
                 );
 
                 // Adjust final metadata with count...
-                test_metadata = test_metadata.with_test_count(context.gen_ct as u32);
+                test_metadata = test_metadata.with_test_count((test_start_num as u32) + context.gen_ct as u32);
                 // ... and with the most frequently seen mnemonic (to handle some tests that have invalid forms icedx86 won't decode).
-                if let Some((mnemonic, count)) = context.mnemonic_set.iter().max_by_key(|entry| entry.1) {
-                    let mnemonic_stats = format!("Most frequent mnemonic: {} ({} times)", mnemonic, count);
-                    trace_log!(context, "{}", mnemonic_stats);
-                    log::debug!("{}", mnemonic_stats);
+                if let Some((mnemonic, count)) = context.stats.most_frequent_mnemonic() {
                     test_metadata = test_metadata.with_mnemonic(mnemonic.to_string());
                 }
 
-                trace_log!(context, "Exceptions seen:");
+                // Log the generation stats.
 
-                let total = context.file_gen_ct * config.test_exec.validate_count as usize;
-                for exception in &context.exceptions {
-                    trace_log!(
-                        context,
-                        "{}: {:5}/{:5} ({:.2}%)",
-                        exception.0,
-                        exception.1,
-                        total,
-                        (*exception.1 as f64 / total as f64) * 100.0
-                    );
-                }
-
-                trace_banner!(context);
+                // Context owns stats, so we can't pass the stats::log method the context to use
+                // with our trace_log macro, so be lazy and just clone it out.
+                let stats = context.stats.clone();
+                stats.log(context);
 
                 test_file.set_metadata(test_metadata);
 
@@ -557,13 +522,18 @@ pub fn gen_tests(context: &mut TestContext, config: &Config) -> anyhow::Result<(
     Ok(())
 }
 
+/// Generate a single test for the specified opcode and test number.
+/// This will call `generate_test` repeatedly until a consistent result is obtained, the number of
+/// times determined by the `validate_count` parameter in the test configuration.
+///
+/// `generate_consistent_test` is also responsible for sieving exceptions for opcodes configured
+/// for exception sieving.
 fn generate_consistent_test(
     context: &mut TestContext,
     config: &Config,
     test_num: usize,
     opcode: Opcode,
-    have_group_ext: bool,
-    opcode_ext: u8,
+    opcode_ext: Option<u8>,
     required_matches: usize,
 ) -> Result<MooTest, Error> {
     let mut gen_num = 0;
@@ -571,7 +541,6 @@ fn generate_consistent_test(
     let mut sieve_ct = 0;
 
     // Set flow control end condition
-
     if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
         let flags = context.client.get_flags()?;
         if flags & ServerFlags::HALT_AFTER_JUMP == 0 {
@@ -603,7 +572,7 @@ fn generate_consistent_test(
             context,
             &config.test_gen,
             opcode,
-            have_group_ext.then_some(opcode_ext),
+            opcode_ext,
             &test_registers,
             test_num,
             gen_num,
@@ -613,9 +582,6 @@ fn generate_consistent_test(
         trace_log!(context, "Code segment is size {:?}", context.code_segment_size);
 
         let mut segments = test_instruction.segments();
-        //segments.sort();
-        //segments.dedup();
-
         let mut segment_limit = 0xFFFF_FFFF;
 
         for segment in &segments {
@@ -635,22 +601,49 @@ fn generate_consistent_test(
             trace_log!(context, "Test instruction uses EA register {:?}", register);
         }
 
-        let scale_shift = match test_instruction.iced_instruction().memory_index_scale() {
+        let mut scale_shift = match test_instruction.iced_instruction().memory_index_scale() {
             8 => 3,
             4 => 2,
             2 => 1,
             _ => 0,
         };
 
+        // If we have multiple EA registers, we need to scale the limit mask down further for every
+        // additional register beyond the first.
+        scale_shift += ea_registers.len().saturating_sub(1);
+
         if !ea_registers.is_empty() {
             trace_log!(
                 context,
-                "Masking EA registers: {:?} with limit {:08X}",
+                "Masking EA registers: {:?} with limit {:08X} (shift: {})",
                 ea_registers,
-                segment_limit >> scale_shift
+                segment_limit >> scale_shift,
+                scale_shift
             );
 
-            test_registers.regs.mask_registers32(segments[0], ea_registers);
+            test_registers
+                .regs
+                .mask_registers32(segments[0], ea_registers, scale_shift as u32);
+        }
+
+        if config.test_gen.bitfield_opcodes.contains(&opcode.into()) {
+            // Bitfield opcodes such as BT, BTS, BTR, BTC need the bit index masked if they use the
+            // m32, reg form.
+            if matches!(test_instruction.address_size(), AddressSize::ThirtyTwo) {
+                if let OpKind::Register = test_instruction.op1_kind() {
+                    if let OpKind::Memory = test_instruction.op0_kind() {
+                        let register = test_instruction.iced_instruction().op1_register();
+                        trace_log!(
+                            context,
+                            "Test instruction is bitfield operation with m, reg form. Masking register {:?}",
+                            register
+                        );
+
+                        let reg_vec = vec![register];
+                        test_registers.regs.mask_registers32(segments[0], &reg_vec, 0);
+                    }
+                }
+            }
         }
 
         if config.test_gen.flow_control_opcodes.contains(&opcode.into()) {
@@ -659,13 +652,15 @@ fn generate_consistent_test(
                     .regs
                     .segment_limit(iced_x86::Register::CS)
                     .unwrap_or(0xFFFF_FFFF);
-                trace_log!(context, "Test instruction is flow control operation with 32-bit near branch. Masking branch target with segment limit {:08X} (sign-extended)", segment_limit);
+
+                let segment_limit_shifted = segment_limit >> 1;
+                trace_log!(context, "Test instruction is flow control operation with 32-bit near branch. Masking branch target with (segment limit >> 1): {:08X}", segment_limit_shifted);
 
                 test_instruction.mask_nearbranch32(
                     context,
                     &config.test_gen,
                     test_registers.regs.segment_size(iced_x86::Register::CS).into(),
-                    segment_limit,
+                    segment_limit_shifted,
                 )?;
             }
         }
@@ -696,6 +691,19 @@ fn generate_consistent_test(
             );
 
             if displacement_size == 4 {
+                let mut sign_extend = true;
+                if config.test_gen.offset_opcodes.contains(&opcode.into()) {
+                    // This is an instruction that uses an 32-bit offset parameter, like MOV to/from memory with a direct address.
+                    // iced treats the offset as a displacement, but it should not be sign-extended like other masked offsets.
+
+                    sign_extend = false;
+                    log::trace!(
+                        "Opcode {} uses direct offset: {:?}",
+                        opcode,
+                        test_instruction.iced_instruction()
+                    );
+                }
+
                 // Handle POP.  POP will touch multiple segments, with the last segment being SS.
                 // This isn't the segment we care about for masking so pop it.
                 if matches!(test_instruction.iced_instruction().mnemonic(), Mnemonic::Pop) && segments.len() > 1 {
@@ -737,6 +745,8 @@ fn generate_consistent_test(
                     test_instruction.mask_displacement32(
                         context,
                         &config.test_gen,
+                        opcode,
+                        sign_extend,
                         test_registers.regs.segment_size(segment).into(),
                         segment_limit >> scale_shift,
                     )?;
@@ -763,7 +773,7 @@ fn generate_consistent_test(
                 test_num,
                 gen_num,
                 opcode,
-                have_group_ext.then_some(opcode_ext),
+                opcode_ext,
                 &test_instruction,
                 &mut test_registers,
             );
@@ -777,7 +787,19 @@ fn generate_consistent_test(
                         // we reject tests that otherwise are good but generated an exception, at some
                         // predefined rate.
                         for es_entry in &config.test_gen.exception_sieve {
-                            if es_entry.opcode == opcode.into() && es_entry.exception == exception.exception_num {
+                            // If there is an opcode extension, check that the extension matches
+                            // in the sieve entry. If no extension is given, match extension '0'.
+                            let ext_matches = if let Some(opcode_ext) = opcode_ext {
+                                es_entry.extension == opcode_ext
+                            }
+                            else {
+                                es_entry.extension == 0
+                            };
+
+                            if es_entry.opcode == opcode.into()
+                                && es_entry.exception == exception.exception_num
+                                && ext_matches
+                            {
                                 log::debug!(
                                     "Opcode {} has sieve for exception {} at rate {}",
                                     opcode,
@@ -842,6 +864,48 @@ fn generate_consistent_test(
                                         context,
                                         "generate_consistent_test(): Test validation count met. Returning test."
                                     );
+
+                                    // Our test is consistent, so we can update the test generation statistics now.
+                                    context.stats.total += 1;
+                                    context.stats.add_mnemonic(test_instruction.mnemonic());
+
+                                    let sib = test_instruction.has_sib();
+                                    if sib {
+                                        context.stats.sib_ct += 1;
+                                    }
+
+                                    let modrm = test_instruction.has_modrm();
+                                    if !sib && modrm {
+                                        context.stats.modrm_ct += 1;
+                                    }
+
+                                    if modrm {
+                                        if test_instruction.has_modrm_register_mode() {
+                                            context.stats.register_mode_ct += 1;
+                                        }
+                                        if test_instruction.has_modrm_address_mode() {
+                                            context.stats.address_mode_ct += 1;
+                                        }
+                                    }
+
+                                    if let Some(exception) = test.exception() {
+                                        context.stats.add_exception(exception.exception_num, sib);
+                                        if sib {
+                                            context.stats.sib_exception_ct += 1;
+                                        }
+                                        else if modrm {
+                                            context.stats.modrm_exception_ct += 1;
+                                        }
+                                    }
+                                    else {
+                                        if sib {
+                                            context.stats.sib_no_exception_ct += 1;
+                                        }
+                                        else if modrm {
+                                            context.stats.modrm_no_exception_ct += 1;
+                                        }
+                                    }
+
                                     return Ok(test);
                                 }
                             }
@@ -982,8 +1046,19 @@ pub fn get_group_extension_range(config: &Config, opcode: Opcode) -> (u8, u8) {
     )
 }
 
-pub fn validate_disassembly(context: &mut TestContext, test_instruction: &TestInstruction) {
+pub fn validate_disassembly(
+    context: &mut TestContext,
+    config: &Config,
+    opcode: Opcode,
+    test_instruction: &TestInstruction,
+) {
     let name = test_instruction.name();
+
+    if config.test_gen.offset_opcodes.contains(&opcode.into()) {
+        // Will disassemble with brackets, but no modrm.
+        return;
+    }
+
     if let (Some(start), Some(end)) = (name.find('['), name.find(']')) {
         if start < end {
             let iced_addr = &name[start..=end];
@@ -1054,6 +1129,8 @@ pub fn log_instruction(
     );
     trace_banner!(context);
 
+    global_trace_log!(context, ">>> Generating test {}", instruction_log_string);
+
     // trace_log!(
     //     context,
     //     "Sequence bytes: {:02X?}",
@@ -1096,6 +1173,88 @@ pub fn log_instruction(
     }
 }
 
+pub fn calculate_ea(
+    context: &mut TestContext,
+    test_instruction: &TestInstruction,
+    test_registers: &TestRegisters,
+) -> Option<EffectiveAddress> {
+    match test_instruction.addressing_mode() {
+        Some(AddressingMode::Sixteen(AddressingMode16::Address { base, offset })) => {
+            let segment_reg: SegmentRegister = base.try_into().expect("Failed to convert EA base to segment register");
+            let iced_reg: iced_x86::Register = segment_reg.into();
+
+            let mut ea = EffectiveAddress {
+                base_segment: base
+                    .try_into()
+                    .expect("calculate_ea(): Couldn't convert 16-bit register to segment register"),
+                base_segment_selector: test_registers
+                    .regs
+                    .segment_selector(iced_reg)
+                    .expect("Failed to get segment selector for EA base register"),
+                base_segment_address: test_registers
+                    .regs
+                    .segment_base(iced_reg)
+                    .expect("Failed to get segment base for EA base register"),
+                base_segment_limit: test_registers
+                    .regs
+                    .segment_limit(iced_reg)
+                    .expect("Failed to get segment limit for EA base register"),
+                ..Default::default()
+            };
+
+            match &test_registers.regs {
+                Registers::V3A(regs32) => {
+                    ea.offset = offset.calculate(regs32);
+                    ea.linear_address = offset.calculate_effective_address(*base, regs32);
+                    Some(ea)
+                }
+                _ => {
+                    unimplemented!(
+                        "Unsupported register set type for EA calculation: {:?}",
+                        context.register_set_type
+                    );
+                }
+            }
+        }
+        Some(AddressingMode::ThirtyTwo(AddressingMode32::Address { base, offset })) => {
+            let segment_reg: SegmentRegister = base.try_into().expect("Failed to convert EA base to segment register");
+            let iced_reg: iced_x86::Register = segment_reg.into();
+            let mut ea = EffectiveAddress {
+                base_segment: base
+                    .try_into()
+                    .expect("Couldn't convert 32-bit segment register to segment register"),
+                base_segment_selector: test_registers
+                    .regs
+                    .segment_selector(iced_reg)
+                    .expect("Failed to get segment selector for EA base register"),
+                base_segment_address: test_registers
+                    .regs
+                    .segment_base(iced_reg)
+                    .expect("Failed to get segment base for EA base register"),
+                base_segment_limit: test_registers
+                    .regs
+                    .segment_limit(iced_reg)
+                    .expect("Failed to get segment limit for EA base register"),
+                ..Default::default()
+            };
+
+            match &test_registers.regs {
+                Registers::V3A(regs32) => {
+                    ea.linear_address = offset.calculate_effective_address(*base, regs32);
+                    Some(ea)
+                }
+                _ => {
+                    unimplemented!(
+                        "Unsupported register set type for EA calculation: {:?}",
+                        context.register_set_type
+                    );
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn generate_test(
     context: &mut TestContext,
     config: &Config,
@@ -1117,7 +1276,7 @@ pub fn generate_test(
         test_registers,
     );
 
-    validate_disassembly(context, test_instruction);
+    validate_disassembly(context, config, opcode, test_instruction);
 
     if context.dry_run {
         bail!("Dry run mode enabled, skipping test generation.");
@@ -1198,6 +1357,147 @@ pub fn generate_test(
         config.test_gen.mem_strategy_start,
         config.test_gen.mem_strategy_end,
     )?;
+
+    // Calculate the effective address of the instruction, if any.
+    let ea = calculate_ea(context, test_instruction, test_registers);
+
+    if let Some(ea) = &ea {
+        ea.trace_log(context);
+    }
+
+    // Patch memory if required by instruction type and cpu mode.
+    // In real mode, we limit pointers to 16 bits.
+    if matches!(strategy, MemoryStrategy::Random) {
+        if matches!(
+            context
+                .test_opcode_size_prefix
+                .relative_opcode_size(context.code_segment_size),
+            InstructionSize::ThirtyTwo
+        ) {
+            // 32-bit instruction
+            if test_instruction.is_near_indirect() | test_instruction.is_far_indirect() {
+                // Instruction is an indirect call or jump. We will need to patch memory with a valid 32-bit pointer.
+
+                let type_str = if test_instruction.is_near_indirect() {
+                    "Near"
+                }
+                else {
+                    "Far"
+                };
+                trace_log!(
+                    context,
+                    "{} indirect jump/call detected, addressing mode: {:X?}",
+                    type_str,
+                    test_instruction.addressing_mode()
+                );
+
+                match test_instruction.addressing_mode() {
+                    Some(AddressingMode::Sixteen(AddressingMode16::Address { base, offset })) => {
+                        if let CpuMode::Real = config.test_gen.cpu_mode {
+                            trace_log!(
+                                context,
+                                "REAL MODE: Patching memory for 32-bit pointer opcode {}. Effective Segment: {:?} Base: {:08X}",
+                                opcode,
+                                base,
+                                test_registers.regs.segment_base16(*base),
+                            );
+
+                            if let Registers::V3A(regs32) = &test_registers.regs {
+                                let linear_address = offset.calculate_effective_address(*base, regs32);
+                                log::warn!("16-bit effective address is {:08X}", linear_address,);
+
+                                let mut mem_value = context.client.read_u32(linear_address)?;
+                                trace_log!(
+                                    context,
+                                    "Patching value at 16-bit effective address {:08X}: {:08X}",
+                                    linear_address,
+                                    mem_value
+                                );
+
+                                mem_value &= 0x0000_FFFF;
+                                context.client.write_u32(linear_address, mem_value)?;
+                            }
+                        }
+                    }
+                    Some(AddressingMode::ThirtyTwo(AddressingMode32::Address { base, offset })) => {
+                        if let CpuMode::Real = config.test_gen.cpu_mode {
+                            trace_log!(
+                                context,
+                                "REAL MODE: Patching memory for 32-bit pointer opcode {}. Effective Segment: {:?} Base: {:08X}",
+                                opcode,
+                                base,
+                                test_registers.regs.segment_base32(*base),
+                            );
+
+                            trace_log!(context, "Patching memory for 32-bit pointer opcode {}", opcode);
+
+                            if let Registers::V3A(regs32) = &test_registers.regs {
+                                let linear_address = offset.calculate_effective_address(*base, regs32);
+                                trace_log!(context, "32-bit effective address is {:08X}", linear_address);
+
+                                let mut mem_value = context.client.read_u32(linear_address)?;
+                                trace_log!(
+                                    context,
+                                    "Patching value at 32-bit effective address {:08X}: {:08X}",
+                                    linear_address,
+                                    mem_value
+                                );
+
+                                mem_value &= 0x0000_FFFF;
+
+                                context.client.write_u32(linear_address, mem_value)?;
+                            }
+                        }
+                    }
+                    _ => {
+                        let err_str = format!(
+                            "Unsupported addressing mode for far indirect jump/call: {:?}",
+                            test_instruction.addressing_mode()
+                        );
+                        trace_error!(context, "{}", err_str);
+                        log::error!("{}", err_str);
+                    }
+                }
+            }
+
+            // Patch offsets for return instructions.
+            if test_instruction.is_return() || test_instruction.is_iret() {
+                let type_str = if test_instruction.is_near_return() {
+                    "Near"
+                }
+                else if test_instruction.is_far_return() {
+                    "Far"
+                }
+                else {
+                    "Interrupt"
+                };
+                trace_log!(context, "{} return detected.", type_str,);
+
+                if let CpuMode::Real = config.test_gen.cpu_mode {
+                    trace_log!(
+                        context,
+                        "REAL MODE: Patching memory for 32-bit return opcode {}. CS Base: {:08X}",
+                        opcode,
+                        test_registers.regs.cs_base(),
+                    );
+
+                    let stack_address = test_registers.regs.stack_address();
+                    trace_log!(context, "Stack address is {:08X}", stack_address);
+
+                    let mut mem_value = context.client.read_u32(stack_address)?;
+                    trace_log!(
+                        context,
+                        "Patching value at 32-bit stack address {:08X}: {:08X}",
+                        stack_address,
+                        mem_value
+                    );
+
+                    mem_value &= 0x0000_FFFF;
+                    context.client.write_u32(stack_address, mem_value)?;
+                }
+            }
+        }
+    }
 
     // Upload the instruction sequence.
     log::trace!("Uploading instruction sequence...");
@@ -1282,7 +1582,7 @@ pub fn generate_test(
     // Poll program state until finished with execution.
     // ---------------------------------------------------------------------------------------------
     let mut state = context.client.get_program_state()?;
-    let mut test_timeout = false;
+
     let start_time = Instant::now();
     while !matches!(
         state,
@@ -1389,8 +1689,10 @@ pub fn generate_test(
 
     // Collect BusOps from cycle states.
     // ---------------------------------------------------------------------------------------------
-    let bus_ops = BusOps::from(my_cycle_vec.as_slice());
+    let mut bus_ops = BusOps::from(my_cycle_vec.as_slice());
     log::trace!("Got {} bus operations from cycles", bus_ops.len(),);
+
+    bus_ops.detect_pushes(&test_registers.regs);
     bus_ops.log(context);
 
     if let Err(e) = bus_ops.validate(
@@ -1435,21 +1737,70 @@ pub fn generate_test(
 
     log::trace!("Got {} initial RAM entries", initial_state.initial_ram.len());
 
+    // Get exception hint from cycle states.
+    let exception_hint = get_exception_hint(context, &moo_cycle_states);
+
     // Detect any exceptions from bus operations.
     // ---------------------------------------------------------------------------------------------
-    let exception = bus_ops.detect_exception(context, context.server_cpu.into());
+    let operand_size = context
+        .test_opcode_size_prefix
+        .relative_opcode_size(context.code_segment_size);
+    let exception = bus_ops.detect_exception(
+        context,
+        context.server_cpu.into(),
+        operand_size,
+        &test_registers.regs,
+        &final_regs,
+    )?;
 
     if let Some(exception) = &exception {
+        if exception_hint.is_none() || !exception_hint.unwrap() {
+            let err_str = format!(
+                "Exception detected but no exception hint was set. Exception: {:?}",
+                exception
+            );
+            log::error!("{}", err_str);
+            trace_error!(context, "{}", err_str);
+        }
+
         log::trace!("Detected exception: {}", exception.exception_num);
 
-        context
-            .exceptions
-            .entry(exception.exception_num)
-            .and_modify(|e| *e += 1)
-            .or_insert(1);
+        if !config.test_gen.allowed_exceptions.contains(&exception.exception_num) {
+            let mut allowed = false;
+            let op_ext_match = op_ext.unwrap_or(0);
+            for entry in &config.test_gen.exception_overrides {
+                if entry.opcode == opcode.into() && entry.extension == op_ext_match {
+                    if entry.exceptions.contains(&exception.exception_num) {
+                        trace_log!(
+                            context,
+                            "Exception {} allowed for opcode {}.{:X} via override.",
+                            exception.exception_num,
+                            opcode,
+                            op_ext_match
+                        );
+                        allowed = true;
+                        break;
+                    }
+                }
+            }
+
+            if !allowed {
+                let err_str = format!("Exception {} not allowed by policy.", exception.exception_num);
+                log::error!("{}", err_str);
+                trace_error!(context, "{}", err_str);
+                return Err(anyhow::anyhow!(err_str));
+            }
+        }
 
         trace_log!(context, "Detected exception: {}", exception.exception_num);
         trace_log!(context, "Flags on stack at {:06X}", exception.flag_address);
+    }
+    else {
+        if let Some(true) = exception_hint {
+            let err_str = String::from("No exception detected but exception hint was set.");
+            log::warn!("{}", err_str);
+            trace_error!(context, "{}", err_str);
+        }
     }
 
     // Log final register state.
@@ -1486,22 +1837,25 @@ pub fn generate_test(
     // ---------------------------------------------------------------------------------------------
     let final_ram = final_state_from_ops(initial_state.initial_state, &bus_ops)?;
 
+    // Convert EA to MooEA
+    let moo_ea = ea.as_ref().map(|ea| ea.into_moo());
+
     // Create the initial test state.
     let initial_state = create_state(
         MooStateType::Initial,
         &test_registers.regs,
+        moo_ea,
         None,
         &initial_state.initial_ram,
     )?;
     // Create the final test state.
-    let final_state = create_state(MooStateType::Final, &test_registers.regs, Some(&final_regs), &final_ram)?;
-
-    // Add the mnemonic to the hash map.
-    context
-        .mnemonic_set
-        .entry(test_instruction.mnemonic().into())
-        .and_modify(|e| *e += 1)
-        .or_insert(1);
+    let final_state = create_state(
+        MooStateType::Final,
+        &test_registers.regs,
+        None,
+        Some(&final_regs),
+        &final_ram,
+    )?;
 
     // Create the test case.
     let test = MooTest::new(
@@ -1516,6 +1870,30 @@ pub fn generate_test(
     );
 
     Ok(test)
+}
+
+/// Get a hint if an exception was expected from the cycle states.
+pub fn get_exception_hint(context: &mut TestContext, cycles: &[MooCycleState]) -> Option<bool> {
+    match context.server_cpu {
+        ServerCpuType::Intel80386 => {
+            // Check for ten consecutive INTA cycles.
+            let mut inta_count = 0;
+            for cycle in cycles {
+                if cycle.bus_state == 0 {
+                    inta_count += 1;
+                    if inta_count >= 10 {
+                        trace_log!(context, "Detected 10 consecutive INTA cycles, exception hint set.");
+                        return Some(true);
+                    }
+                }
+                else {
+                    inta_count = 0;
+                }
+            }
+            Some(false)
+        }
+        _ => None,
+    }
 }
 
 pub fn adjust_memory(
@@ -1589,6 +1967,7 @@ pub fn log_cycle_states(context: &mut TestContext, cycles: &[MooCycleState]) {
 pub fn create_state(
     state_type: MooStateType,
     initial_regs: &Registers,
+    ea: Option<MooEffectiveAddress>,
     final_regs: Option<&Registers>,
     ram: &Vec<[u32; 2]>,
 ) -> anyhow::Result<MooTestState> {
@@ -1614,6 +1993,7 @@ pub fn create_state(
         state_type,
         &initial_reg_init,
         final_reg_init.as_ref(),
+        ea,
         Vec::new(),
         ram_vec,
     );

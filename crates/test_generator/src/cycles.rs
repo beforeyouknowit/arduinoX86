@@ -54,10 +54,10 @@ impl From<MyServerCycleState> for MooCycleState {
                     pins0 |= MooCycleState::PIN_BHE; // Set the BHE bit
                 }
                 if state.pins & (MooCycleState::PIN_READY as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_READY; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_READY; // Set the READ& bit
                 }
                 if state.pins & (MooCycleState::PIN_LOCK as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_LOCK; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_LOCK; // Set the LOCK bit
                 }
 
                 let bhe = state.bus_command_bits & 0x80 != 0;
@@ -115,10 +115,10 @@ impl From<MyServerCycleState> for MooCycleState {
                     pins0 |= MooCycleState::PIN_BHE; // Set the BHE bit
                 }
                 if state.pins & (MooCycleState::PIN_READY as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_READY; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_READY; // Set the READY bit
                 }
                 if state.pins & (MooCycleState::PIN_LOCK as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_LOCK; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_LOCK; // Set the LOCK bit
                 }
 
                 let bhe = state.bus_command_bits & 0x80 != 0;

@@ -21,3 +21,4 @@ arduinox86_client = { path = "../arduinox86_client", features = ["use_moo", "use
 moo-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+time = { version = "0.3", features = ["macros", "formatting", "local-offset"] }

@@ -232,6 +232,7 @@ pub fn randomize_v3a(
     }
 
     let random_opts = RandomizeOpts {
+        real_mode: matches!(config.cpu_mode, CpuMode::Real),
         weight_zero: config.reg_zero_chance,
         weight_ones: config.reg_ones_chance,
         weight_inject: config.reg_inject_chance,

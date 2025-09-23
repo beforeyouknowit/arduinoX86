@@ -8,8 +8,8 @@ base_seed = 0xDEADBEEF
 # Termination method - Queue, Halt
 termination_condition = "Halt"
 test_output_dir = "e:/test_output_386"
-trace_output_dir = "e:/test_output_386/trace/"
-verify_trace_output_dir = "e:/test_output_386/verify_trace/"
+trace_output_dir = "trace"
+verify_trace_output_dir = "verify_trace"
 trace_file_suffix = "_trace.log"
 moo_version = 1
 moo_arch = "386E"
@@ -21,6 +21,7 @@ instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address ran
 
 extended_opcode = false # Use extended opcodes (0x0F)
 opcode_range = [0x00, 0x0FFF]
+
 #opcode_override = 0x5c
 group_extension_range = [0, 7] # Range for group extensions
 
@@ -139,13 +140,13 @@ valid_opcodes = [
 excluded_opcodes = [
     0xF1, # LOCK prefix
     0x63, # ARPL, not valid in real mode
-    0x0F22, # MOV to/from control registers
-    0x0F23, # MOV to/from debug registers
-
+    0x0F20, 0x0F22, # MOV to/from control registers
+    0x0F21, 0x0F23, # MOV to/from debug registers
 ]
+
 exclude_esc_opcodes = true
 
-test_count = 100
+test_count = 500
 append_file = true
 
 # shift/rotate mask
@@ -159,6 +160,8 @@ prefix_beta = [0.1, 1.5] # Beta distribution for prefix count
 lock_prefix_chance = 0.025 # Chance of LOCK prefix
 lock_prefix_opcode = 0xF0
 rep_prefix_chance = 0.25 # Chance of REP prefix
+
+sib_chance = 0.20 # Chance of SIB byte reference in generated 32-bit mod/rm bytes
 
 reg_zero_chance = 0.05 # Chance of zeroed register
 reg_ones_chance = 0.00 # Chance of an all-bit-set register
@@ -177,7 +180,9 @@ sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
 sp_max_value = 0xFFFFFFFF # Maximum value for SP
 
-near_branch_ban = 0x08 # Ban certain near branch immediate values
+near_branch_ban = [
+    0x00, # Bad things happen when we try to jump to 0.
+]
 
 # Segment descriptor table strategies
 segment_limit_min = 0x00000FFF # Minimum segment limit size
@@ -201,8 +206,11 @@ group_opcodes = [
     0x0F00, # Group 6: SLDT, STR, LLDT, LTR, VERR, VERW
     0x0F01, # Group 7: SGDT, SIDT, LGDT, LIDT, SMSW, LMSW
     0x0FBA, # Group 8: BT, BTS, BTR, BTC
+]
 
-
+protected_mode_opcodes = [
+    0x0F02, # LAR
+    0x0F03, # LSL
 ]
 
 esc_opcodes = [
@@ -219,7 +227,31 @@ flow_control_opcodes = [
     0xE8, 0xE9, 0xEA, 0xEB, # CALL, JMP, JMP FAR, JMP SHORT
     0xFE, 0xFF, # CALL, JMP,
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
+]
 
+# These opcodes use the unique 'offset8/16/32' indirect addressing mode with no mod/rm.
+offset_opcodes = [
+    0xA0, 0xA1, # MOV AL/AX/EAX, offs
+    0xA2, 0xA3, # MOV offs, AL/AX/EAX
+]
+
+# These opcodes can use a register value as a bit index into memory with arbitrary size
+# and must be masked appropriately.
+bitfield_opcodes = [
+    0x0FA3, # BT
+    0x0FAB, # BTS
+    0x0FB3, # BTR
+    0x0FBB, # BTC
+]
+
+# These opcodes use the unique 'ptr16/32' addressing mode with no mod/rm.
+ptr_opcodes = [
+    0x9A, # CALL ptr
+    0xEA, # JMP ptr
+]
+
+far_indirect_opcodes = [
+    0xFF, # CALL, JMP (group opcodes - must have secondary mnemonic check)
 ]
 
 # These opcodes are prefixes and should not be generated as standalone instructions.
@@ -306,6 +338,7 @@ disable_lock_prefix = [
     0x9E, 0x9F, # SAHF and LAHF
     0xA8, 0xA9, # Test imm8
     0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, # MOV imm8 to register
+    0xE0, 0xE1, 0xE2, 0xE3, # LOOP, JCXZ
     0xF5, # CMC
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, # CLC, STC, CLI, STI, CLD, STD
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
@@ -375,12 +408,21 @@ sp_overrides = [
 ]
 
 modrm_overrides = [
-    { opcode = 0x8F, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC6, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC7, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0x8C, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x8E, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x62, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
+    { opcode = 0x8F, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC6, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC7, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0x8C, extension = 0, allow_reg_form = true, mask = 0xFF, invalid_chance = 0.05 }, # On 386, we have two more segment selectors, so don't mask
+    { opcode = 0x8E, extension = 0, allow_reg_form = true, mask = 0xFF, invalid_chance = 0.05 }, # On 386, we have two more segment selectors, so don't mask
+    { opcode = 0x62, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
+    { opcode = 0xC4, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.0 }, # LES - reg form invalid
+    { opcode = 0xC5, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.0 }, # LDS - reg form invalid - weird stuff gets decoded too?
+    { opcode = 0x0FB2, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LSS - reg form invalid
+    { opcode = 0x0FB4, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LFS - reg form invalid
+    { opcode = 0x0FB5, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LGS - reg form invalid
+    { opcode = 0xFF, extension = 2, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # CALL (no register form)
+    { opcode = 0xFF, extension = 3, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # CALL FAR (no register form)
+    { opcode = 0xFF, extension = 4, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # JUMP (no register form)
+    { opcode = 0xFF, extension = 5, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # JUMP FAR (no register form)
 ]
 
 count_overrides = [
@@ -392,8 +434,44 @@ count_overrides = [
     { count = 1000, opcode_range = [0xF4, 0xF4] }, # HALT
 ]
 
+allowed_exceptions = [
+    6, # Invalid Opcode
+    12, # Stack Fault
+    13, # General Protection Fault
+]
+
+exception_overrides = [
+    { opcode = 0xF6, extension = 6, allow_all = false, exceptions = [0] }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, allow_all = false, exceptions = [0] }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, allow_all = false, exceptions = [0] }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, allow_all = false, exceptions = [0] }, # IDIV r/m16/32
+    { opcode = 0xD4, extension = 0, allow_all = false, exceptions = [0] }, # AAM
+    { opcode = 0x62, extension = 0, allow_all = false, exceptions = [5] }, # BOUND
+    { opcode = 0xCC, extension = 0, allow_all = false, exceptions = [3] }, # INT3
+    { opcode = 0xCC, extension = 0, allow_all = true, exceptions = [] }, # INT n
+    { opcode = 0xCE, extension = 0, allow_all = false, exceptions = [4] }, # INTO
+]
+
+# For instructions that generate exceptions with no easy way to control the exception rate through simple masking,
+# we can sieve the generated instructions to achieve a target exception rate.
+# The exception rate is the probability that a test matching the opcode, extension and exception number will be accepted
+# if it generates an exception.
 exception_sieve = [
-    { opcode = 0x62, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+    { opcode = 0x62, extension = 0, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+    { opcode = 0xF6, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m16/32
+    { opcode = 0xF6, extension = 6, exception = 13, exception_rate = 0.25 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 13, exception_rate = 0.25 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 13, exception_rate = 0.25 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 13, exception_rate = 0.25 }, # IDIV r/m16/32
+    { opcode = 0xF6, extension = 6, exception = 6, exception_rate = 0.0 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 6, exception_rate = 0.0 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 6, exception_rate = 0.0 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 6, exception_rate = 0.0 }, # IDIV r/m16/32
+    { opcode = 0x8C, extension = 0, exception = 6, exception_rate = 0.05 }, # MOV r/m16, Sreg
+    { opcode = 0x8E, extension = 0, exception = 6, exception_rate = 0.05 }, # MOV Sreg, r/m16
 ]
 
 inject_values = [
@@ -638,8 +716,8 @@ serial_debug_default = false
 validate_count = 2 # Number of identical tests required to accept test
 max_sieve = 100 # Maximum number of times to sieve a test before giving up.
 max_gen = 10 # Maximum number of times to regenerate a failed instruction.
-test_retry = 5 # Number of retries per single test generation.
-load_retry = 5 # Number of retries for LOADALL.
+test_retry = 2 # Number of retries per single test generation.
+load_retry = 2 # Number of retries for LOADALL.
 polling_sleep = 10 # Polling rate in milliseconds per poll
 test_timeout = 2000 # Timeout for a single test in milliseconds
 print_instruction = true
