@@ -93,6 +93,13 @@ pub trait Registers32 {
     fn gs(&self) -> u16;
     fn ss(&self) -> u16;
 
+    fn cs_base(&self) -> u32;
+    fn ds_base(&self) -> u32;
+    fn es_base(&self) -> u32;
+    fn fs_base(&self) -> u32;
+    fn gs_base(&self) -> u32;
+    fn ss_base(&self) -> u32;
+
     fn cr0_mut(&mut self) -> &mut u32;
     //fn cr3_mut(&mut self) -> &mut u32;
     fn dr6_mut(&mut self) -> &mut u32;

@@ -1300,6 +1300,11 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdSetMemory)
     }
 
+    pub fn write_u32(&mut self, address: u32, val: u32) -> Result<bool, CpuClientError> {
+        let buf: [u8; 4] = val.to_le_bytes();
+        self.set_memory(address, &buf)
+    }
+
     pub fn get_cycle_states(&mut self) -> Result<Vec<ServerCycleState>, CpuClientError> {
         let mut param_buf: [u8; 8] = [0; 8];
 
@@ -1409,6 +1414,12 @@ impl CpuClient {
 
         // Command terminates with final result code
         self.read_result_code(ServerCommand::CmdReadMemory)
+    }
+
+    pub fn read_u32(&mut self, address: u32) -> Result<u32, CpuClientError> {
+        let mut buf: [u8; 4] = [0; 4];
+        self.read_memory(address, 4, &mut buf.as_mut_slice())?;
+        Ok(u32::from_le_bytes(buf))
     }
 
     /// Command the server to erase all memory (set to 0x00). If the current memory backend is

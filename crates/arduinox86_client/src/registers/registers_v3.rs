@@ -192,6 +192,25 @@ macro_rules! impl_registers32 {
                 self.ss
             }
 
+            fn cs_base(&self) -> u32 {
+                self.cs_desc.base()
+            }
+            fn ds_base(&self) -> u32 {
+                self.ds_desc.base()
+            }
+            fn es_base(&self) -> u32 {
+                self.es_desc.base()
+            }
+            fn fs_base(&self) -> u32 {
+                self.fs_desc.base()
+            }
+            fn gs_base(&self) -> u32 {
+                self.gs_desc.base()
+            }
+            fn ss_base(&self) -> u32 {
+                self.ss_desc.base()
+            }
+
             fn cs_mut(&mut self) -> &mut u16 {
                 &mut self.cs
             }
@@ -343,6 +362,43 @@ impl Registers32 for RemoteCpuRegistersV3 {
     enum_get!(fs -> u16, fs);
     enum_get!(gs -> u16, gs);
     enum_get!(ss -> u16, ss);
+
+    fn cs_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.cs_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.cs_desc.base(),
+        }
+    }
+    fn ds_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.ds_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.ds_desc.base(),
+        }
+    }
+    fn es_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.es_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.es_desc.base(),
+        }
+    }
+    fn fs_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.fs_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.fs_desc.base(),
+        }
+    }
+    fn gs_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.gs_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.gs_desc.base(),
+        }
+    }
+    fn ss_base(&self) -> u32 {
+        match self {
+            RemoteCpuRegistersV3::A(regs) => regs.ss_desc.base(),
+            RemoteCpuRegistersV3::B(regs) => regs.ss_desc.base(),
+        }
+    }
 
     enum_get_mut!(cs_mut -> &mut u16, cs_mut);
     enum_get_mut!(ds_mut -> &mut u16, ds_mut);
@@ -638,6 +694,7 @@ impl RemoteCpuRegistersV3A {
     pub const FLAGS_RESERVED_CR0: u32 = 0x7FFE_FFF0; // Reserved bits in CR0
     pub const FLAGS_RESERVED_SET: u32 = 0xFFFC_0002; // Reserved bit 1 set
     pub const FLAGS_RESERVED_MASK: u32 = 0xFFFF_7FD7;
+    pub const FLAGS_REALMODE_MASK: u32 = 0xFFFC_0FFF; // Clear IOPL, NT, VIRT86 and RESUME flags.
     pub const FLAG_CARRY: u32 = 0b0000_0000_0000_0001;
     pub const FLAG_RESERVED1: u32 = 0b0000_0000_0000_0010;
     pub const FLAG_PARITY: u32 = 0b0000_0000_0000_0100;
@@ -724,10 +781,15 @@ impl RemoteCpuRegistersV3A {
     }
 
     #[cfg(feature = "use_iced")]
-    pub fn mask_registers(&mut self, segment: iced_x86::Register, mask_registers: &[iced_x86::Register]) {
+    pub fn mask_registers(
+        &mut self,
+        segment: iced_x86::Register,
+        mask_registers: &[iced_x86::Register],
+        mask_shift: u32,
+    ) {
         use iced_x86::Register;
 
-        let limit_mask = match segment {
+        let mut limit_mask = match segment {
             Register::CS => self.cs_desc.limit(),
             Register::DS => self.ds_desc.limit(),
             Register::ES => self.es_desc.limit(),
@@ -736,6 +798,8 @@ impl RemoteCpuRegistersV3A {
             Register::SS => self.ss_desc.limit(),
             _ => return, // Unsupported register for masking
         };
+
+        limit_mask >>= mask_shift;
 
         for &reg in mask_registers {
             match reg {
@@ -761,6 +825,10 @@ impl RemoteCpuRegistersV3A {
         if opts.randomize_flags {
             self.eflags = (rand.random::<u32>() | RemoteCpuRegistersV3A::FLAGS_RESERVED_SET) & RemoteCpuRegistersV3A::FLAGS_RESERVED_MASK; // Set reserved bit
         }
+        if opts.real_mode {
+            self.eflags = self.eflags & RemoteCpuRegistersV3A::FLAGS_REALMODE_MASK; // Clear mode, iopl and nt bits for real mode
+        }
+
         if opts.clear_trap_flag {
             self.clear_trap_flag();
         }

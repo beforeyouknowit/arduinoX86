@@ -193,6 +193,7 @@ impl From<SegmentSize> for u32 {
 
 #[derive(Clone, Default)]
 pub struct RandomizeOpts {
+    pub real_mode: bool,
     pub weight_zero: f32,
     pub weight_ones: f32,
     pub weight_inject: f32,
