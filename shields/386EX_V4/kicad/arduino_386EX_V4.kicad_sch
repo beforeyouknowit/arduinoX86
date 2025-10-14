@@ -8768,6 +8768,12 @@
 		(uuid "071be6fc-c945-4551-aa9e-9e736328532b")
 	)
 	(junction
+		(at 300.99 143.51)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "0cc89e22-6796-4e62-93ba-ee6300fe7b6d")
+	)
+	(junction
 		(at 386.08 45.72)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -8826,6 +8832,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "4bc981d8-43b8-4ce6-ad55-aaaf117240f3")
+	)
+	(junction
+		(at 304.8 143.51)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "4c40d968-c13d-4f7a-9865-98af59e2e410")
 	)
 	(junction
 		(at 320.04 177.8)
@@ -8922,6 +8934,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "70dcfc2d-6b5a-40a8-9cac-3f29036dda54")
+	)
+	(junction
+		(at 304.8 158.75)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "744ca870-8cea-43cf-8e9e-d94ac44c8bd9")
 	)
 	(junction
 		(at 257.81 256.54)
@@ -9048,6 +9066,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "c18bade1-5eec-41f8-a0ca-ce98f17f5e3b")
+	)
+	(junction
+		(at 300.99 156.21)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "c41c5d43-c549-42d1-b67a-d530655b35ca")
 	)
 	(junction
 		(at 257.81 259.08)
@@ -10043,6 +10067,16 @@
 	)
 	(wire
 		(pts
+			(xy 304.8 143.51) (xy 304.8 146.05)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "04a5a500-3e0a-48aa-8479-1ee7e875a40a")
+	)
+	(wire
+		(pts
 			(xy 201.93 287.02) (xy 201.93 294.64)
 		)
 		(stroke
@@ -10493,7 +10527,7 @@
 	)
 	(wire
 		(pts
-			(xy 287.02 143.51) (xy 320.04 143.51)
+			(xy 287.02 143.51) (xy 300.99 143.51)
 		)
 		(stroke
 			(width 0)
@@ -11703,6 +11737,16 @@
 	)
 	(wire
 		(pts
+			(xy 304.8 153.67) (xy 304.8 158.75)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4fd612d7-0da5-477e-baed-ef832f567d92")
+	)
+	(wire
+		(pts
 			(xy 95.25 68.58) (xy 100.33 68.58)
 		)
 		(stroke
@@ -12213,6 +12257,16 @@
 	)
 	(wire
 		(pts
+			(xy 304.8 143.51) (xy 320.04 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "67c097a3-2000-44cc-a646-7ddd961552aa")
+	)
+	(wire
+		(pts
 			(xy 63.5 233.68) (xy 63.5 241.3)
 		)
 		(stroke
@@ -12603,6 +12657,16 @@
 	)
 	(wire
 		(pts
+			(xy 300.99 153.67) (xy 300.99 156.21)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7d005b0b-4b7a-4922-99de-771d2ef4c472")
+	)
+	(wire
+		(pts
 			(xy 317.5 165.1) (xy 317.5 161.29)
 		)
 		(stroke
@@ -12730,6 +12794,16 @@
 			(type default)
 		)
 		(uuid "84152b53-5606-4145-ad4d-06d5ee1cc57a")
+	)
+	(wire
+		(pts
+			(xy 300.99 143.51) (xy 304.8 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8505de8d-f5a3-40d8-a7ff-7f53bf54756e")
 	)
 	(wire
 		(pts
@@ -13183,6 +13257,16 @@
 	)
 	(wire
 		(pts
+			(xy 300.99 156.21) (xy 336.55 156.21)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "9999decd-d2a5-411d-977f-4c61245b4b09")
+	)
+	(wire
+		(pts
 			(xy 50.8 323.85) (xy 50.8 332.74)
 		)
 		(stroke
@@ -13413,7 +13497,7 @@
 	)
 	(wire
 		(pts
-			(xy 297.18 156.21) (xy 336.55 156.21)
+			(xy 297.18 156.21) (xy 300.99 156.21)
 		)
 		(stroke
 			(width 0)
@@ -13993,7 +14077,7 @@
 	)
 	(wire
 		(pts
-			(xy 297.18 158.75) (xy 336.55 158.75)
+			(xy 297.18 158.75) (xy 304.8 158.75)
 		)
 		(stroke
 			(width 0)
@@ -14453,6 +14537,16 @@
 	)
 	(wire
 		(pts
+			(xy 300.99 143.51) (xy 300.99 146.05)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d39e6bf2-e0f9-41f9-9c77-0d97d47635bb")
+	)
+	(wire
+		(pts
 			(xy 95.25 214.63) (xy 95.25 220.98)
 		)
 		(stroke
@@ -14740,6 +14834,16 @@
 			(type default)
 		)
 		(uuid "e5447c7b-fe68-4015-b64e-f2af06436f8e")
+	)
+	(wire
+		(pts
+			(xy 304.8 158.75) (xy 336.55 158.75)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e55fa423-4050-4329-94ae-3ef25fe45c36")
 	)
 	(wire
 		(pts
@@ -19544,6 +19648,75 @@
 		)
 	)
 	(symbol
+		(lib_id "Device:R")
+		(at 304.8 149.86 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "3dc265d7-4a1b-46a0-a03f-a40df4b7554d")
+		(property "Reference" "R15"
+			(at 307.34 148.5899 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "3.3 K Ohm"
+			(at 307.34 151.1299 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
+			(at 306.578 149.86 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 304.8 149.86 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 304.8 149.86 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "fa16363e-112b-40af-9826-0263234bda1b")
+		)
+		(pin "1"
+			(uuid "43000b20-f31f-45f7-a087-f681792d63d7")
+		)
+		(instances
+			(project "arduino_386EX_V4"
+				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
+					(reference "R15")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "mega:Arduino_Mega2560_Shield")
 		(at 133.35 102.87 0)
 		(unit 1)
@@ -20778,6 +20951,76 @@
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
 					(reference "C1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 300.99 149.86 0)
+		(mirror x)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "799da0de-c5b4-4d8f-bc48-c0fd6429b181")
+		(property "Reference" "R14"
+			(at 298.45 148.5899 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Value" "3.3 K Ohm"
+			(at 298.45 151.1299 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
+			(at 299.212 149.86 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 300.99 149.86 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 300.99 149.86 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "e41c89ac-ad74-4a9c-b859-c81b123593ce")
+		)
+		(pin "1"
+			(uuid "5c2d84cb-9ec7-4e52-9676-46eacc6a6001")
+		)
+		(instances
+			(project "arduino_386EX_V4"
+				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
+					(reference "R14")
 					(unit 1)
 				)
 			)
