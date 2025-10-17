@@ -8,6 +8,9 @@
 /sketches/due_test/
 /json/
 
+# JetBrains IDE stuff
+.idea/copilot*
+
 # Arduino stuff
 
 # Ignore IDE folder
