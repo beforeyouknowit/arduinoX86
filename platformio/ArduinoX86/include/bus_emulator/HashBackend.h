@@ -107,9 +107,9 @@ public:
       word = gen_default_u16(addr16);
     }
     if (address & 1) {
-      word = (word & 0x00FF) | (value << 8); // write high byte
+      word = (word & 0x00FF) | (static_cast<uint16_t>(value) << 8); // write high byte
     } else {
-      word = (word & 0xFF00) | value;        // write low byte
+      word = (word & 0xFF00) | static_cast<uint16_t>(value);        // write low byte
     }
     mem_table_.insert(addr16, word);
   }
