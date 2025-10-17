@@ -1615,7 +1615,6 @@ void handle_smm_load_386() {
     }
     else if (CPU.bus_state_latched == MEMR && !CPU.data_bus_resolved) {
 
-
       if (CPU.address_latch() == EXCEPTION_ADDR_GPF) {
         Controller.getBoard().debugPrintln(DebugType::ERROR, "## LOAD_SMM_386: General Protection Fault detected during SMM LOAD! ##");
         set_error("LOAD_SMM_386 General Protection Fault");
@@ -1623,12 +1622,7 @@ void handle_smm_load_386() {
         return;
       }
 
-      if (CPU.address_latch() == SMM_LOAD_CHECKPOINT) {
-        Controller.getBoard().debugPrintf(DebugType::LOAD, false, "## LOAD_SMM_386: Passed checkpoint. Deasserting SMI. Next fetch should be for program");
-        Controller.writePin(OutputPin::Smi, true); // SMI is active-low
-        CPU.loadall_checkpoint = 1;
-      }
-      else if ((CPU.address_latch() >= SMRAM_386EX_DUMP_START) && (CPU.address_latch() < SMRAM_386EX_END_ADDRESS)) {
+      if ((CPU.address_latch() >= SMRAM_386EX_DUMP_START) && (CPU.address_latch() < SMRAM_386EX_END_ADDRESS)) {
         // Read from bus emulator with SMIACT set to get word from register struct.
         CPU.data_bus = ArduinoX86::Bus->mem_read_bus(CPU.address_latch(), !Controller.readBHEPin(), false, true);
         Controller.getBoard().debugPrintf(DebugType::LOAD, true, "## LOAD_SMM_386: Writing SMM dump word to bus: %04X\n\r", CPU.data_bus);
@@ -1639,6 +1633,12 @@ void handle_smm_load_386() {
         CPU.data_bus = 0x0000;
         Controller.writeDataBus(CPU.data_bus, CPU.data_width);
         CPU.data_bus_resolved = true;
+      }
+
+      if (CPU.loadall_checkpoint == 0 && (CPU.address_latch() == SMM_LOAD_CHECKPOINT)) {
+        Controller.getBoard().debugPrintf(DebugType::LOAD, false, "## LOAD_SMM_386: Passed checkpoint. Deasserting SMI. Next fetch should be for program\n\r");
+        Controller.writePin(OutputPin::Smi, true); // SMI is active-low
+        CPU.loadall_checkpoint = 1;
       }
     }
   }
@@ -2104,7 +2104,8 @@ void handle_execute_automatic() {
       if (CPU.use_smm()) {
         Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT with SMM enabled.");
         if (READ_SMI_PIN) {
-          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low.", true);
+          Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: HALT - Writing SMI pin low", true);
+          //Controller.writePin(OutputPin::Ready, true);
           Controller.writePin(OutputPin::Smi, false);
         }
       }
@@ -2149,18 +2150,29 @@ void handle_execute_automatic() {
           else {
             Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: Injecting HALT opcode at %08X\n\r after detecting jump.", CPU.address_latch());
             if (CPU.cpu_type == CpuType::i80386) {
-              // The 386 only fetches at even addresses. Writing two NOPs is a bit of a hack to cover jumping to an odd address.
-              ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), OPCODE_DOUBLE_HALT, true, false);
+              // The 386 only fetches at even addresses. We rely on a hint from the client to determine which byte to patch.
+              // If no hint is provided, we'll be forced to write a word with two HALTs to cover both cases.
+              if (CPU.have_jump_hint()) {
+                if (CPU.jump_hint_is_odd()) {
+                  
+                  ArduinoX86::Bus->mem_write_u8(CPU.address_latch() + 1, OPCODE_HALT);
+                }
+                else {
+                  ArduinoX86::Bus->mem_write_u8(CPU.address_latch(), OPCODE_HALT);
+                }
+              }
+              else {
+                // No jump hint, so write double HALT to cover both even and odd address jumps.
+                ArduinoX86::Bus->mem_write_bus(CPU.address_latch(), OPCODE_DOUBLE_HALT, true);
+              }
             }
             else {
               ArduinoX86::Bus->mem_write_u8(CPU.address_latch(), OPCODE_HALT);
             }
           }
         }
-
         CPU.predicted_fetch = 0;  // Reset predicted fetch
       }
-
 
       if (CPU.address_latch() & 1) {
         // Fetch at odd address. Predict next fetch at even address.

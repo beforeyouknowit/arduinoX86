@@ -221,6 +221,7 @@ const char* CommandServer<BoardType, ShieldType>::get_command_name(ServerCommand
       case ServerCommand::CmdServerStatus: return "CmdServerStatus";
       case ServerCommand::CmdClearCycleLog: return "CmdClearCycleLog";
       case ServerCommand::CmdSetProgramBounds: return "CmdSetProgramBounds";
+      case ServerCommand::CmdSetJumpHint: return "CmdSetJumpHint";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -369,7 +370,9 @@ bool CommandServer<BoardType, ShieldType>::dispatch_command(ServerCommand cmd) {
     case ServerCommand::CmdClearCycleLog:
         return cmd_clear_cycle_log();
     case ServerCommand::CmdSetProgramBounds:
-        return cmd_set_program_bounds();        
+        return cmd_set_program_bounds();      
+    case ServerCommand::CmdSetJumpHint:
+        return cmd_set_jump_hint();  
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -445,6 +448,7 @@ uint8_t CommandServer<BoardType, ShieldType>::get_command_input_bytes(ServerComm
         case ServerCommand::CmdServerStatus: return 0;
         case ServerCommand::CmdClearCycleLog: return 0; // No parameters needed to clear cycle log
         case ServerCommand::CmdSetProgramBounds: return 8; // Parameters: start_addr (4 bytes), end_addr (4 bytes).
+        case ServerCommand::CmdSetJumpHint: return 2; // Parameter. First byte: 0 (clear hint) (1) set hint. 2nd byte: 0 (even address), 1 (odd address)
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -1766,6 +1770,22 @@ bool CommandServer<BoardType, ShieldType>::cmd_set_program_bounds() {
   controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_program_bounds(): Setting bounds from start: %08lX to end: %08lX\n\r", start, end);
 
   CPU.set_program_bounds(start, end);
+  return true;
+}
+
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_jump_hint() {
+  bool enabled = static_cast<bool>(commandBuffer_[0]);
+  bool odd_address = static_cast<bool>(commandBuffer_[1]);
+
+  if (enabled) {
+    CPU.set_jump_hint(true, odd_address);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_jump_hint(): Enabling jump hint. Odd address: %d\n\r", odd_address ? 1 : 0);
+  } else {
+    CPU.set_jump_hint(false, false);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_jump_hint(): Disabling jump hint.\n\r");
+  }
+
   return true;
 }
 

@@ -114,6 +114,7 @@ public:
     CmdServerStatus    = 0x26,
     CmdClearCycleLog   = 0x27,
     CmdSetProgramBounds = 0x28,
+    CmdSetJumpHint     = 0x29,
     CmdInvalid
   };
 
@@ -273,5 +274,6 @@ private:
   bool cmd_server_status(void);
   bool cmd_clear_cycle_log(void);
   bool cmd_set_program_bounds(void);
+  bool cmd_set_jump_hint(void);
   bool cmd_null(void);
 };

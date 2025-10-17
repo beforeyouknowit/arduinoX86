@@ -116,6 +116,7 @@ pub enum ServerCommand {
     CmdGetServerStatus = 0x26,
     CmdClearCycleLog = 0x27,
     CmdSetProgramBounds = 0x28,
+    CmdSetJumpHint = 0x29,
     CmdInvalid,
 }
 
@@ -1470,5 +1471,19 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdSetProgramBounds)?;
         self.send_buf(&buf)?;
         self.read_result_code(ServerCommand::CmdSetProgramBounds)
+    }
+
+    /// Send a hint to the server about whether the next jump or call will be to an odd or even address.
+    /// To clear the hint, pass None.
+    pub fn set_jump_hint(&mut self, odd_address: Option<bool>) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 2] = [0; 2];
+
+        if let Some(hint) = odd_address {
+            buf[0] = 1;
+            buf[1] = if hint { 1 } else { 0 };
+        }
+        self.send_command_byte(ServerCommand::CmdSetJumpHint)?;
+        self.send_buf(&buf)?;
+        self.read_result_code(ServerCommand::CmdSetJumpHint)
     }
 }

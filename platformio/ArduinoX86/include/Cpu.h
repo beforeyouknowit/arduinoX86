@@ -133,6 +133,19 @@ public:
     return (address >= program_start_) && (address < program_end_);
   }
 
+  void set_jump_hint(bool enabled, bool odd_address) {
+    jump_hint_enabled_ = enabled;
+    jump_hint_odd_address_ = odd_address;
+  }
+
+  bool have_jump_hint() const {
+    return jump_hint_enabled_;
+  }
+
+  bool jump_hint_is_odd() const {
+    return jump_hint_odd_address_;
+  }
+
 private:
 
   uint32_t program_start_ = 0;
@@ -141,4 +154,7 @@ private:
   bool is_shutdown_ = false; // Whether the CPU is in a shutdown state.
   uint64_t cycle_ct_ = 0; // Number of cycles executed since reset.
   uint32_t address_latch_ = 0; // Value of address bus as of ALE/ADS.
+
+  bool jump_hint_enabled_ = false; // Whether the jump hint is or not
+  bool jump_hint_odd_address_ = false; // If the jump hint is enabled
 };
