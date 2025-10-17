@@ -1136,6 +1136,53 @@ impl RemoteCpuRegistersV3B {
     }
 }
 
+impl From<&RemoteCpuRegistersV3B> for RemoteCpuRegistersV3A {
+    fn from(regs: &RemoteCpuRegistersV3B) -> RemoteCpuRegistersV3A {
+        RemoteCpuRegistersV3A {
+            cr0: regs.cr0,
+            eflags: regs.eflags,
+            eip: regs.eip,
+            edi: regs.edi,
+            esi: regs.esi,
+            ebp: regs.ebp,
+            esp: regs.esp,
+            ebx: regs.ebx,
+            edx: regs.edx,
+            ecx: regs.ecx,
+            eax: regs.eax,
+            dr6: regs.dr6,
+            dr7: regs.dr7,
+            tr: regs.tr,
+            tr_pad: regs.tr_pad,
+            ldt: regs.ldt,
+            ldt_pad: regs.ldt_pad,
+            gs: regs.gs,
+            gs_pad: regs.gs_pad,
+            fs: regs.fs,
+            fs_pad: regs.fs_pad,
+            ds: regs.ds,
+            ds_pad: regs.ds_pad,
+            ss: regs.ss,
+            ss_pad: regs.ss_pad,
+            cs: regs.cs,
+            cs_pad: regs.cs_pad,
+            es: regs.es,
+            es_pad: regs.es_pad,
+
+            tss_desc: regs.tss_desc,
+            idt_desc: regs.idt_desc,
+            gdt_desc: regs.gdt_desc,
+            ldt_desc: regs.ldt_desc,
+            gs_desc:  regs.gs_desc,
+            fs_desc:  regs.fs_desc,
+            ds_desc:  regs.ds_desc,
+            ss_desc:  regs.ss_desc,
+            cs_desc:  regs.cs_desc,
+            es_desc:  regs.es_desc,
+        }
+    }
+}
+
 impl From<&RemoteCpuRegistersV3A> for RemoteCpuRegistersV3B {
     fn from(regs: &RemoteCpuRegistersV3A) -> RemoteCpuRegistersV3B {
         RemoteCpuRegistersV3B {
