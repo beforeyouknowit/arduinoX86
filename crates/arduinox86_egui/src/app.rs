@@ -900,7 +900,7 @@ impl App {
                         // Get the server status. This event is scheduled automatically.
                         match client_ctx.client.server_status() {
                             Ok(status) => {
-                                log::debug!("Server status: {:?}", status);
+                                //log::debug!("Server status: {:?}", status);
                                 self.ts.client_window.set_server_status(client_ctx, status);
 
                                 if self.ts.last_program_state.is_none()
