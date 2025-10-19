@@ -2730,6 +2730,173 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "Diode:1N4148"
+			(pin_numbers
+				(hide yes)
+			)
+			(pin_names
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "D"
+				(at 0 2.54 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "1N4148"
+				(at 0 -2.54 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/1N4148_1N4448.pdf"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Description" "100V 0.15A standard switching diode, DO-35"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Sim.Device" "D"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Sim.Pins" "1=K 2=A"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_keywords" "diode"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_fp_filters" "D*DO?35*"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "1N4148_0_1"
+				(polyline
+					(pts
+						(xy -1.27 1.27) (xy -1.27 -1.27)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 1.27 1.27) (xy 1.27 -1.27) (xy -1.27 0) (xy 1.27 1.27)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 1.27 0) (xy -1.27 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "1N4148_1_1"
+				(pin passive line
+					(at -3.81 0 0)
+					(length 2.54)
+					(name "K"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 3.81 0 180)
+					(length 2.54)
+					(name "A"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "GND_1"
 			(power)
 			(pin_numbers
@@ -9158,6 +9325,12 @@
 		(uuid "e95327b0-867e-450d-a020-7b847f6ddf80")
 	)
 	(junction
+		(at 287.02 143.51)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e9a95e9d-76ce-4868-afaa-31d34dcb326c")
+	)
+	(junction
 		(at 73.66 261.62)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -9198,16 +9371,36 @@
 		(uuid "14b72853-3bc4-4131-90b9-a6f1e137ccd6")
 	)
 	(no_connect
+		(at 100.33 121.92)
+		(uuid "19994d82-b36c-4f2a-94a2-48d2ca23fea8")
+	)
+	(no_connect
 		(at 95.25 109.22)
 		(uuid "39bd5583-64b5-4693-8ac0-27a257f2b29a")
+	)
+	(no_connect
+		(at 95.25 83.82)
+		(uuid "3db53b4d-db4f-4f1e-a9fa-82213d3f89fa")
 	)
 	(no_connect
 		(at 139.7 36.83)
 		(uuid "481b4981-5054-49ee-bfa3-3b1dd268b755")
 	)
 	(no_connect
+		(at 100.33 129.54)
+		(uuid "5010ca40-63de-41dc-91cb-6f53bc5c53df")
+	)
+	(no_connect
 		(at 166.37 220.98)
 		(uuid "62c38b0d-c8a8-42db-a76b-4efc5b2cfa09")
+	)
+	(no_connect
+		(at 95.25 114.3)
+		(uuid "79f076e6-72c9-4c76-840f-1eed65510347")
+	)
+	(no_connect
+		(at 100.33 127)
+		(uuid "8af2bc89-9ca4-4b9e-92e8-9eecfd9b8e8c")
 	)
 	(no_connect
 		(at 168.91 220.98)
@@ -9244,6 +9437,10 @@
 	(no_connect
 		(at 134.62 36.83)
 		(uuid "fd1ecc39-c067-4bc5-a8d6-f70437f63b91")
+	)
+	(no_connect
+		(at 95.25 111.76)
+		(uuid "fdc794ca-8092-4950-8a0e-a0916edcd664")
 	)
 	(bus_entry
 		(at 140.97 292.1)
@@ -10257,16 +10454,6 @@
 	)
 	(wire
 		(pts
-			(xy 461.01 80.01) (xy 461.01 90.17)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "0c4ae89b-040c-42c3-abb2-014f80869135")
-	)
-	(wire
-		(pts
 			(xy 196.85 287.02) (xy 196.85 294.64)
 		)
 		(stroke
@@ -10387,7 +10574,7 @@
 	)
 	(wire
 		(pts
-			(xy 450.85 80.01) (xy 461.01 80.01)
+			(xy 448.31 87.63) (xy 448.31 90.17)
 		)
 		(stroke
 			(width 0)
@@ -10867,6 +11054,16 @@
 	)
 	(wire
 		(pts
+			(xy 287.02 138.43) (xy 295.91 138.43)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2a3c7328-c9a2-4307-82a4-3df78f9b497e")
+	)
+	(wire
+		(pts
 			(xy 257.81 251.46) (xy 257.81 254)
 		)
 		(stroke
@@ -10964,6 +11161,16 @@
 			(type default)
 		)
 		(uuid "2f6991e1-d852-4d2f-9e1a-89e24765d591")
+	)
+	(wire
+		(pts
+			(xy 320.04 143.51) (xy 322.58 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2f7b5236-6db5-4c57-bf26-f07df9631b2b")
 	)
 	(wire
 		(pts
@@ -11184,16 +11391,6 @@
 			(type default)
 		)
 		(uuid "38a98294-1357-4bdf-b905-0d29265b2dff")
-	)
-	(wire
-		(pts
-			(xy 320.04 142.24) (xy 320.04 143.51)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "38b9cfac-e001-4da5-b1b3-e84213478d91")
 	)
 	(wire
 		(pts
@@ -12277,6 +12474,16 @@
 	)
 	(wire
 		(pts
+			(xy 270.51 140.97) (xy 270.51 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "68d1cb3e-fe8d-41e5-a832-7851d6f4a008")
+	)
+	(wire
+		(pts
 			(xy 68.58 233.68) (xy 69.85 233.68)
 		)
 		(stroke
@@ -12304,6 +12511,16 @@
 			(type default)
 		)
 		(uuid "6a50d836-39c9-47fc-ae14-cb7748b3afed")
+	)
+	(wire
+		(pts
+			(xy 287.02 143.51) (xy 287.02 138.43)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6b014c04-c0b0-4fa7-9f07-bb2571c70df1")
 	)
 	(wire
 		(pts
@@ -12657,6 +12874,16 @@
 	)
 	(wire
 		(pts
+			(xy 335.28 140.97) (xy 335.28 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7cc59be2-ddfe-4a72-a09c-004ccdab6bae")
+	)
+	(wire
+		(pts
 			(xy 300.99 153.67) (xy 300.99 156.21)
 		)
 		(stroke
@@ -12927,7 +13154,7 @@
 	)
 	(wire
 		(pts
-			(xy 443.23 80.01) (xy 443.23 83.82)
+			(xy 450.85 80.01) (xy 445.77 80.01)
 		)
 		(stroke
 			(width 0)
@@ -13347,7 +13574,7 @@
 	)
 	(wire
 		(pts
-			(xy 448.31 80.01) (xy 448.31 83.82)
+			(xy 450.85 85.09) (xy 445.77 85.09)
 		)
 		(stroke
 			(width 0)
@@ -13444,6 +13671,16 @@
 			(type default)
 		)
 		(uuid "a2d86ff9-ff17-44fc-9728-ead245ed13c0")
+	)
+	(wire
+		(pts
+			(xy 335.28 143.51) (xy 330.2 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a36e73e5-959c-44ee-98df-43a389b7e7e3")
 	)
 	(wire
 		(pts
@@ -13647,16 +13884,6 @@
 	)
 	(wire
 		(pts
-			(xy 434.34 76.2) (xy 434.34 80.01)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ace9e6d0-bca9-434c-8092-d8628ca7ffe4")
-	)
-	(wire
-		(pts
 			(xy 274.32 45.72) (xy 279.4 45.72)
 		)
 		(stroke
@@ -13734,6 +13961,16 @@
 			(type default)
 		)
 		(uuid "af24896a-729d-4faf-b00b-38228afa98ff")
+	)
+	(wire
+		(pts
+			(xy 270.51 143.51) (xy 276.86 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "af44f887-37ad-4a4c-9c64-a04cc89346aa")
 	)
 	(bus
 		(pts
@@ -13977,7 +14214,7 @@
 	)
 	(wire
 		(pts
-			(xy 450.85 83.82) (xy 450.85 80.01)
+			(xy 445.77 87.63) (xy 448.31 87.63)
 		)
 		(stroke
 			(width 0)
@@ -14767,6 +15004,16 @@
 	)
 	(wire
 		(pts
+			(xy 284.48 143.51) (xy 287.02 143.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e1ceba68-a0d0-47eb-ae41-d9817666dcba")
+	)
+	(wire
+		(pts
 			(xy 257.81 248.92) (xy 257.81 251.46)
 		)
 		(stroke
@@ -15107,7 +15354,7 @@
 	)
 	(wire
 		(pts
-			(xy 445.77 80.01) (xy 445.77 83.82)
+			(xy 450.85 82.55) (xy 445.77 82.55)
 		)
 		(stroke
 			(width 0)
@@ -15194,16 +15441,6 @@
 			(type default)
 		)
 		(uuid "f9b8236b-41f2-4766-9ed2-5441e1edc64b")
-	)
-	(wire
-		(pts
-			(xy 434.34 80.01) (xy 443.23 80.01)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "fa2a6b11-00ae-43dd-b073-0c2a567744cb")
 	)
 	(wire
 		(pts
@@ -16551,6 +16788,28 @@
 			)
 		)
 	)
+	(global_label "3.3V_COMBINED"
+		(shape bidirectional)
+		(at 295.91 138.43 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "2e3632ca-7766-43b2-b0da-ce16d154a57f")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 314.7627 138.43 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "SCL"
 		(shape input)
 		(at 336.55 158.75 0)
@@ -16617,6 +16876,28 @@
 			)
 		)
 	)
+	(global_label "3.3V_COMBINED"
+		(shape input)
+		(at 450.85 80.01 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "37f3ac2b-ffb9-44c2-b154-afcdeb73daf4")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 468.5914 80.01 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "TCK"
 		(shape input)
 		(at 458.47 176.53 0)
@@ -16641,7 +16922,7 @@
 	)
 	(global_label "DBG_TX"
 		(shape output)
-		(at 445.77 80.01 90)
+		(at 450.85 82.55 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -16651,7 +16932,7 @@
 		)
 		(uuid "39c55953-a4b1-49a0-8e5c-fa4275a0f84e")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 445.77 70.0701 90)
+			(at 460.7899 82.55 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17499,7 +17780,7 @@
 	)
 	(global_label "DBG_RX"
 		(shape input)
-		(at 448.31 80.01 90)
+		(at 450.85 85.09 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -17509,7 +17790,7 @@
 		)
 		(uuid "9301baf7-23ff-40c4-9fd5-2fa666596fd1")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 448.31 69.7677 90)
+			(at 461.0923 85.09 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18409,7 +18690,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "004580f3-cfbb-4824-83b5-6bc865775cbb")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 102.87 0)
 			(effects
 				(font
@@ -18497,7 +18778,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 4)
 				)
 			)
@@ -18513,7 +18794,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "06a7cc0d-09d7-489e-ba02-b32c12588331")
-		(property "Reference" "T_CLK2_GND1"
+		(property "Reference" "T_CLK1"
 			(at 265.43 270.5099 90)
 			(effects
 				(font
@@ -18564,73 +18845,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "T_CLK2_GND1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:+3.3VP")
-		(at 434.34 76.2 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "0a1dd851-fada-4bb5-9580-1ed2d9fa23bb")
-		(property "Reference" "#PWR015"
-			(at 438.15 77.47 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "+3.3VP"
-			(at 434.34 71.12 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 434.34 76.2 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 434.34 76.2 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"+3.3VP\""
-			(at 434.34 76.2 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "ec13422b-5ede-459e-a674-54609ceea8c9")
-		)
-		(instances
-			(project "arduino_386_387"
-				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "#PWR015")
+					(reference "T_CLK1")
 					(unit 1)
 				)
 			)
@@ -18646,7 +18861,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "1095283e-8c9d-45b6-ba18-387355a7d62d")
-		(property "Reference" "U1"
+		(property "Reference" "U3"
 			(at 278.13 157.4799 0)
 			(effects
 				(font
@@ -18709,7 +18924,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U1")
+					(reference "U3")
 					(unit 1)
 				)
 			)
@@ -18724,7 +18939,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "16800623-95f0-4f78-9fea-ff1de9081296")
-		(property "Reference" "R7"
+		(property "Reference" "R11"
 			(at 358.14 60.96 90)
 			(effects
 				(font
@@ -18777,7 +18992,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R7")
+					(reference "R11")
 					(unit 1)
 				)
 			)
@@ -18792,7 +19007,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "169380b0-ec2f-44be-9a86-75e35f4597bd")
-		(property "Reference" "R13"
+		(property "Reference" "R12"
 			(at 210.82 36.8299 0)
 			(effects
 				(font
@@ -18846,7 +19061,74 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R13")
+					(reference "R12")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+3.3V")
+		(at 270.51 140.97 0)
+		(mirror y)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "17c4f7c6-942d-4563-b0e1-717ca1a3334c")
+		(property "Reference" "#PWR012"
+			(at 270.51 144.78 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+3.3V"
+			(at 267.97 139.6999 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" ""
+			(at 270.51 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 270.51 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3.3V\""
+			(at 270.51 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "7d11c45e-5d54-42ae-9e8d-bdac4db3d3d6")
+		)
+		(instances
+			(project "arduino_386EX_V4"
+				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
+					(reference "#PWR012")
 					(unit 1)
 				)
 			)
@@ -18921,16 +19203,15 @@
 	)
 	(symbol
 		(lib_id "Connector:Conn_01x04_Pin")
-		(at 445.77 88.9 90)
+		(at 440.69 82.55 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "1c55ad08-eec5-41aa-b721-2ee5dbb1f71b")
-		(property "Reference" "J3"
-			(at 447.04 91.44 90)
+		(property "Reference" "J6"
+			(at 431.546 82.042 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18938,7 +19219,7 @@
 			)
 		)
 		(property "Value" "Conn_01x04_Pin"
-			(at 447.04 93.98 90)
+			(at 431.546 84.582 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18946,7 +19227,7 @@
 			)
 		)
 		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
-			(at 445.77 88.9 0)
+			(at 440.69 82.55 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18955,7 +19236,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 445.77 88.9 0)
+			(at 440.69 82.55 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18964,7 +19245,7 @@
 			)
 		)
 		(property "Description" "Generic connector, single row, 01x04, script generated"
-			(at 445.77 88.9 0)
+			(at 440.69 82.55 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18987,7 +19268,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J3")
+					(reference "J6")
 					(unit 1)
 				)
 			)
@@ -19003,7 +19284,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "1d110a95-9a7c-459f-a5d7-9fa672a97091")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 402.59 50.7999 0)
 			(effects
 				(font
@@ -19093,7 +19374,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 7)
 				)
 			)
@@ -19108,7 +19389,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "2592d3f7-44c1-4371-8382-3ea0ff46589a")
-		(property "Reference" "D5"
+		(property "Reference" "D6"
 			(at 377.698 55.626 0)
 			(effects
 				(font
@@ -19161,7 +19442,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "D5")
+					(reference "D6")
 					(unit 1)
 				)
 			)
@@ -19176,7 +19457,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "268d5617-ad4b-4097-a895-9e12190c5d7e")
-		(property "Reference" "C3"
+		(property "Reference" "C5"
 			(at 54.61 260.858 90)
 			(do_not_autoplace yes)
 			(effects
@@ -19196,7 +19477,7 @@
 				(justify right top)
 			)
 		)
-		(property "Footprint" ""
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder"
 			(at 55.88 261.62 0)
 			(effects
 				(font
@@ -19232,7 +19513,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C3")
+					(reference "C5")
 					(unit 1)
 				)
 			)
@@ -19376,8 +19657,93 @@
 		)
 	)
 	(symbol
+		(lib_id "Diode:1N4148")
+		(at 326.39 143.51 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "29cac114-68f5-4018-a069-15fb3a1ca505")
+		(property "Reference" "D9"
+			(at 326.39 137.16 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "1N4148"
+			(at 326.39 139.7 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+			(at 326.39 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/1N4148_1N4448.pdf"
+			(at 326.39 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "100V 0.15A standard switching diode, DO-35"
+			(at 326.39 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Sim.Device" "D"
+			(at 326.39 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Sim.Pins" "1=K 2=A"
+			(at 326.39 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "1d2fcdab-833e-41e5-b1a4-65756b0ac124")
+		)
+		(pin "1"
+			(uuid "1dc876ff-09d5-42a1-956f-331e866a47c3")
+		)
+		(instances
+			(project "arduino_386EX_V4"
+				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
+					(reference "D9")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:+3.3VP")
-		(at 320.04 142.24 0)
+		(at 335.28 140.97 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -19386,7 +19752,7 @@
 		(fields_autoplaced yes)
 		(uuid "2ba30ce0-ba34-4cdf-aeae-f9c0329d70f4")
 		(property "Reference" "#PWR010"
-			(at 323.85 143.51 0)
+			(at 339.09 142.24 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19395,7 +19761,7 @@
 			)
 		)
 		(property "Value" "+3.3VP"
-			(at 320.04 137.16 0)
+			(at 335.28 135.89 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19403,7 +19769,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 320.04 142.24 0)
+			(at 335.28 140.97 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19412,7 +19778,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 320.04 142.24 0)
+			(at 335.28 140.97 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19421,7 +19787,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+3.3VP\""
-			(at 320.04 142.24 0)
+			(at 335.28 140.97 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19433,7 +19799,7 @@
 			(uuid "cb9f8220-2b79-47f3-bc80-2ee61e85752f")
 		)
 		(instances
-			(project "arduino_386EX_V3"
+			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
 					(reference "#PWR010")
 					(unit 1)
@@ -19517,7 +19883,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "2e7f1dbf-d9ae-4d17-8821-876bd59caf21")
-		(property "Reference" "D7"
+		(property "Reference" "D8"
 			(at 377.698 63.246 0)
 			(effects
 				(font
@@ -19570,7 +19936,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "D7")
+					(reference "D8")
 					(unit 1)
 				)
 			)
@@ -19585,7 +19951,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "36ddbaea-ff41-4282-973d-061fed1cd9cb")
-		(property "Reference" "C4"
+		(property "Reference" "C7"
 			(at 54.61 269.748 90)
 			(do_not_autoplace yes)
 			(effects
@@ -19641,7 +20007,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C4")
+					(reference "C7")
 					(unit 1)
 				)
 			)
@@ -19656,7 +20022,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "3dc265d7-4a1b-46a0-a03f-a40df4b7554d")
-		(property "Reference" "R15"
+		(property "Reference" "R7"
 			(at 307.34 148.5899 0)
 			(effects
 				(font
@@ -19710,7 +20076,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R15")
+					(reference "R7")
 					(unit 1)
 				)
 			)
@@ -20194,7 +20560,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "47d15ccf-0036-4091-a663-6f17177e4505")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 36.83 0)
 			(effects
 				(font
@@ -20282,8 +20648,94 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 3)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Diode:1N4148")
+		(at 280.67 143.51 0)
+		(mirror y)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "5b2a2d1d-1155-4b79-8b44-43f45bdf27a9")
+		(property "Reference" "D3"
+			(at 280.67 137.16 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "1N4148"
+			(at 280.67 139.7 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+			(at 280.67 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/1N4148_1N4448.pdf"
+			(at 280.67 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "100V 0.15A standard switching diode, DO-35"
+			(at 280.67 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Sim.Device" "D"
+			(at 280.67 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Sim.Pins" "1=K 2=A"
+			(at 280.67 143.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "9f256148-1281-4756-8cb4-04b49a4369c2")
+		)
+		(pin "1"
+			(uuid "10dafbb1-1ff6-4750-82a4-d988f80efc18")
+		)
+		(instances
+			(project ""
+				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
+					(reference "D3")
+					(unit 1)
 				)
 			)
 		)
@@ -20297,7 +20749,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "61bfc10c-3d36-4787-8c22-75571bfa5235")
-		(property "Reference" "R2"
+		(property "Reference" "R3"
 			(at 358.14 48.26 90)
 			(effects
 				(font
@@ -20350,7 +20802,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R2")
+					(reference "R3")
 					(unit 1)
 				)
 			)
@@ -20366,7 +20818,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "68346859-c100-4164-ae40-40b3d20229f6")
-		(property "Reference" "J4"
+		(property "Reference" "J5"
 			(at 438.15 138.43 90)
 			(effects
 				(font
@@ -20424,7 +20876,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J4")
+					(reference "J5")
 					(unit 1)
 				)
 			)
@@ -20439,7 +20891,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "6929c894-ba42-44a2-b9e2-b3304bb063dc")
-		(property "Reference" "C7"
+		(property "Reference" "C14"
 			(at 54.61 296.418 90)
 			(do_not_autoplace yes)
 			(effects
@@ -20495,7 +20947,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C7")
+					(reference "C14")
 					(unit 1)
 				)
 			)
@@ -20510,7 +20962,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "6caeb454-1cf3-47ed-9c9e-a42280353709")
-		(property "Reference" "R8"
+		(property "Reference" "R13"
 			(at 208.026 311.658 0)
 			(effects
 				(font
@@ -20564,7 +21016,7 @@
 		(instances
 			(project "arduino_386EX_V3"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R8")
+					(reference "R13")
 					(unit 1)
 				)
 			)
@@ -20580,7 +21032,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "6d9f7cfe-d3ba-41d7-ba1e-4258ff27dfc6")
-		(property "Reference" "R12"
+		(property "Reference" "R1"
 			(at 322.58 171.4499 0)
 			(effects
 				(font
@@ -20634,7 +21086,7 @@
 		(instances
 			(project "arduino_386EX_V3"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R12")
+					(reference "R1")
 					(unit 1)
 				)
 			)
@@ -20650,7 +21102,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "7307cbc1-bfa2-4ad3-bf32-353a7c29aacf")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 88.9 0)
 			(effects
 				(font
@@ -20738,7 +21190,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 2)
 				)
 			)
@@ -20754,7 +21206,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "7524f789-ad3c-4e8e-814b-bf8384de6091")
-		(property "Reference" "J1"
+		(property "Reference" "J2"
 			(at 430.53 28.5749 90)
 			(effects
 				(font
@@ -20808,7 +21260,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J1")
+					(reference "J2")
 					(unit 1)
 				)
 			)
@@ -20823,7 +21275,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "77008b12-6263-4836-a9dc-a6d44caeb728")
-		(property "Reference" "C8"
+		(property "Reference" "C13"
 			(at 54.61 305.308 90)
 			(do_not_autoplace yes)
 			(effects
@@ -20879,7 +21331,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C8")
+					(reference "C13")
 					(unit 1)
 				)
 			)
@@ -20894,7 +21346,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "782c567d-4ae2-4683-8df4-0a0c7c7fa412")
-		(property "Reference" "C1"
+		(property "Reference" "C3"
 			(at 54.61 243.078 90)
 			(do_not_autoplace yes)
 			(effects
@@ -20950,7 +21402,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C1")
+					(reference "C3")
 					(unit 1)
 				)
 			)
@@ -20966,7 +21418,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "799da0de-c5b4-4d8f-bc48-c0fd6429b181")
-		(property "Reference" "R14"
+		(property "Reference" "R6"
 			(at 298.45 148.5899 0)
 			(effects
 				(font
@@ -21020,7 +21472,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R14")
+					(reference "R6")
 					(unit 1)
 				)
 			)
@@ -21035,7 +21487,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "80813932-c60b-4cb8-95d7-853b8628854c")
-		(property "Reference" "D6"
+		(property "Reference" "D7"
 			(at 377.698 59.436 0)
 			(effects
 				(font
@@ -21088,7 +21540,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "D6")
+					(reference "D7")
 					(unit 1)
 				)
 			)
@@ -21103,7 +21555,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "81b77818-3003-4a53-92db-b6bd976a87be")
-		(property "Reference" "R5"
+		(property "Reference" "R9"
 			(at 358.14 55.88 90)
 			(effects
 				(font
@@ -21156,7 +21608,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R5")
+					(reference "R9")
 					(unit 1)
 				)
 			)
@@ -21237,7 +21689,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "88d2805c-6c82-451b-ae60-fcd4729e761c")
-		(property "Reference" "R4"
+		(property "Reference" "R5"
 			(at 358.14 53.34 90)
 			(effects
 				(font
@@ -21290,7 +21742,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R4")
+					(reference "R5")
 					(unit 1)
 				)
 			)
@@ -21306,7 +21758,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "89702b87-74c4-4381-a59f-547a9bb6eee7")
-		(property "Reference" "C14"
+		(property "Reference" "C1"
 			(at 455.93 38.4809 0)
 			(effects
 				(font
@@ -21360,7 +21812,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C14")
+					(reference "C1")
 					(unit 1)
 				)
 			)
@@ -21376,7 +21828,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "8ab69697-6a60-415a-aae5-41c254727803")
-		(property "Reference" "J6"
+		(property "Reference" "J4"
 			(at 448.31 215.9 0)
 			(effects
 				(font
@@ -21452,7 +21904,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J6")
+					(reference "J4")
 					(unit 1)
 				)
 			)
@@ -21533,7 +21985,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "8f2885f6-7424-449e-965d-1da0100dd5a8")
-		(property "Reference" "D3"
+		(property "Reference" "D4"
 			(at 377.698 48.006 0)
 			(effects
 				(font
@@ -21586,7 +22038,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "D3")
+					(reference "D4")
 					(unit 1)
 				)
 			)
@@ -21602,7 +22054,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "946434da-2334-46d8-bc4d-7271a1f0ca6e")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 22.86 0)
 			(effects
 				(font
@@ -21690,7 +22142,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 1)
 				)
 			)
@@ -21706,7 +22158,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "946434da-2334-46d8-bc4d-7271a1f0ca6f")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 67.31 0)
 			(effects
 				(font
@@ -21794,7 +22246,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 6)
 				)
 			)
@@ -21810,7 +22262,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "946434da-2334-46d8-bc4d-7271a1f0ca70")
-		(property "Reference" "U3"
+		(property "Reference" "U2"
 			(at 287.02 52.07 0)
 			(effects
 				(font
@@ -21898,7 +22350,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U3")
+					(reference "U2")
 					(unit 5)
 				)
 			)
@@ -22048,7 +22500,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "a2b0920d-4c12-47cc-b5f2-e8d86f8717d5")
-		(property "Reference" "R6"
+		(property "Reference" "R10"
 			(at 358.14 58.42 90)
 			(effects
 				(font
@@ -22101,7 +22553,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R6")
+					(reference "R10")
 					(unit 1)
 				)
 			)
@@ -22182,7 +22634,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "a675cbda-3ced-4bb7-9313-4f2c8f3c34cc")
-		(property "Reference" "R9"
+		(property "Reference" "R14"
 			(at 198.12 36.8299 0)
 			(effects
 				(font
@@ -22236,7 +22688,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R9")
+					(reference "R14")
 					(unit 1)
 				)
 			)
@@ -22318,7 +22770,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "b6aaba85-d80c-4097-bfdb-78d1bb5e8637")
-		(property "Reference" "R1"
+		(property "Reference" "R2"
 			(at 358.14 45.72 90)
 			(effects
 				(font
@@ -22371,7 +22823,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R1")
+					(reference "R2")
 					(unit 1)
 				)
 			)
@@ -22386,7 +22838,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "b8f0224b-a2dd-48fe-9f2a-5f596858adce")
-		(property "Reference" "C9"
+		(property "Reference" "C12"
 			(at 54.61 314.198 90)
 			(do_not_autoplace yes)
 			(effects
@@ -22442,7 +22894,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C9")
+					(reference "C12")
 					(unit 1)
 				)
 			)
@@ -22525,7 +22977,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "bcbac08b-a88e-4ee6-b8ae-6297f687d90f")
-		(property "Reference" "C13"
+		(property "Reference" "C2"
 			(at 442.976 38.354 0)
 			(effects
 				(font
@@ -22579,7 +23031,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C13")
+					(reference "C2")
 					(unit 1)
 				)
 			)
@@ -22588,7 +23040,7 @@
 	(symbol
 		(lib_name "GND_3")
 		(lib_id "power:GND")
-		(at 461.01 90.17 0)
+		(at 448.31 90.17 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -22597,7 +23049,7 @@
 		(fields_autoplaced yes)
 		(uuid "bd96d544-4165-4869-84b4-6788b233b016")
 		(property "Reference" "#PWR016"
-			(at 461.01 96.52 0)
+			(at 448.31 96.52 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22606,7 +23058,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 461.01 95.25 0)
+			(at 448.31 95.25 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22614,7 +23066,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 461.01 90.17 0)
+			(at 448.31 90.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22623,7 +23075,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 461.01 90.17 0)
+			(at 448.31 90.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22632,7 +23084,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 461.01 90.17 0)
+			(at 448.31 90.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22662,7 +23114,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "be8be235-90f4-43b9-92c9-c85f0f9aff24")
-		(property "Reference" "U11"
+		(property "Reference" "U4"
 			(at 256.54 235.8038 90)
 			(effects
 				(font
@@ -23101,7 +23553,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U11")
+					(reference "U4")
 					(unit 1)
 				)
 			)
@@ -23249,7 +23701,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "c65eb717-a4df-4a89-9b38-3bdcd2e7375c")
-		(property "Reference" "R10"
+		(property "Reference" "R15"
 			(at 218.694 302.768 0)
 			(effects
 				(font
@@ -23303,7 +23755,7 @@
 		(instances
 			(project "arduino_386EX_V3"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R10")
+					(reference "R15")
 					(unit 1)
 				)
 			)
@@ -23384,7 +23836,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "caf35d86-def8-4cde-a8d4-11e6d29628ae")
-		(property "Reference" "C12"
+		(property "Reference" "C6"
 			(at 54.61 340.868 90)
 			(do_not_autoplace yes)
 			(effects
@@ -23440,7 +23892,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C12")
+					(reference "C6")
 					(unit 1)
 				)
 			)
@@ -23521,7 +23973,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "cf3a5e21-e8bd-40c4-b115-6270d240adca")
-		(property "Reference" "C2"
+		(property "Reference" "C4"
 			(at 54.61 251.968 90)
 			(do_not_autoplace yes)
 			(effects
@@ -23577,7 +24029,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C2")
+					(reference "C4")
 					(unit 1)
 				)
 			)
@@ -23592,7 +24044,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "d397346f-936c-4743-b25b-da20ce8cc1a4")
-		(property "Reference" "R3"
+		(property "Reference" "R4"
 			(at 358.14 50.8 90)
 			(effects
 				(font
@@ -23645,7 +24097,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R3")
+					(reference "R4")
 					(unit 1)
 				)
 			)
@@ -23660,7 +24112,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "d4167c94-dc3f-45e8-9ab9-53a731969a7f")
-		(property "Reference" "C5"
+		(property "Reference" "C9"
 			(at 54.61 278.638 90)
 			(do_not_autoplace yes)
 			(effects
@@ -23716,7 +24168,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C5")
+					(reference "C9")
 					(unit 1)
 				)
 			)
@@ -23732,7 +24184,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "da699ce4-f39f-4e54-a7fb-f34b963fb9d2")
-		(property "Reference" "U2"
+		(property "Reference" "U1"
 			(at 336.55 33.02 0)
 			(effects
 				(font
@@ -23827,7 +24279,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "U2")
+					(reference "U1")
 					(unit 1)
 				)
 			)
@@ -23843,7 +24295,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "e2b9b3f1-920a-4ec7-9a09-ee005450e414")
-		(property "Reference" "J9"
+		(property "Reference" "J1"
 			(at 326.39 163.8299 0)
 			(effects
 				(font
@@ -23900,7 +24352,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J9")
+					(reference "J1")
 					(unit 1)
 				)
 			)
@@ -23983,7 +24435,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "e6221230-ab10-476e-a9a3-5cab7d70481e")
-		(property "Reference" "J5"
+		(property "Reference" "J3"
 			(at 459.74 138.43 90)
 			(effects
 				(font
@@ -24041,7 +24493,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J5")
+					(reference "J3")
 					(unit 1)
 				)
 			)
@@ -24056,7 +24508,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "eb4e723d-ff42-42b7-bc09-6407b31f3ea8")
-		(property "Reference" "C6"
+		(property "Reference" "C11"
 			(at 54.61 287.528 90)
 			(do_not_autoplace yes)
 			(effects
@@ -24112,7 +24564,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C6")
+					(reference "C11")
 					(unit 1)
 				)
 			)
@@ -24194,7 +24646,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "f69b93c7-5c6e-4376-81db-a223243df48f")
-		(property "Reference" "J2"
+		(property "Reference" "J7"
 			(at 448.31 167.64 0)
 			(effects
 				(font
@@ -24264,7 +24716,7 @@
 		(instances
 			(project ""
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "J2")
+					(reference "J7")
 					(unit 1)
 				)
 			)
@@ -24279,7 +24731,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "fa999e6d-75af-44f7-bc25-8b97353b6212")
-		(property "Reference" "D4"
+		(property "Reference" "D5"
 			(at 377.698 51.816 0)
 			(effects
 				(font
@@ -24332,7 +24784,7 @@
 		(instances
 			(project "arduino_386_387"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "D4")
+					(reference "D5")
 					(unit 1)
 				)
 			)
@@ -24347,7 +24799,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "fd0cd03d-89a0-461c-98bd-77da5b4acc37")
-		(property "Reference" "C11"
+		(property "Reference" "C8"
 			(at 54.61 331.978 90)
 			(do_not_autoplace yes)
 			(effects
@@ -24403,7 +24855,7 @@
 		(instances
 			(project "arduino_386EX_V4"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "C11")
+					(reference "C8")
 					(unit 1)
 				)
 			)
@@ -24419,7 +24871,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "fffbc6c0-44e2-4a19-bf8e-fd82b1d02297")
-		(property "Reference" "R11"
+		(property "Reference" "R8"
 			(at 322.58 148.5899 0)
 			(effects
 				(font
@@ -24473,7 +24925,7 @@
 		(instances
 			(project "arduino_386EX_V3"
 				(path "/2ed64d3c-1ac9-4d9f-9649-2011440e90de"
-					(reference "R11")
+					(reference "R8")
 					(unit 1)
 				)
 			)
