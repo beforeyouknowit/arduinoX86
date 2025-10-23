@@ -2148,7 +2148,7 @@ void handle_execute_automatic() {
             Controller.getBoard().debugPrintln(DebugType::EXECUTE, "## EXECUTE: Suppressing HALT injection within program bounds", false);
           }
           else {
-            Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: Injecting HALT opcode at %08X\n\r after detecting jump.", CPU.address_latch());
+            Controller.getBoard().debugPrintf(DebugType::EXECUTE, false, "## EXECUTE: Injecting HALT opcode at %08X after detecting jump.", CPU.address_latch());
             if (CPU.cpu_type == CpuType::i80386) {
               // The 386 only fetches at even addresses. We rely on a hint from the client to determine which byte to patch.
               // If no hint is provided, we'll be forced to write a word with two HALTs to cover both cases.
