@@ -161,6 +161,21 @@ The original cpu_server Arduino IDE sketch. Development has since moved to platf
 The original sketch for Arduino MEGA only demonstrating how to control an 8088. It does not contain a serial protocol
 server - code is run directly from an array defined within the sketch.
 
+
+# Ordering Boards
+
+- Ordering boards from any of the KiCad projects is extremely simple using PCBWay's KiCad fabrication plugin.
+  - From the Plugin and Content Manager, go the Fabrication Plugins tab, find the PCBWay plugin and install.
+  - <img width="620" height="405" alt="image" src="https://github.com/user-attachments/assets/c1e08ee9-d995-4615-a5df-647f5c32cd7b" />
+  - Open the PCB editor and click the PCBWay Button
+  - <img width="192" height="115" alt="image" src="https://github.com/user-attachments/assets/50aeec0d-4424-4750-b5c3-ba1a5c47c763" />
+  - A browser window will open to PCBWay's website with the project uploaded and acceptable defaults selected.
+  - If you like you can change the board color, or get a nicer finish with gold (ENIG).
+  - <img width="541" height="51" alt="image" src="https://github.com/user-attachments/assets/41317565-d556-463a-9d48-33a104033afe" />
+  - You can then proceed to ordering. Part of your purchase goes back to help fund the KiCad project, which is cool.
+  - <img width="333" height="65" alt="image" src="https://github.com/user-attachments/assets/292e06a9-254a-4270-a2c4-a197c8c89bd7" />
+
+    
 # Credits
 
 Inspired by the Pi8088 validator created by Andreas Jonsson as part of the VirtualXT project:
@@ -176,3 +191,4 @@ https://github.com/andreas-jonsson/virtualxt/tree/develop/tools/validator/pi8088
 - The Universal Chip Analyser (U. C. A.): https://x86.fr/uca/
 
 - Foxtech's 486 Breadboard Computer: https://www.youtube.com/watch?v=wSiDSdHS2QQ
+
