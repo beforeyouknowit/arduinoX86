@@ -21,20 +21,19 @@
     DEALINGS IN THE SOFTWARE.
 */
 use crate::{
-    cpu_common::{BusOp, BusOpType},
+    cpu_common::{BusOp, BusOpPayload, BusOpType},
     cycles::MyServerCycleState,
+    enums::{InstructionSize, TerminationCondition},
     hash_memory::HashMemory,
     registers::Registers,
     trace_error,
     trace_log,
-    Config,
-    InstructionSize,
-    Opcode,
     TestContext,
 };
 use anyhow::bail;
 use arduinox86_client::ServerCpuType;
 use iced_x86::{Mnemonic, OpKind};
+use marty_dasm::Opcode;
 use moo::types::{MooCpuType, MooException, MooIvtOrder};
 use std::collections::HashMap;
 
@@ -49,17 +48,22 @@ impl From<&[MyServerCycleState]> for BusOps {
         let mut latched_bus_op = None;
         for cycle_state in cycle_states {
             if let Ok(bus_op) = BusOp::try_from(cycle_state) {
-                log::trace!("Collected bus op: {:X?}", bus_op);
+                //log::trace!("Collected bus op: {:X?}", bus_op);
                 latched_bus_op = Some(bus_op);
             }
             else {
                 if let Some(mut latched_bus_op_inner) = latched_bus_op {
                     latched_bus_op_inner.data = cycle_state.data_bus();
                     latched_bus_op_inner.idx = bus_ops.len();
-                    bus_ops.push(BusOp::from(latched_bus_op_inner));
+                    bus_ops.push(latched_bus_op_inner);
                     latched_bus_op = None; // Reset the latched bus operation.
                 }
             }
+        }
+
+        if let Some(mut latched_bus_op_inner) = latched_bus_op {
+            latched_bus_op_inner.idx = bus_ops.len();
+            bus_ops.push(latched_bus_op_inner);
         }
 
         BusOps::new(&bus_ops)
@@ -107,7 +111,7 @@ impl BusOps {
                     if sp_aligned {
                         if op.addr == next_push {
                             have_stack = true;
-                            log::warn!("Have probable stack push at address {:06X}", op.addr);
+                            //log::warn!("Have probable stack push at address {:06X}", op.addr);
                             op.flags |= BusOp::FLAG_STACK;
                             next_push = next_push.wrapping_sub(2);
                         }
@@ -120,7 +124,7 @@ impl BusOps {
 
                         if sp_diff < Self::MAX_STACK_SIZE as u32 * 2 {
                             have_stack = true;
-                            log::warn!("Have probable (unaligned) stack push at address {:06X}", op.addr);
+                            //log::warn!("Have probable (unaligned) stack push at address {:06X}", op.addr);
                             op.flags |= BusOp::FLAG_STACK;
                         }
                     }
@@ -165,15 +169,100 @@ impl BusOps {
 
     pub fn validate(
         &self,
-        config: &Config,
+        context: &TestContext,
         registers: &Registers,
         opcode: Opcode,
         instruction: &iced_x86::Instruction,
         op0: OpKind,
         op1: OpKind,
+        had_exception: bool,
     ) -> anyhow::Result<()> {
         let has_memory_read = self.ops.iter().any(|op| op.op_type == BusOpType::MemRead);
         let has_memory_write = self.ops.iter().any(|op| op.op_type == BusOpType::MemWrite);
+
+        let config = &context.cfg;
+
+        // The first bus operation should be a code fetch, unless prefetching is enabled.
+        if !context.prefetch {
+            if let Some(first_op) = self.ops.first() {
+                if !(first_op.op_type == BusOpType::CodeRead && first_op.addr == registers.calculate_code_address()) {
+                    return Err(anyhow::anyhow!(
+                        "Expected first bus operation to be code fetch at address {:06X}, but found {:?} at {:06X}",
+                        registers.eip(),
+                        first_op.op_type,
+                        first_op.addr
+                    ));
+                }
+            }
+        }
+
+        // The last bus operation should be a HALT if halt termination was specified.
+        if matches!(config.test_gen.termination_condition, TerminationCondition::Halt) {
+            if let Some(last_op) = self.ops.last() {
+                if last_op.op_type != BusOpType::Halt {
+                    return Err(anyhow::anyhow!(
+                        "Expected last bus operation to be HALT, but found {:?} at {:06X}",
+                        last_op.op_type,
+                        last_op.addr
+                    ));
+                }
+            }
+        }
+
+        // Enforce a maximum cycle count if not a string operation.
+        let is_string = matches!(
+            instruction.mnemonic(),
+            Mnemonic::Movsb
+                | Mnemonic::Movsw
+                | Mnemonic::Movsd
+                | Mnemonic::Cmpsb
+                | Mnemonic::Cmpsw
+                | Mnemonic::Cmpsd
+                | Mnemonic::Scasb
+                | Mnemonic::Scasw
+                | Mnemonic::Scasd
+                | Mnemonic::Lodsb
+                | Mnemonic::Lodsw
+                | Mnemonic::Lodsd
+                | Mnemonic::Stosb
+                | Mnemonic::Stosw
+                | Mnemonic::Stosd
+        );
+
+        let is_io_string = matches!(
+            instruction.mnemonic(),
+            Mnemonic::Insb | Mnemonic::Insw | Mnemonic::Insd | Mnemonic::Outsb | Mnemonic::Outsw | Mnemonic::Outsd
+        );
+        let is_enter = matches!(instruction.mnemonic(), Mnemonic::Enter);
+        let is_pusha = matches!(instruction.mnemonic(), Mnemonic::Pusha | Mnemonic::Pushad);
+        let is_popa = matches!(instruction.mnemonic(), Mnemonic::Popa | Mnemonic::Popad);
+        let is_io_read = matches!(
+            instruction.mnemonic(),
+            Mnemonic::In | Mnemonic::Insb | Mnemonic::Insd | Mnemonic::Insw
+        );
+        let is_io_write = matches!(
+            instruction.mnemonic(),
+            Mnemonic::Out | Mnemonic::Outsb | Mnemonic::Outsw | Mnemonic::Outsd
+        );
+        let is_io = is_io_read || is_io_write;
+
+        if !is_string && !is_io_string && !is_enter && !is_pusha && !is_popa {
+            let non_code_ops = self
+                .ops
+                .iter()
+                .filter(|op| op.op_type != BusOpType::CodeRead && op.op_type != BusOpType::Halt)
+                .count();
+
+            let max_bus_ops = config.test_gen.max_normal_bus_ops as usize;
+            if non_code_ops > max_bus_ops {
+                return Err(anyhow::anyhow!(
+                    "Exceeded maximum bus operation count of {} for non-string, enter, or pusha instruction {:?}: actual bus ops = {}",
+                    max_bus_ops,
+                    instruction.mnemonic(),
+                    non_code_ops
+                ));
+            }
+        }
 
         match op0 {
             OpKind::Memory => {
@@ -278,10 +367,10 @@ impl BusOps {
                     }
                 }
             }
-            OpKind::NearBranch16 => {
+            OpKind::NearBranch16 | OpKind::NearBranch32 => {
                 // Shouldn't have any reads or writes.
                 if !matches!(instruction.mnemonic(), Mnemonic::Call) {
-                    if has_memory_read || has_memory_write {
+                    if !had_exception && (has_memory_read || has_memory_write) {
                         return Err(anyhow::anyhow!(
                             "Expected no memory operations for branch instruction {:?}, but found some.",
                             instruction.mnemonic()
@@ -302,6 +391,88 @@ impl BusOps {
             }
         }
 
+        // Validate IO operations.
+        for op in &self.ops {
+            match op.op_type {
+                BusOpType::MemWrite => {
+                    // Check if this is an INS instruction writing to memory.
+                    if is_io_string {
+                        if op.flags & BusOp::FLAG_STACK == 0 {
+                            // Bus operation is not a stack write.
+                            match op.payload() {
+                                Ok(BusOpPayload::Byte(byte)) => {
+                                    if byte != 0xFF {
+                                        return Err(anyhow::anyhow!(
+                                            "Expected IO byte written to memory to be 0xFF, but found {:02X}",
+                                            byte
+                                        ));
+                                    }
+                                }
+                                Ok(BusOpPayload::Word(word)) => {
+                                    if word != 0xFFFF {
+                                        return Err(anyhow::anyhow!(
+                                            "Expected IO word written to memory to be 0xFFFF, but found {:04X}",
+                                            word
+                                        ));
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(anyhow::anyhow!("Failed to get IO MEMW payload: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
+                BusOpType::IoRead => {
+                    if !is_io {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected IO operation for non-IO instruction {:?}.",
+                            instruction.mnemonic()
+                        ));
+                    }
+
+                    if is_io_write {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected IO read operation for IO write instruction {:?}.",
+                            instruction.mnemonic()
+                        ));
+                    }
+
+                    match op.payload() {
+                        Ok(BusOpPayload::Byte(byte)) => {
+                            if byte != 0xFF {
+                                return Err(anyhow::anyhow!("Expected IO byte to be 0xFF, but found {:02X}", byte));
+                            }
+                        }
+                        Ok(BusOpPayload::Word(word)) => {
+                            if word != 0xFFFF {
+                                return Err(anyhow::anyhow!("Expected IO word to be 0xFFFF, but found {:04X}", word));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Failed to get IO busop payload: {}", e));
+                        }
+                    }
+                }
+                BusOpType::IoWrite => {
+                    if !is_io {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected IO operation for non-IO instruction {:?}.",
+                            instruction.mnemonic()
+                        ));
+                    }
+
+                    if is_io_read {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected IO write operation for IO read instruction {:?}.",
+                            instruction.mnemonic()
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         Ok(())
     }
 
@@ -317,7 +488,7 @@ impl BusOps {
         &mut self,
         context: &mut TestContext,
         cpu_type: ServerCpuType,
-        operand_size: InstructionSize,
+        _operand_size: InstructionSize,
         init_regs: &Registers,
         final_regs: &Registers,
     ) -> anyhow::Result<Option<MooException>> {
@@ -325,7 +496,7 @@ impl BusOps {
         let hash_memory = self.hash_memory();
         let sp_address = init_regs.stack_address();
         let mut have_stack_frame = false;
-        let mut flag_address = 0;
+        let flag_address;
         let mut stack_frame_idx = 0;
         let mut ivt_read_idx = 0;
 
@@ -455,7 +626,7 @@ impl BusOps {
         if have_stack_frame && have_two_consecutive_ivr_reads {
             // Look for 16-bit flag push.
             let first_push_addr = sp_address.saturating_sub(2);
-            let flag_word = init_regs.flags();
+            let flag_word = final_regs.flags();
             let found_word = hash_memory.read_u16(first_push_addr);
 
             if flag_word != found_word {

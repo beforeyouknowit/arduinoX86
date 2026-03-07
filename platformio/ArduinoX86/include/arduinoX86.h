@@ -176,7 +176,7 @@ void patch_brkem_pgm(InlineProgram *pgm, volatile registers1_t *regs);
 
 void convert_inline_registers(volatile void *inline_regs);
 void reverse_stack_buf();
-bool is_transfer_done();
+//bool is_transfer_done(); -> inlined
 void handle_fetch(uint8_t q);
 void handle_cpuid_state(uint8_t q);
 void handle_cpu_setup_state();
@@ -191,7 +191,7 @@ void handle_smm_load_386();
 void handle_smm_store_386();
 void handle_store_state();
 void handle_execute_state();
-void handle_execute_automatic();
+//void handle_execute_automatic();    -> inlined
 void handle_execute_finalize_state();
 void detect_fpu_type();
 void detect_cpu_type(uint32_t cpuid_cycles);

@@ -48,6 +48,10 @@
 
 #include <programs.h>
 
+inline void handle_execute_automatic() __attribute__((always_inline));
+inline void set_data_bus_width() __attribute__((always_inline));
+inline bool is_transfer_done() __attribute__((always_inline));
+
 Cpu CPU;
 Intel8288 I8288;
 
@@ -705,22 +709,22 @@ uint16_t read_nops(ActiveBusWidth width) {
   }
 }
 
+
 void set_data_bus_width() {
   if (!READ_BHE_PIN) {
     if ((CPU.address_latch() & 1) == 0) {
       // BHE is active, and address is even. Bus width is 16.
-      Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 16");
+      //Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 16");
       CPU.data_width = ActiveBusWidth::Sixteen;
     } else {
       // BHE is active, and address is odd. Bus width is EightHigh.
-      Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Odd)");
+      //Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Odd)");
       CPU.data_width = ActiveBusWidth::EightHigh;
     }
   } 
   else {
-    // If BHE is inactive, then we can't read an even address. So this must be
-    // EightLow.
-    Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Even)");
+    // If BHE is inactive, then we can't read an even address. So this must be EightLow.
+    //Controller.getBoard().debugPrintln(DebugType::BUS, "Bus width 8 (Even)");
     CPU.data_width = ActiveBusWidth::EightLow;
   }
 }
@@ -728,10 +732,10 @@ void set_data_bus_width() {
 void cycle() {
 
   // Resolve data bus from last cycle.
-  if (!CPU.data_bus_resolved && (!Controller.readMRDCPin() || !Controller.readIORCPin())) {
-    //Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
-    Controller.writeDataBus(CPU.data_bus, CPU.data_width);
-  }
+  // if (!CPU.data_bus_resolved && (!Controller.readMRDCPin() || !Controller.readIORCPin())) {
+  //   //Controller.getBoard().debugPrintln(DebugType::BUS, "## Resolving data bus ##");
+  //   Controller.writeDataBus(CPU.data_bus, CPU.data_width);
+  // }
 
   // First, tick the CPU and increment cycle count
   Controller.tickCpu();
@@ -747,10 +751,10 @@ void cycle() {
   // Save last address bus value for skipped bus cycle detection.
   CPU.last_address_bus = CPU.address_bus;
   CPU.address_bus = Controller.readAddressBus(false);
-  //CPU.data_bus = Controller.readDataBus(CPU.data_width, true);
 
-  CycleState cycle_state;
-  
+  static CycleState cycle_state;
+  bool ale = Controller.readALEPin();
+  uint32_t server_flags = ArduinoX86::Server.get_flags();
   cycle_state.cpu_status0 = CPU.status0;
   cycle_state.bus_command_bits = CPU.command_bits;
   cycle_state.bus_control_bits = Controller.readBusControllerControlLines();
@@ -779,7 +783,7 @@ void cycle() {
   // The ALE signal is issued to inform the motherboard to latch the address bus.
   // The full address is only valid on T1, when ALE is asserted, so if we need to
   // reference the address of the bus cycle later, we must latch it.
-  if (Controller.readALEPin()) {
+  if (ale) {
     // ALE signals start of bus cycle, so set cycle to t1.
     //Controller.getBoard().debugPrintln(DebugType::TSTATE, "## ALE is high, setting T-cycle to T1 ##");
     
@@ -791,7 +795,7 @@ void cycle() {
     CPU.bus_state_latched = CPU.bus_state;
     CPU.data_bus_resolved = false;
 
-#if defined(CPU_286)
+    #if defined(CPU_286)
     // Test for a missed bus cycle (occasionally happens on 286)
     // This is the case if the last bus cycle was Ti, and had the previous address on the bus,
     // and the previous bus address was odd
@@ -807,27 +811,42 @@ void cycle() {
       set_error("Missed bus cycle detected!");
       return;
     }
-#endif      
+    #endif      
   }
 
 
   // We always enter Tw from T3, as we can't tell if the read/write is done yet on T3.
   // Now that we have cycled, we can know if we need to transition to T4, skipping Tw.
-  switch (CPU.bus_cycle) {
-    case TW:
-      // Transition to T4 if read/write signals are complete
-      if (is_transfer_done()) {
-        CPU.bus_cycle = T4;
-        handle_fetch(q);
-      }
-      break;
-    case T4:
-      handle_fetch(q);
-      CPU.bus_state_latched = PASV;
-      break;
-    default:
-      break;
+  if (CPU.bus_cycle == TW) {
+    if (is_transfer_done()) {
+      // Read/write is done, so we can skip Tw and go to T4
+      CPU.bus_cycle = T4;
+    }
   }
+
+  if (CPU.bus_cycle == T4) {
+    if (CPU.have_queue_status) {
+      handle_fetch(q);
+    }
+    CPU.bus_state_latched = PASV;
+  }
+
+
+  // switch (CPU.bus_cycle) {
+  //   case TW:
+  //     // Transition to T4 if read/write signals are complete
+  //     if (is_transfer_done()) {
+  //       CPU.bus_cycle = T4;
+  //       handle_fetch(q);
+  //     }
+  //     break;
+  //   case T4:
+  //     handle_fetch(q);
+  //     CPU.bus_state_latched = PASV;
+  //     break;
+  //   default:
+  //     break;
+  // }
 
   cycle_state.cpu_state = static_cast<uint8_t>(CPU.bus_cycle);
 
@@ -915,6 +934,25 @@ void cycle() {
   // Handle state machine
   switch (ArduinoX86::Server.state()) {
 
+    // Unlike in run_program, the Execute state in cpu_server is entirely interactive based on
+    // commands from the client.
+    // This is to support interception of memory reads & writes as instructions execute and to allow
+    // the client to query CPU state as it wishes per cpu cycle.
+    // When done in the Execute state, a cpu client can end execution by:
+    //  - Executing an ExecuteFinalize command.
+    //    This is typically done when a CODE fetch occurs past the end of the provided program, although
+    //    other end conditions are possible.
+    //  - Executing a HALT
+    //  - Asserting NMI before the end of the instruction
+    case ServerState::Execute:
+      if (server_flags & CommandServer<BoardType, ShieldType>::FLAG_EXECUTE_AUTOMATIC) {
+        handle_execute_automatic();
+      }
+      else {
+        handle_execute_state();
+      }
+      break;
+
     case ServerState::Reset:
       // We are executing the CPU reset routine.
       // Nothing to do here.
@@ -967,25 +1005,6 @@ void cycle() {
     case ServerState::EmuEnter:
       // We are executing the BRKEM routine.
       handle_emu_enter_state(q);
-      break;
-
-    // Unlike in run_program, the Execute state in cpu_server is entirely interactive based on
-    // commands from the client.
-    // This is to support interception of memory reads & writes as instructions execute and to allow
-    // the client to query CPU state as it wishes per cpu cycle.
-    // When done in the Execute state, a cpu client can end execution by:
-    //  - Executing an ExecuteFinalize command.
-    //    This is typically done when a CODE fetch occurs past the end of the provided program, although
-    //    other end conditions are possible.
-    //  - Executing a HALT
-    //  - Asserting NMI before the end of the instruction
-    case ServerState::Execute:
-      if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, ShieldType>::FLAG_EXECUTE_AUTOMATIC) {
-        handle_execute_automatic();
-      }
-      else {
-        handle_execute_state();
-      }
       break;
 
     // Since Execute is an interactive state where the client controls the cpu_server, we need to be able
@@ -1241,11 +1260,11 @@ void cycle() {
   }
 
   // Log cycle state.
-  if (ArduinoX86::Server.get_flags() & CommandServer<BoardType, ShieldType>::FLAG_LOG_CYCLES) {
+  if (server_flags & CommandServer<BoardType, ShieldType>::FLAG_LOG_CYCLES) {
     cycle_state.data_bus = CPU.data_bus;
     cycle_state.pins = 0;
 
-    if (Controller.readALEPin()) {
+    if (ale) {
       cycle_state.pins |= CycleState::ALE;
     }
     if (Controller.readBHEPin()) {
@@ -1262,7 +1281,7 @@ void cycle() {
   
   // Handle wait states - doing this after logging cycle simulates READY going low sometime during
   // Tc.
-  if (Controller.readALEPin() && CPU.wait_states > 0) {
+  if (ale && CPU.wait_states > 0) {
     // Lower READY line on ALE.
     //Controller.getBoard().debugPrintln(DebugType::BUS, "## Wait state requested ##");
     //Controller.writePin(OutputPin::Ready, READY_DEASSERT);
@@ -1280,13 +1299,10 @@ void cycle() {
 void handle_fetch(uint8_t q) {
   // Did we complete a code fetch? If so, increment queue len
   if (CPU.bus_state_latched == CODE) {
-    //DEBUG_SERIAL.print("## T4 of CODE fetch. Q is: ");
-    //DEBUG_SERIAL.println(q);
-
-   Controller.getBoard().debugPrintln(DebugType::QUEUE, "## QUEUE: T4 of code fetch!");
+    //Controller.getBoard().debugPrintln(DebugType::QUEUE, "## QUEUE: T4 of code fetch!");
 
     if (q == QUEUE_FLUSHED) {
-      Controller.getBoard().debugPrintln(DebugType::QUEUE, "## Queue flush during T4.");
+      //Controller.getBoard().debugPrintln(DebugType::QUEUE, "## Queue flush during T4.");
       if (CPU.queue.have_room(CPU.data_width)) {
         CPU.queue.push(CPU.data_bus, CPU.data_type, CPU.data_width);
       } else {
@@ -1295,8 +1311,8 @@ void handle_fetch(uint8_t q) {
       }
     } else {
       if (CPU.queue.have_room(CPU.data_width)) {
-        Controller.getBoard().debugPrint(DebugType::QUEUE, "## QUEUE: T4, Pushing data bus to queue: ");
-        Controller.getBoard().debugPrintln(DebugType::QUEUE, CPU.data_bus, HEX);
+        //Controller.getBoard().debugPrint(DebugType::QUEUE, "## QUEUE: T4, Pushing data bus to queue: ");
+        //Controller.getBoard().debugPrintln(DebugType::QUEUE, CPU.data_bus, HEX);
         CPU.queue.push(CPU.data_bus, CPU.data_type, CPU.data_width);
       } else {
         // Shouldn't be here
@@ -1992,7 +2008,6 @@ void handle_execute_state() {
 
 /// @brief Handle program execution in automatic mode.
 void handle_execute_automatic() {
-
   bool cpu_mrdc = !Controller.readMRDCPin();
   bool cpu_iorc = !Controller.readIORCPin();
   bool cpu_mwtc = !Controller.readMWTCPin();
@@ -2660,31 +2675,27 @@ bool readParameterBytes(uint8_t *buf, size_t buf_len, size_t len)  {
 // Main sketch loop
 void loop() {
 
-  if (screen_init_requested && !screen_initialized) {
-    Board.debugPrintln(DebugType::SETUP, "Initializing screen...");
-    screen->init();
-    Board.debugPrintln(DebugType::SETUP, "Screen initialized!");
-    last_millis = millis();
+  // if (screen_init_requested && !screen_initialized) {
+  //   Board.debugPrintln(DebugType::SETUP, "Initializing screen...");
+  //   screen->init();
+  //   Board.debugPrintln(DebugType::SETUP, "Screen initialized!");
+  //   last_millis = millis();
 
-    // Draw cpu status.
-    size_t idx = static_cast<size_t>(CPU.cpu_type);
-    screen->updateCell(0, 0, screen->makeColor(255, 255, 255), CPU_TYPE_STRINGS[idx]);
+  //   // Draw cpu status.
+  //   size_t idx = static_cast<size_t>(CPU.cpu_type);
+  //   screen->updateCell(0, 0, screen->makeColor(255, 255, 255), CPU_TYPE_STRINGS[idx]);
 
-    screen_initialized = true;
-  }
-
-  do_frame_update();
+  //   screen_initialized = true;
+  // }
+  //do_frame_update();
+  
   ArduinoX86::Server.run();
 
-  bool executing = (ArduinoX86::Server.get_state() == ServerState::Execute) ||
-                  (ArduinoX86::Server.get_state() == ServerState::ExecuteFinalize) ||
-                  (ArduinoX86::Server.get_state() == ServerState::ExecuteDone) ||
-                  (ArduinoX86::Server.get_state() == ServerState::Store) ||
-                  (ArduinoX86::Server.get_state() == ServerState::StoreAll);
-
-  if (executing && (ArduinoX86::Server.is_execute_automatic())) {
+  bool do_cycle = false;
+  if (ArduinoX86::Server.is_executing() && (ArduinoX86::Server.is_execute_automatic())) {
     CPU.execute_cycle_ct++;
-    cycle();
+    do_cycle = true;
+
     // if (CPU.execute_cycle_ct < EXECUTE_TIMEOUT) {
     //   cycle();
     // }
@@ -2697,7 +2708,10 @@ void loop() {
     // If we are in error state, we still want to cycle the CPU to allow it to
     // process the error.
     CPU.error_cycle_ct++;
-    cycle();
+    do_cycle = true;
   }
 
+  if (do_cycle) {
+    cycle();
+  }
 }

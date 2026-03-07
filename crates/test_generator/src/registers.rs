@@ -21,18 +21,21 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use crate::cpu_common::{Register16, Register32};
+use crate::{
+    config::WeightedValue,
+    cpu_common::{Register16, Register32},
+};
 use arduinox86_client::{
     registers_common::{RandomizeOpts, SegmentSize},
     Registers32,
 };
-use moo::{
-    prelude::{MooRegisters16Init, MooRegisters32Init},
-    types::{MooRegisters, MooRegisters16, MooRegisters32, MooRegistersInit},
-};
+use iced_x86::Mnemonic;
+use moo::prelude::*;
+use rand::distr::weighted::WeightedIndex;
 use rand_distr::Beta;
 use std::io::{Seek, Write};
 
+#[derive(Debug)]
 pub enum Registers {
     V1(arduinox86_client::RemoteCpuRegistersV1),
     V2(arduinox86_client::RemoteCpuRegistersV2),
@@ -237,19 +240,22 @@ impl TryFrom<&Registers> for MooRegisters32 {
 }
 
 impl Registers {
+    pub const POP_FLAGS_MASK: u32 = 0b0000111011010111;
+
     pub fn randomize(
         &mut self,
         opts: &RandomizeOpts,
-        rand: &mut rand::rngs::StdRng,
+        rng: &mut rand::rngs::StdRng,
         beta: &mut Beta<f64>,
+        weighted_index: &WeightedIndex<f32>,
         inject_values: &[u32],
     ) {
         match self {
             Registers::V1(_regs) => {
                 //gen_regs::randomize_v1(&self.context, &self.config.test_gen, regs);
             }
-            Registers::V2(regs) => regs.randomize(opts, rand, beta, inject_values),
-            Registers::V3A(regs) => regs.randomize(opts, rand, beta, inject_values),
+            Registers::V2(regs) => regs.randomize(opts, rng, beta, weighted_index, inject_values),
+            Registers::V3A(regs) => regs.randomize(opts, rng, beta, weighted_index, inject_values),
             Registers::V3B(_) => {
                 // B registers don't need randomization as they are output
             }
@@ -264,7 +270,7 @@ impl Registers {
             }
             Registers::V2(regs) => regs.to_buffer(buf),
             Registers::V3A(regs) => _ = regs.to_buffer(buf),
-            Registers::V3B(regs) => {}
+            Registers::V3B(_regs) => {}
         }
     }
 
@@ -301,6 +307,14 @@ impl Registers {
             Registers::V2(regs) => regs.ip,
             Registers::V3A(regs) => regs.eip as u16,
             Registers::V3B(regs) => regs.eip as u16,
+        }
+    }
+    pub fn eip(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => regs.ip as u32,
+            Registers::V2(regs) => regs.ip as u32,
+            Registers::V3A(regs) => regs.eip,
+            Registers::V3B(regs) => regs.eip,
         }
     }
     pub fn cs(&self) -> u16 {
@@ -386,7 +400,7 @@ impl Registers {
                 iced_x86::Register::CS => Some(regs.cs_desc.limit()),
                 _ => None,
             },
-            Registers::V3B(regs) => None,
+            Registers::V3B(_regs) => None,
         }
     }
     pub fn segment_base(&self, segment: iced_x86::Register) -> Option<u32> {
@@ -499,6 +513,22 @@ impl Registers {
             Registers::V3B(regs) => regs.ecx = value,
         }
     }
+    pub fn dx(&self) -> u16 {
+        match self {
+            Registers::V1(regs) => regs.dx,
+            Registers::V2(regs) => regs.dx,
+            Registers::V3A(regs) => regs.edx as u16,
+            Registers::V3B(regs) => regs.edx as u16,
+        }
+    }
+    pub fn edx(&self) -> u32 {
+        match self {
+            Registers::V1(regs) => regs.dx as u32,
+            Registers::V2(regs) => regs.dx as u32,
+            Registers::V3A(regs) => regs.edx,
+            Registers::V3B(regs) => regs.edx,
+        }
+    }
     pub fn sp(&self) -> u16 {
         match self {
             Registers::V1(regs) => regs.sp,
@@ -559,4 +589,245 @@ impl Registers {
             _ => 0,
         }
     }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let moo_registers = MooRegisters::try_from(self)
+            .map_err(|e| anyhow::anyhow!("Failed to convert registers to MooRegisters: {}", e))?;
+
+        // Check for reserved bit. Flags shouldn't be 0.
+        let flags = moo_registers.flags();
+        if flags & 0x0002 == 0 {
+            // Reserved bit is not set.
+            return Err(anyhow::anyhow!("Reserved bit in flags is not set: {:04X}", flags,));
+        }
+
+        Ok(())
+    }
+}
+
+pub fn compare_registers(regs0: &MooRegisters, regs1: &MooRegisters) {
+    match (regs0, regs1) {
+        (MooRegisters::Sixteen(regs0_inner), MooRegisters::Sixteen(regs1_inner)) => {
+            compare_registers16(regs0_inner, regs1_inner);
+        }
+        (MooRegisters::ThirtyTwo(regs0_inner), MooRegisters::ThirtyTwo(regs1_inner)) => {
+            compare_registers32(regs0_inner, regs1_inner);
+        }
+        _ => {
+            println!("Incompatible register types for comparison!");
+        }
+    }
+}
+
+pub fn compare_registers16(regs0: &MooRegisters16, regs1: &MooRegisters16) {
+    if regs0.ax != regs1.ax {
+        println!("AX mismatch: {:04X} != {:04X}", regs0.ax, regs1.ax);
+    }
+    if regs0.bx != regs1.bx {
+        println!("BX mismatch: {:04X} != {:04X}", regs0.bx, regs1.bx);
+    }
+    if regs0.cx != regs1.cx {
+        println!("CX mismatch: {:04X} != {:04X}", regs0.cx, regs1.cx);
+    }
+    if regs0.dx != regs1.dx {
+        println!("DX mismatch: {:04X} != {:04X}", regs0.dx, regs1.dx);
+    }
+    if regs0.sp != regs1.sp {
+        println!("SP mismatch: {:04X} != {:04X}", regs0.sp, regs1.sp);
+    }
+    if regs0.bp != regs1.bp {
+        println!("BP mismatch: {:04X} != {:04X}", regs0.bp, regs1.bp);
+    }
+    if regs0.si != regs1.si {
+        println!("SI mismatch: {:04X} != {:04X}", regs0.si, regs1.si);
+    }
+    if regs0.di != regs1.di {
+        println!("DI mismatch: {:04X} != {:04X}", regs0.di, regs1.di);
+    }
+    if regs0.cs != regs1.cs {
+        println!("CS mismatch: {:04X} != {:04X}", regs0.cs, regs1.cs);
+    }
+    if regs0.ds != regs1.ds {
+        println!("DS mismatch: {:04X} != {:04X}", regs0.ds, regs1.ds);
+    }
+    if regs0.es != regs1.es {
+        println!("ES mismatch: {:04X} != {:04X}", regs0.es, regs1.es);
+    }
+    if regs0.ss != regs1.ss {
+        println!("SS mismatch: {:04X} != {:04X}", regs0.ss, regs1.ss);
+    }
+    if regs0.ip != regs1.ip {
+        println!("IP mismatch: {:04X} != {:04X}", regs0.ip, regs1.ip);
+    }
+    if regs0.flags != regs1.flags {
+        println!("FLAGS mismatch: {:04X} != {:04X}", regs0.flags, regs1.flags);
+    }
+}
+
+pub fn compare_registers32(regs0: &MooRegisters32, regs1: &MooRegisters32) {
+    match regs1.cr0() {
+        Some(regs1_cr0) => {
+            if regs0.cr0 != regs1_cr0 {
+                println!("CR0 mismatch: {:08X} != {:08X}", regs0.cr0, regs1_cr0);
+            }
+        }
+        None => {
+            if regs0.cr0().is_some() {
+                println!("CR0 mismatch: {:08X} != None", regs0.cr0);
+            }
+        }
+    }
+
+    if let Some(regs1_cr3) = regs1.cr3() {
+        if regs0.cr3 != regs1_cr3 {
+            println!("CR3 mismatch: {:08X} != {:08X}", regs0.cr3, regs1_cr3);
+        }
+    }
+    if let Some(regs1_eax) = regs1.eax() {
+        if regs0.eax != regs1_eax {
+            println!("EAX mismatch: {:08X} != {:08X}", regs0.eax, regs1_eax);
+        }
+    }
+    if let Some(regs1_ebx) = regs1.ebx() {
+        if regs0.ebx != regs1_ebx {
+            println!("EBX mismatch: {:08X} != {:08X}", regs0.ebx, regs1_ebx);
+        }
+    }
+    if let Some(regs1_ecx) = regs1.ecx() {
+        if regs0.ecx != regs1_ecx {
+            println!("ECX mismatch: {:08X} != {:08X}", regs0.ecx, regs1_ecx);
+        }
+    }
+    if let Some(regs1_edx) = regs1.edx() {
+        if regs0.edx != regs1_edx {
+            println!("EDX mismatch: {:08X} != {:08X}", regs0.edx, regs1_edx);
+        }
+    }
+    if let Some(regs1_esp) = regs1.esp() {
+        if regs0.esp != regs1_esp {
+            println!("ESP mismatch: {:08X} != {:08X}", regs0.esp, regs1_esp);
+        }
+    }
+    if let Some(regs1_ebp) = regs1.ebp() {
+        if regs0.ebp != regs1_ebp {
+            println!("EBP mismatch: {:08X} != {:08X}", regs0.ebp, regs1_ebp);
+        }
+    }
+    if let Some(regs1_esi) = regs1.esi() {
+        if regs0.esi != regs1_esi {
+            println!("ESI mismatch: {:08X} != {:08X}", regs0.esi, regs1.esi);
+        }
+    }
+    if let Some(regs1_edi) = regs1.edi() {
+        if regs0.edi != regs1_edi {
+            println!("EDI mismatch: {:08X} != {:08X}", regs0.edi, regs1.edi);
+        }
+    }
+    if let Some(regs1_cs) = regs1.cs() {
+        if regs0.cs != regs1_cs.into() {
+            println!("CS mismatch: {:04X} != {:04X}", regs0.cs, regs1_cs);
+        }
+    }
+    if let Some(regs1_ds) = regs1.ds() {
+        if regs0.ds != regs1_ds.into() {
+            println!("DS mismatch: {:04X} != {:04X}", regs0.ds, regs1_ds);
+        }
+    }
+    if let Some(regs1_es) = regs1.es() {
+        if regs0.es != regs1_es.into() {
+            println!("ES mismatch: {:04X} != {:04X}", regs0.es, regs1_es);
+        }
+    }
+    if let Some(regs1_fs) = regs1.fs() {
+        if regs0.fs != regs1_fs.into() {
+            println!("FS mismatch: {:04X} != {:04X}", regs0.fs, regs1_fs);
+        }
+    }
+    if let Some(regs1_gs) = regs1.gs() {
+        if regs0.gs != regs1_gs.into() {
+            println!("GS mismatch: {:04X} != {:04X}", regs0.gs, regs1_gs);
+        }
+    }
+    if let Some(regs1_ss) = regs1.ss() {
+        if regs0.ss != regs1_ss.into() {
+            println!("SS mismatch: {:04X} != {:04X}", regs0.ss, regs1_ss);
+        }
+    }
+    if let Some(regs1_eip) = regs1.eip() {
+        if regs0.eip != regs1_eip {
+            println!("EIP mismatch: {:08X} != {:08X}", regs0.eip, regs1_eip);
+        }
+    }
+    if let Some(regs1_eflags) = regs1.eflags() {
+        if regs0.eflags != regs1_eflags {
+            println!("EFLAGS mismatch: {:08X} != {:08X}", regs0.eflags, regs1_eflags);
+        }
+    }
+    if let Some(regs1_dr6) = regs1.dr6() {
+        if regs0.dr6 != regs1_dr6 {
+            println!("DR6 mismatch: {:08X} != {:08X}", regs0.dr6, regs1_dr6);
+        }
+    }
+    if let Some(regs1_dr7) = regs1.dr7() {
+        if regs0.dr7 != regs1_dr7 {
+            println!("DR7 mismatch: {:08X} != {:08X}", regs0.dr7, regs1_dr7);
+        }
+    }
+}
+
+pub fn validate_register_delta(
+    mnemonic: Mnemonic,
+    initial_regs: &Registers,
+    final_regs: &Registers,
+) -> anyhow::Result<()> {
+    let moo_initial = MooRegisters::try_from(initial_regs)
+        .map_err(|e| anyhow::anyhow!("Failed to convert initial registers: {}", e))?;
+    let moo_final =
+        MooRegisters::try_from(final_regs).map_err(|e| anyhow::anyhow!("Failed to convert final registers: {}", e))?;
+
+    let mut error = false;
+
+    if let (MooRegisters::Sixteen(moo_initial_i), MooRegisters::Sixteen(moo_final_i)) = (moo_initial, moo_final) {
+        if !matches!(mnemonic, Mnemonic::Xchg) {
+            if (moo_initial_i.ax != moo_initial_i.cx) && (moo_final_i.ax == moo_initial_i.cx) {
+                error = true;
+            }
+            if (moo_initial_i.cx != moo_initial_i.dx) && (moo_final_i.cx == moo_initial_i.dx) {
+                error = true;
+            }
+            if (moo_initial_i.dx != moo_initial_i.bx) && (moo_final_i.dx == moo_initial_i.bx) {
+                error = true;
+            }
+            if (moo_initial_i.bx != moo_initial_i.sp) && (moo_final_i.bx == moo_initial_i.sp) {
+                error = true;
+            }
+            if (moo_initial_i.sp != moo_initial_i.bp) && (moo_final_i.sp == moo_initial_i.bp) {
+                error = true;
+            }
+            if (moo_initial_i.bp != moo_initial_i.si) && (moo_final_i.bp == moo_initial_i.si) {
+                error = true;
+            }
+            if (moo_initial_i.si != moo_initial_i.di) && (moo_final_i.si == moo_initial_i.di) {
+                error = true;
+            }
+            if (moo_initial_i.di != moo_initial_i.es) && (moo_final_i.di == moo_initial_i.es) {
+                error = true;
+            }
+            if (moo_initial_i.es != moo_initial_i.cs) && (moo_final_i.es == moo_initial_i.cs) {
+                error = true;
+            }
+            if (moo_initial_i.cs != moo_initial_i.ss) && (moo_final_i.cs == moo_initial_i.ss) {
+                error = true;
+            }
+            if (moo_initial_i.ss != moo_initial_i.ds) && (moo_final_i.ss == moo_initial_i.ds) {
+                error = true;
+            }
+        }
+    }
+
+    if error {
+        log::error!("Possible off-by-one STOREALL register error detected!");
+        return Err(anyhow::anyhow!("Possible off-by-one STOREALL register error detected!"));
+    }
+    Ok(())
 }

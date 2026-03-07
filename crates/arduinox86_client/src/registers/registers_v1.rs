@@ -24,7 +24,7 @@ use crate::RemoteCpuRegistersV2;
 use binrw::binrw;
 
 #[cfg(feature = "use_moo")]
-use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
+use moo::prelude::*;
 
 #[binrw]
 #[brw(little)]

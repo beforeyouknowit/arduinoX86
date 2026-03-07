@@ -212,7 +212,7 @@ impl From<&MooCpuType> for ServerCpuType {
             MooCpuType::NecV30 => ServerCpuType::NecV30,
             MooCpuType::Intel80188 => ServerCpuType::Intel80188(false),
             MooCpuType::Intel80186 => ServerCpuType::Intel80186(false),
-            MooCpuType::Intel80286 => ServerCpuType::Intel80286,
+            MooCpuType::Intel80286 | MooCpuType::Harris80C286 => ServerCpuType::Intel80286,
             MooCpuType::Intel80386Ex => ServerCpuType::Intel80386,
         }
     }

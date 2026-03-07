@@ -2288,9 +2288,10 @@ dependencies = [
 [[package]]
 name = "moo-rs"
 version = "0.3.0"
-source = "git+https://github.com/dbalsom/moo#b2e7512173af3f29b6f709911d97b4a485197b3a"
+source = "git+https://github.com/dbalsom/moo#f4e692497c84df86da912cd22a09a0a27906c720"
 dependencies = [
  "binrw",
+ "document-features",
  "env_logger",
  "log",
  "serde",

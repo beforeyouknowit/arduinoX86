@@ -21,7 +21,7 @@
     DEALINGS IN THE SOFTWARE.
 */
 
-use crate::{global_trace_banner, global_trace_log, trace_banner, trace_log, ExceptionSeenEntry, TestContext};
+use crate::{global_trace_banner, global_trace_log, ExceptionSeenEntry, TestContext};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -134,7 +134,7 @@ impl GenerationStats {
             .filter(|(entry, _)| entry.sib)
             .collect::<Vec<(&ExceptionSeenEntry, &usize)>>();
 
-        sib_exceptions.sort_by_key(|f| f.0);
+        sib_exceptions.sort_by_key(|f| f.0.exception_number);
 
         if !sib_exceptions.is_empty() {
             global_trace_log!(context, "Exceptions seen (SIB):");

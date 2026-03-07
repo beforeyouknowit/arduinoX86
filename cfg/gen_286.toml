@@ -5,21 +5,26 @@ cpu_type = "Intel80286"
 # Execution mode - Real, Unreal, Protected
 cpu_mode = "Real"
 base_seed = 0xDEADBEEF
+stop_on_error = true
 # Termination method - Queue, Halt
 termination_condition = "Halt"
 test_output_dir = "e:/test_output_286"
 trace_output_dir = "trace"
-verify_trace_output_dir = "verify_trace"
+validate_output_dir = "validate"
+skip_validated = true
 trace_file_suffix = "_trace.log"
-moo_version = 1
+error_file_suffix = "_error.log"
+moo_version_major = 1
+moo_version_minor = 1
 moo_arch = "C286"
 gen_widths = ["Sixteen"] # 16-bit only
 
 address_mask = 0xFFFFFF # 24-bit address mask for 286
 ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
+max_normal_cycles = 300 # Maximum normal instruction cycles (non-string op)
+max_normal_bus_ops = 16 # Maximum normal bus operations (non-string op)
 
-extended_opcode = false # Use extended opcodes (0x0F)
 opcode_range = [0x00, 0xFF]
 group_extension_range = [0, 7] # Range for group extensions
 
@@ -66,10 +71,15 @@ sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
 sp_max_value = 0xFFFF # Maximum value for SP
 
+instruction_pad = 6 # Number of padding bytes to add after each instruction. This should be able to account for SIB + 32bit displacement + 32bit immediate.
+
 # Ban certain near branch immediate values
 near_branch_ban = [
     0x08, # On the 286, this branch value happens to land exactly where the next fetch would occur, making the jump undetectable.
 ]
+
+# Ban certain IO ports (they have side effects on some CPUs)
+io_port_ban = []
 
 # Segment descriptor table strategies
 segment_limit_min = 0x000FFF # Minimum segment limit size
@@ -503,6 +513,10 @@ print_instruction = true
 print_initial_regs = false
 print_final_regs = false
 show_gen_time = true
+
+[test_exec.validate_mode]
+attempts = 2 # Number of attempts to validate a test
+move_after_validate = true # Move test to validated directory after successful validation
 
 [metadata]
 repo = "https://github.com/SingleStepTests/80286"

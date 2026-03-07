@@ -31,18 +31,18 @@
 template<typename Board, typename Shield>
 class BoardController {
   Board& board;
-  Shield shield;  // Add Shield instance to maintain state
+  Shield shield_;  // Add Shield instance to maintain state
   bool ale_interrupt_enabled_ = false;
 
 public:
-  explicit BoardController(Board& b) : board(b), shield() {}
-  
+  explicit BoardController(Board& b) : board(b), shield_() {}
+
   // Constructor that allows passing Shield constructor parameters
   template<typename... HatArgs>
-  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), shield(std::forward<HatArgs>(hatArgs)...) {}
-  
+  explicit BoardController(Board& b, HatArgs&&... hatArgs) : board(b), shield_(std::forward<HatArgs>(hatArgs)...) {}
+
   CpuResetResult resetCpu() {
-    return shield.resetCpu(board);
+    return shield_.resetCpu(board);
   }
 
   Board& getBoard() {
@@ -71,10 +71,6 @@ public:
     }
   }
 
-  void tickCpu() {
-    shield.tickCpu();
-  }
-
   static int getAddressBusWidth() {
     return Shield::getAddressBusWidth();
   }
@@ -95,17 +91,10 @@ public:
     return Shield::getNextCycle(current_cycle, current_status, latched_status);
   }
 
-  uint16_t readDataBus(ActiveBusWidth width, bool peek = false) {
-    return shield.readDataBus(width, peek);
-  }
-
-  void writeDataBus(uint16_t data, ActiveBusWidth width) {
-    shield.writeDataBus(data, width);
-  }
-
-  uint32_t readAddressBus(bool peek) {
-    return shield.readAddressBus(peek);
-  }
+  inline uint16_t readDataBus(ActiveBusWidth width, bool peek = false) __attribute__((always_inline));
+  inline void writeDataBus(uint16_t data, ActiveBusWidth width) __attribute__((always_inline));
+  inline void tickCpu() __attribute__((always_inline));
+  inline uint32_t readAddressBus(bool peek) __attribute__((always_inline));
 
   static void writePin(OutputPin pin, bool value) {
     Shield::writePin(pin, value);
@@ -116,15 +105,15 @@ public:
   }
 
   uint8_t readCpuStatusLines() {
-    return shield.readCpuStatusLines();
+    return shield_.readCpuStatusLines();
   }
 
   uint8_t readBusControllerCommandLines() {
-    return shield.readBusControllerCommandLines();
+    return shield_.readBusControllerCommandLines();
   }
 
   uint8_t readBusControllerControlLines() {
-    return shield.readBusControllerControlLines();
+    return shield_.readBusControllerControlLines();
   }
 
   bool cpuIsReading(BusTransferType &read_type) const {
@@ -151,47 +140,85 @@ public:
     return Shield::hasMultiplexedBus();
   }
 
-  bool readBHEPin() {
-    return shield.readBHEPin();
-  }
-
-  bool readALEPin() {
-    return shield.readALEPin();
-  }
-
   bool readLockPin() {
-    return shield.readLockPin();
+    return shield_.readLockPin();
   }
 
   bool readReadyPin() {
-    return shield.readReadyPin();
+    return shield_.readReadyPin();
   }
-
-  bool readMRDCPin() {
-    return shield.readMRDCPin();
-  }
-
-  bool readAMWCPin() {
-    return shield.readAMWCPin();
-  }
-
-  bool readMWTCPin() {
-    return shield.readMWTCPin();
-  }
-
-  bool readIORCPin() {
-    return shield.readIORCPin();
-  }
-
-  bool readIOWCPin() {
-    return shield.readIOWCPin();
-  }
-
-  bool readAIOWCPin() {
-    return shield.readAIOWCPin();
-  }
+  
+  inline bool readBHEPin() __attribute__((always_inline)); 
+  inline bool readALEPin() __attribute__((always_inline));
+  inline bool readMRDCPin() __attribute__((always_inline));
+  inline bool readAMWCPin() __attribute__((always_inline));
+  inline bool readMWTCPin() __attribute__((always_inline));
+  inline bool readIORCPin() __attribute__((always_inline));
+  inline bool readIOWCPin() __attribute__((always_inline));
+  inline bool readAIOWCPin() __attribute__((always_inline));
 
   void printPinStates() {
-    shield.printPinStates(board);
+    shield_.printPinStates(board);
   }
 };
+
+template<class BoardType, class ShieldType>
+uint32_t BoardController<BoardType, ShieldType>::readAddressBus(bool peek) {
+  return shield_.readAddressBus(peek);
+}
+
+template<class BoardType, class ShieldType>
+void BoardController<BoardType, ShieldType>::tickCpu() {
+    shield_.tickCpu();
+}
+
+template<class BoardType, class ShieldType>
+uint16_t BoardController<BoardType, ShieldType>::readDataBus(ActiveBusWidth width, bool peek) {
+  return shield_.readDataBus(width, peek);
+}
+
+template<class BoardType, class ShieldType>
+void BoardController<BoardType, ShieldType>::writeDataBus(uint16_t data, ActiveBusWidth width) {
+  shield_.writeDataBus(data, width);
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readBHEPin() {
+  return shield_.readBHEPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readALEPin() {
+  return shield_.readALEPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readMRDCPin() {
+  return shield_.readMRDCPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readAMWCPin() {
+  return shield_.readAMWCPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readMWTCPin() {
+  return shield_.readMWTCPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readIORCPin() {
+  return shield_.readIORCPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readIOWCPin() {
+  return shield_.readIOWCPin();
+}
+
+template<class BoardType, class ShieldType>
+bool BoardController<BoardType, ShieldType>::readAIOWCPin() {
+  return shield_.readAIOWCPin();
+}
+

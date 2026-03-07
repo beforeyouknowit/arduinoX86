@@ -71,33 +71,45 @@ class ShieldBase {
       static_cast<Derived*>(this)->writeDataBusImpl(b, d, w);
     }
 
+    inline __attribute__((always_inline))
     uint32_t readAddressBus(bool peek) {
        return static_cast<Derived*>(this)->readAddressBusImpl(peek);
     }
 
+    inline __attribute__((always_inline))
     int8_t readCpuStatusLines() {
        return static_cast<Derived*>(this)->readCpuStatusLinesImpl();
     }
 
+    inline __attribute__((always_inline))
     static bool cpuIsReading(BusTransferType &read_type) {
        return Derived::cpuIsReadingImpl(read_type);
     }
 
+    inline __attribute__((always_inline))
     static bool cpuIsWriting(BusTransferType &write_type) {
        return Derived::cpuIsWritingImpl(write_type);
     }
 
+    inline __attribute__((always_inline))
     bool readBHEPin()   { return static_cast<Derived*>(this)->readBHEPinImpl(); }
+    inline __attribute__((always_inline))
     bool readLockPin()  { return static_cast<Derived*>(this)->readLockPinImpl(); }
+    inline __attribute__((always_inline))
     bool readReadyPin() { return static_cast<Derived*>(this)->readReadyPinImpl(); }
-
-    // The following methods are not static as they may need to access state for bus controller emulation.
+    inline __attribute__((always_inline))
     bool readALEPin()   { return static_cast<Derived*>(this)->readALEPinImpl(); }
+    inline __attribute__((always_inline))
     bool readMRDCPin()  { return static_cast<Derived*>(this)->readMRDCPinImpl(); }
+    inline __attribute__((always_inline))
     bool readAMWCPin()  { return static_cast<Derived*>(this)->readAMWCPinImpl(); }
+    inline __attribute__((always_inline))
     bool readMWTCPin()  { return static_cast<Derived*>(this)->readMWTCPinImpl(); }
+    inline __attribute__((always_inline))
     bool readIORCPin()  { return static_cast<Derived*>(this)->readIORCPinImpl(); }
+    inline __attribute__((always_inline))
     bool readIOWCPin()  { return static_cast<Derived*>(this)->readIOWCPinImpl(); }
+    inline __attribute__((always_inline))
     bool readAIOWCPin() { return static_cast<Derived*>(this)->readAIOWCPinImpl(); }
 
     template<typename Board>

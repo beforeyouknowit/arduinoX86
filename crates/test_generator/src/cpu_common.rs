@@ -22,13 +22,15 @@
 */
 #![allow(dead_code)]
 
-use crate::{trace_banner, trace_log, TestContext};
-use arduinox86_client::Registers32;
 use std::{
     borrow::Borrow,
     fmt::{Debug, Display, Formatter},
 };
 
+use crate::{trace_banner, trace_log, TestContext};
+
+use anyhow::{anyhow, Result};
+use arduinox86_client::Registers32;
 use moo::types::effective_address::MooEffectiveAddress;
 
 #[derive(Copy, Clone, Debug)]
@@ -404,6 +406,21 @@ macro_rules! disp_hex {
     }};
 }
 
+macro_rules! disp_hex_or_decimal {
+    ($t:ty, $x:expr) => {{
+        // Accept value or reference: coerce to &T via Borrow, then copy out (Copy for ints).
+        let v: $t = *<$t as Borrow<$t>>::borrow(&$x);
+
+        let mag = v.unsigned_abs() as u32; // magnitude as unsigned
+        if mag < 10 {
+            format!("{v}")
+        }
+        else {
+            format!("{v:X}h")
+        }
+    }};
+}
+
 macro_rules! signed_hex {
     ($t:ty, $x:expr) => {{
         // Accept value or reference: coerce to &T via Borrow, then copy out (Copy for ints).
@@ -449,7 +466,7 @@ impl Display for AddressOffset16 {
             BpDi => write!(f, "bp+di"),
             Si => write!(f, "si"),
             Di => write!(f, "di"),
-            Disp16(disp) => write!(f, "{}", disp_hex!(i16, disp)),
+            Disp16(disp) => write!(f, "{}", disp_hex_or_decimal!(i16, disp)),
             Bx => write!(f, "bx"),
             BxSiDisp8(disp) => write!(f, "bx+si{}", signed_hex!(i8, disp)),
             BxDiDisp8(disp) => write!(f, "bx+di{}", signed_hex!(i8, disp)),
@@ -480,7 +497,7 @@ impl Display for AddressOffset32 {
             Ecx => write!(f, "ecx"),
             Edx => write!(f, "edx"),
             Ebx => write!(f, "ebx"),
-            Disp32(disp) => write!(f, "{}", disp_hex!(i32, disp)),
+            Disp32(disp) => write!(f, "{}", disp_hex_or_decimal!(i32, disp)),
             Ebp => write!(f, "ebp"),
             Esi => write!(f, "esi"),
             Edi => write!(f, "edi"),
@@ -754,15 +771,15 @@ impl From<SegmentRegister> for iced_x86::Register {
     }
 }
 
-impl From<SegmentRegister> for moo::types::MooSegmentRegister {
+impl From<SegmentRegister> for moo::registers::MooSegmentRegister {
     fn from(value: SegmentRegister) -> Self {
         match value {
-            SegmentRegister::ES => moo::types::MooSegmentRegister::ES,
-            SegmentRegister::CS => moo::types::MooSegmentRegister::CS,
-            SegmentRegister::SS => moo::types::MooSegmentRegister::SS,
-            SegmentRegister::DS => moo::types::MooSegmentRegister::DS,
-            SegmentRegister::FS => moo::types::MooSegmentRegister::FS,
-            SegmentRegister::GS => moo::types::MooSegmentRegister::GS,
+            SegmentRegister::ES => moo::registers::MooSegmentRegister::ES,
+            SegmentRegister::CS => moo::registers::MooSegmentRegister::CS,
+            SegmentRegister::SS => moo::registers::MooSegmentRegister::SS,
+            SegmentRegister::DS => moo::registers::MooSegmentRegister::DS,
+            SegmentRegister::FS => moo::registers::MooSegmentRegister::FS,
+            SegmentRegister::GS => moo::registers::MooSegmentRegister::GS,
         }
     }
 }
@@ -1013,11 +1030,13 @@ impl TryFrom<BusStatusByte> for BusOpType {
                 0b00 => Ok(BusOpType::CodeRead),
                 0b001 => Ok(BusOpType::IoRead),
                 0b010 => Ok(BusOpType::IoWrite),
+                0b011 => Ok(BusOpType::Halt),
                 0b101 => Ok(BusOpType::MemRead),
                 0b110 => Ok(BusOpType::MemWrite),
                 _ => Err(()),
             },
             BusStatusByte::V2(v) => match v & 0xF {
+                0b0100 => Ok(BusOpType::Halt),
                 0b0101 => Ok(BusOpType::MemRead),
                 0b0110 => Ok(BusOpType::MemWrite),
                 0b1001 => Ok(BusOpType::IoRead),
@@ -1029,6 +1048,7 @@ impl TryFrom<BusStatusByte> for BusOpType {
                 0b010 => Ok(BusOpType::IoRead),
                 0b011 => Ok(BusOpType::IoWrite),
                 0b100 => Ok(BusOpType::CodeRead),
+                0b101 => Ok(BusOpType::Halt),
                 0b110 => Ok(BusOpType::MemRead),
                 0b111 => Ok(BusOpType::MemWrite),
                 _ => Err(()),
@@ -1044,6 +1064,7 @@ pub enum BusOpType {
     MemWrite,
     IoRead,
     IoWrite,
+    Halt,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1056,9 +1077,26 @@ pub struct BusOp {
     pub flags: u8,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum BusOpPayload {
+    Byte(u8),
+    Word(u16),
+}
+
 impl BusOp {
     pub const FLAG_PAIRED: u8 = 0x01;
     pub const FLAG_STACK: u8 = 0x02;
+
+    pub fn payload(&self) -> Result<BusOpPayload> {
+        let a0 = (self.addr & 0x1) != 0;
+
+        match (self.bhe, a0) {
+            (true, false) => Ok(BusOpPayload::Word(self.data)),
+            (true, true) => Ok(BusOpPayload::Byte((self.data >> 8) as u8)),
+            (false, false) => Ok(BusOpPayload::Byte((self.data & 0xFF) as u8)),
+            (false, true) => Err(anyhow!("Invalid bus operation: byte access with BHE=0 and A0=1")),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]

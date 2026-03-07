@@ -68,108 +68,6 @@ void CommandServer<BoardType,ShieldType>::reset()
   commandState_ = CommandState::WaitingForCommand;
 }
 
-/// @brief Runs the command server, processing incoming commands and executing them.
-/// @tparam BoardType 
-/// @tparam ShieldType 
-template<typename BoardType, typename ShieldType>
-void CommandServer<BoardType,ShieldType>::run()
-{
-
-  switch (commandState_) {
-
-    case CommandState::WaitingForCommand:
-      if (proto_available() > 0) {
-        uint8_t cmd_byte = proto_read();
-
-        // DEBUG_SERIAL.print("Received opcode: 0x");
-        // DEBUG_SERIAL.println(cmd_byte, HEX);
-
-        if (cmd_byte >= static_cast<uint8_t>(ServerCommand::CmdInvalid)) {
-          send_fail();
-          break;
-        }
-
-        // Valid command, enter ReadingCommand state
-        cmd_ = static_cast<ServerCommand>(cmd_byte);
-        if (cmd_ != ServerCommand::CmdServerStatus) {
-          controller_.getBoard().debugPrintf(
-            DebugType::CMD, 
-            false, 
-            "## CMD: Received command byte: %02X (%s)\n\r", 
-            cmd_byte, 
-            get_command_name(cmd_)
-          );
-        }
-
-        size_t command_bytes = get_command_input_bytes(cmd_);
-
-        if (cmd_ == ServerCommand::CmdNone) {
-          // We ignore command byte 0 (null command)
-          break;
-        } else if (command_bytes > 0) {
-          // This command requires input bytes before it is executed.
-          commandByteN_ = 0;
-          commandBytesExpected_ = command_bytes;
-          commandStartTime_ = millis();  // Get start time for timeout calculation
-          commandState_ = CommandState::ReadingCommand;
-        } else {
-          // Command requires no input, so execute it immediately
-          bool result = dispatch_command(cmd_);
-          if (result) {
-            debug_proto("Command OK!");
-            send_ok();
-          } else {
-            debug_proto("Command FAIL!");
-            send_fail();
-          }
-        }
-      }
-      break;
-
-    case CommandState::ReadingCommand:
-      // The previously specified command requires parameter bytes, so read them in, or timeout
-      if (proto_available() > 0) {
-        // TODO: Read more than one byte at a time if available.
-        uint8_t param_byte = proto_read();
-
-        if (commandByteN_ < MAX_COMMAND_BYTES) {
-          commandBuffer_[commandByteN_++] = param_byte;
-
-          if (commandByteN_ == commandBytesExpected_) {
-            // We have received enough parameter bytes to execute the in-progress command.
-            bool result = dispatch_command(cmd_);
-            if (result) {
-              send_ok();
-            } else {
-              send_fail();
-            }
-
-            // Revert to listening for command
-            commandByteN_ = 0;
-            commandBytesExpected_ = 0;
-            commandState_ = CommandState::WaitingForCommand;
-          }
-        }
-      } else {
-        // No bytes received yet, so keep track of how long we've been waiting
-        uint32_t now = millis();
-        uint32_t elapsed = now - commandStartTime_;
-
-        if (elapsed >= CMD_TIMEOUT) {
-          // Timed out waiting for parameter bytes. Send failure and revert to listening for command
-          commandByteN_ = 0;
-          commandBytesExpected_ = 0;
-          commandState_ = CommandState::WaitingForCommand;
-          debug_proto("Command timeout!");
-          send_fail();
-        }
-      }
-      break;
-
-    case CommandState::ExecutingCommand:
-      break;
-  }
-}
 
 /// @brief Returns the name of the command based on the ServerCommand enum.
 /// This is useful for debugging and logging purposes.
@@ -476,6 +374,8 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
       break;
   }
 
+  executing_ = false;
+
   // Enter new state.
   switch (new_state) {
     case ServerState::Reset:
@@ -556,6 +456,7 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         // Set v_pc to 4 to skip IVT segment:offset
         CPU.program->set_pc(4);
       }
+      executing_ = true;
       break;
     case ServerState::ExecuteFinalize:
       NMI_VECTOR.reset();
@@ -579,8 +480,10 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         CPU.program = &STORE_PROGRAM_INLINE;
       }
       CPU.program->reset();
+      executing_ = true;
       break;
     case ServerState::ExecuteDone:
+      executing_ = true;
       break;
     case ServerState::EmuExit:
       CPU.stack_r_op_ct = 0;
@@ -594,6 +497,7 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
       // so we can write raw incoming data over the struct. Faster than logic required to set
       // specific members.
       CPU.readback_p = (uint8_t *)&CPU.post_regs;
+      executing_ = true;
       break;
     case ServerState::StoreAll:
       CPU.wait_states = 2;
@@ -605,24 +509,31 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         CPU.program = &STOREALL_PROGRAM;
       }
       CPU.program->reset();
+      executing_ = true;
       break;
     case ServerState::StoreDone:
+      executing_ = false;
       break;  
     case ServerState::StoreDoneSmm:
+      executing_ = false;
       break;
     case ServerState::Done:
+      executing_ = false;
       break;
     case ServerState::Shutdown:
       CPU.error_cycle_ct = 0;
       controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering shutdown state. Please reset the CPU.");
+      executing_ = false;
       break;
     case ServerState::Error:
       CPU.error_cycle_ct = 0;
       controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering error state. Please reset the CPU.");
+      executing_ = false;
       break;
     default:
       controller_.getBoard().debugPrint(DebugType::ERROR, "Unhandled state change to: ");
       controller_.getBoard().debugPrintln(DebugType::ERROR, get_state_string(new_state));
+      executing_ = false;
       // Unhandled state.
       break;
   }

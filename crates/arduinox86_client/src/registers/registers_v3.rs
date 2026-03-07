@@ -29,7 +29,7 @@ use crate::registers_common::SegmentSize;
 use binrw::{binrw, BinRead, BinReaderExt, BinResult, BinWrite};
 
 #[cfg(feature = "use_moo")]
-use moo::{prelude::MooRegisters32Init, types::MooRegisters32};
+use moo::prelude::*;
 use rand::Rng;
 use rand_distr::{Beta, Distribution};
 
@@ -734,11 +734,12 @@ impl RemoteCpuRegistersV3A {
         weight_zero: f32,
         weight_ones: f32,
         weight_inject: f32,
-        rand: &mut rand::rngs::StdRng,
+        rng: &mut rand::rngs::StdRng,
         register_beta: &mut Beta<f64>,
+        weighted_index: &rand::distr::weighted::WeightedIndex<f32>,
         inject_values: &[u32],
     ) -> u16 {
-        let random_value: f32 = rand.random();
+        let random_value: f32 = rng.random();
         if random_value < weight_zero {
             0
         }
@@ -746,11 +747,11 @@ impl RemoteCpuRegistersV3A {
             0xFFFF // All bits set to 1
         }
         else if random_value < weight_zero + weight_ones + weight_inject {
-            let index = rand.random_range(0..inject_values.len());
+            let index = weighted_index.sample(rng);
             inject_values[index] as u16
         }
         else {
-            let value: u16 = (register_beta.sample(rand) * u16::MAX as f64) as u16;
+            let value: u16 = (register_beta.sample(rng) * u16::MAX as f64) as u16;
             value
         }
     }
@@ -759,23 +760,24 @@ impl RemoteCpuRegistersV3A {
         weight_zero: f32,
         weight_ones: f32,
         weight_inject: f32,
-        rand: &mut rand::rngs::StdRng,
+        rng: &mut rand::rngs::StdRng,
         register_beta: &mut Beta<f64>,
+        weighted_index: &rand::distr::weighted::WeightedIndex<f32>,
         inject_values: &[u32],
     ) -> u32 {
-        let random_value: f32 = rand.random();
+        let random_value: f32 = rng.random();
         if random_value < weight_zero {
             0
         }
         else if random_value < weight_zero + weight_ones {
-            0xFFFF // All bits set to 1
+            0xFFFFFFFF // All bits set to 1
         }
         else if random_value < weight_zero + weight_ones + weight_inject {
-            let index = rand.random_range(0..inject_values.len());
+            let index = weighted_index.sample(rng);
             inject_values[index]
         }
         else {
-            let value: u32 = (register_beta.sample(rand) * u32::MAX as f64) as u32;
+            let value: u32 = (register_beta.sample(rng) * u32::MAX as f64) as u32;
             value
         }
     }
@@ -819,7 +821,14 @@ impl RemoteCpuRegistersV3A {
     }
 
     #[rustfmt::skip]
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>, inject_values: &[u32]) {
+    pub fn randomize(
+        &mut self,
+        opts: &RandomizeOpts,
+        rand: &mut rand::rngs::StdRng,
+        beta: &mut Beta<f64>,
+        weighted_index: &rand::distr::weighted::WeightedIndex<f32>,
+        inject_values: &[u32]
+    ) {
         *self = RemoteCpuRegistersV3A::default(); // Reset all registers to default values
 
         if opts.randomize_flags {
@@ -840,20 +849,20 @@ impl RemoteCpuRegistersV3A {
         }
 
         if opts.randomize_general {
-            self.eax = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.ebx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.ecx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.edx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.esp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.ebp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.esi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.edi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.ds = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.ss = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.es = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.fs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.gs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
-            self.cs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, inject_values);
+            self.eax = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.ebx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.ecx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.edx = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.esp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.ebp = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.esi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.edi = RemoteCpuRegistersV3A::weighted_u32(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.ds = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.ss = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.es = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.fs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.gs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
+            self.cs = RemoteCpuRegistersV3A::weighted_u16(opts.weight_zero, opts.weight_ones, opts.weight_inject, rand, beta, weighted_index, inject_values);
         }
 
         if opts.randomize_ip {
