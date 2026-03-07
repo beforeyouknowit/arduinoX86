@@ -103,26 +103,16 @@ public:
     use_smm_ = use_smm;
   }
 
-  uint64_t cycle_ct() const {
-    return cycle_ct_;
-  }
-
-  void tick() {
-    cycle_ct_++;
-  }
-
-  uint32_t address_latch() const {
-    return address_latch_;
-  }
+  inline uint64_t cycle_ct() const __attribute__((always_inline));
+  inline void tick() __attribute__((always_inline));
+  inline uint32_t address_latch() const __attribute__((always_inline));
+  inline void latch_address(uint32_t address) __attribute__((always_inline));
 
   bool is_shutdown() const { return is_shutdown_; }
   void set_shutdown() { is_shutdown_ = true; }
   void clear_shutdown() { is_shutdown_ = false; }
 
-  void latch_address(uint32_t address) {
-    // Latch the address bus value on ALE/ADS
-    address_latch_ = address;
-  }
+
 
   void set_program_bounds(uint32_t start, uint32_t end) {
     program_start_ = start;
@@ -133,6 +123,19 @@ public:
     return (address >= program_start_) && (address < program_end_);
   }
 
+  void set_jump_hint(bool enabled, bool odd_address) {
+    jump_hint_enabled_ = enabled;
+    jump_hint_odd_address_ = odd_address;
+  }
+
+  bool have_jump_hint() const {
+    return jump_hint_enabled_;
+  }
+
+  bool jump_hint_is_odd() const {
+    return jump_hint_odd_address_;
+  }
+
 private:
 
   uint32_t program_start_ = 0;
@@ -141,4 +144,24 @@ private:
   bool is_shutdown_ = false; // Whether the CPU is in a shutdown state.
   uint64_t cycle_ct_ = 0; // Number of cycles executed since reset.
   uint32_t address_latch_ = 0; // Value of address bus as of ALE/ADS.
+
+  bool jump_hint_enabled_ = false; // Whether the jump hint is or not
+  bool jump_hint_odd_address_ = false; // If the jump hint is enabled
 };
+
+uint64_t Cpu::cycle_ct() const {
+  return cycle_ct_;
+}
+
+void Cpu::tick() {
+  cycle_ct_++;
+}
+
+uint32_t Cpu::address_latch() const {
+  return address_latch_;
+}
+
+void Cpu::latch_address(uint32_t address) {
+  // Latch the address bus value on ALE/ADS
+  address_latch_ = address;
+}

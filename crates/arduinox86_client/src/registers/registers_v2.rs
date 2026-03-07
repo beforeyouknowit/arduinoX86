@@ -33,7 +33,7 @@ use binrw::{binrw, BinRead, BinReaderExt, BinWrite};
 use modular_bitfield::{bitfield, prelude::*};
 
 #[cfg(feature = "use_moo")]
-use moo::{prelude::MooRegisters16Init, types::MooRegisters16};
+use moo::prelude::*;
 
 #[bitfield]
 #[derive(Default, Debug)]
@@ -347,7 +347,14 @@ impl RemoteCpuRegistersV2 {
 
     #[cfg(feature = "use_iced")]
     #[rustfmt::skip]
-    pub fn randomize(&mut self, opts: &RandomizeOpts, rand: &mut rand::rngs::StdRng, beta: &mut Beta<f64>, inject_values: &[u32]) {
+    pub fn randomize(
+        &mut self,
+        opts: &RandomizeOpts,
+        rand: &mut rand::rngs::StdRng,
+        beta: &mut Beta<f64>,
+        weighted_index: &rand::distr::weighted::WeightedIndex<f32>,
+        inject_values: &[u32])
+    {
         *self = RemoteCpuRegistersV2::default(); // Reset all registers to default values
 
         if opts.randomize_flags {

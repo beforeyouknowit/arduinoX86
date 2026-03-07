@@ -2,6 +2,16 @@
 cpu	386
 org	0h
 
+CFG_ENABLE_EXTENDED EQU (1 << 15)
+CFG_REMAP_SERIAL1   EQU (1 << 6)
+CFG_REMAP_SERIAL0   EQU (1 << 5)
+CFG_REMAP_PIC2      EQU (1 << 4)
+CFG_REMAP_PIC1      EQU (1 << 3)
+CFG_REMAP_DMA2      EQU (1 << 2)
+CFG_REMAP_TIMER     EQU (1 << 0)
+
+CFG_REMAP_ALL       EQU (CFG_REMAP_SERIAL1 | CFG_REMAP_SERIAL0 | CFG_REMAP_PIC2 | CFG_REMAP_PIC1 | CFG_REMAP_DMA2 | CFG_REMAP_TIMER)
+
 start:
     jmp   -100h
     times 8 nop
@@ -19,3 +29,12 @@ start:
     mov   ax, 1         ; Enable the chip select channel
     mov   dx, 0F43Ch    ; UCSMSKL - Chip-select Low Mask
     out   dx, ax
+
+    mov   al, CFG_REMAP_ALL
+    out   22H, al       ; Remap all peripherals into extended IO space...
+    mov   al, 0
+    out   23H, al       ; ... and then disable the extended IO space
+
+    mov   dx, 0F820H    ; P1CFG
+    mov   al, 0FFH      ; Connect all pins.
+    out   dx, al

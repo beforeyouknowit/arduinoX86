@@ -116,6 +116,7 @@ pub enum ServerCommand {
     CmdGetServerStatus = 0x26,
     CmdClearCycleLog = 0x27,
     CmdSetProgramBounds = 0x28,
+    CmdSetJumpHint = 0x29,
     CmdInvalid,
 }
 
@@ -211,7 +212,7 @@ impl From<&MooCpuType> for ServerCpuType {
             MooCpuType::NecV30 => ServerCpuType::NecV30,
             MooCpuType::Intel80188 => ServerCpuType::Intel80188(false),
             MooCpuType::Intel80186 => ServerCpuType::Intel80186(false),
-            MooCpuType::Intel80286 => ServerCpuType::Intel80286,
+            MooCpuType::Intel80286 | MooCpuType::Harris80C286 => ServerCpuType::Intel80286,
             MooCpuType::Intel80386Ex => ServerCpuType::Intel80386,
         }
     }
@@ -1300,6 +1301,11 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdSetMemory)
     }
 
+    pub fn write_u32(&mut self, address: u32, val: u32) -> Result<bool, CpuClientError> {
+        let buf: [u8; 4] = val.to_le_bytes();
+        self.set_memory(address, &buf)
+    }
+
     pub fn get_cycle_states(&mut self) -> Result<Vec<ServerCycleState>, CpuClientError> {
         let mut param_buf: [u8; 8] = [0; 8];
 
@@ -1411,6 +1417,12 @@ impl CpuClient {
         self.read_result_code(ServerCommand::CmdReadMemory)
     }
 
+    pub fn read_u32(&mut self, address: u32) -> Result<u32, CpuClientError> {
+        let mut buf: [u8; 4] = [0; 4];
+        self.read_memory(address, 4, &mut buf.as_mut_slice())?;
+        Ok(u32::from_le_bytes(buf))
+    }
+
     /// Command the server to erase all memory (set to 0x00). If the current memory backend is
     /// SDRAM, the SDRAM will be memset to 0. If the backend is a hash table, the hash table will
     /// be cleared and any memory strategy reset.
@@ -1459,5 +1471,19 @@ impl CpuClient {
         self.send_command_byte(ServerCommand::CmdSetProgramBounds)?;
         self.send_buf(&buf)?;
         self.read_result_code(ServerCommand::CmdSetProgramBounds)
+    }
+
+    /// Send a hint to the server about whether the next jump or call will be to an odd or even address.
+    /// To clear the hint, pass None.
+    pub fn set_jump_hint(&mut self, odd_address: Option<bool>) -> Result<bool, CpuClientError> {
+        let mut buf: [u8; 2] = [0; 2];
+
+        if let Some(hint) = odd_address {
+            buf[0] = 1;
+            buf[1] = if hint { 1 } else { 0 };
+        }
+        self.send_command_byte(ServerCommand::CmdSetJumpHint)?;
+        self.send_buf(&buf)?;
+        self.read_result_code(ServerCommand::CmdSetJumpHint)
     }
 }

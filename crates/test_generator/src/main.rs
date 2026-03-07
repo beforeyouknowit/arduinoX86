@@ -21,24 +21,28 @@
     DEALINGS IN THE SOFTWARE.
 */
 
+mod batch;
 mod bus_ops;
+mod config;
 mod cpu_common;
 mod cycles;
+mod disassembly;
 mod display;
+mod enums;
+mod file;
 mod flags;
-mod gen_regs;
-mod gen_tests;
+mod generate;
+mod hash_memory;
 mod instruction;
 mod modrm;
 mod registers;
+mod size_prefix;
 mod state;
-mod validate_tests;
+mod trace_log;
+mod trace_macros;
+mod validate;
 
-use arduinox86_client::{registers_common::SegmentSize, CpuClient, ProgramState, RegisterSetType, ServerCpuType};
-use moo::types::MooCpuType;
 use std::{
-    collections::HashMap,
-    fmt::Display,
     fs,
     fs::File,
     io::{BufWriter, Cursor},
@@ -46,366 +50,21 @@ use std::{
     time::Instant,
 };
 
+use arduinox86_client::{registers_common::SegmentSize, CpuClient, ProgramState, RegisterSetType, ServerCpuType};
+use moo::types::MooCpuType;
+
+use crate::{
+    config::Config,
+    enums::{CpuMode, ExecMode},
+    file::timestamped_filename,
+    generate::generation_stats::GenerationStats,
+    size_prefix::TestOpcodeSizePrefix,
+};
 use anyhow::Context;
 use clap::Parser;
-use serde::Deserialize;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
-pub enum InstructionSize {
-    Sixteen,
-    ThirtyTwo,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
-pub enum AddressSize {
-    Sixteen,
-    ThirtyTwo,
-}
-
-impl From<InstructionSize> for u32 {
-    fn from(size: InstructionSize) -> Self {
-        match size {
-            InstructionSize::Sixteen => 16,
-            InstructionSize::ThirtyTwo => 32,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
-pub enum CpuMode {
-    Real,
-    Unreal,
-    Protected,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
-pub enum TerminationCondition {
-    Queue,
-    Halt,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum TestOpcodeSizePrefix {
-    None,
-    OperandSize,
-    AddressSize,
-    OperandAndAddressSize,
-}
-
-impl TestOpcodeSizePrefix {
-    pub fn to_filename_prefix(&self) -> &'static str {
-        match self {
-            TestOpcodeSizePrefix::None => "",
-            TestOpcodeSizePrefix::OperandSize => "66",
-            TestOpcodeSizePrefix::AddressSize => "67",
-            TestOpcodeSizePrefix::OperandAndAddressSize => "6766",
-        }
-    }
-
-    /// Returns an iterator over all valid prefixes for the given CPU.
-    pub fn iter(
-        cpu_type: MooCpuType,
-        opcode: Opcode,
-        disable_operand_size_opcodes: &[u16],
-        disable_address_size_opcodes: &[u16],
-    ) -> Box<dyn Iterator<Item = TestOpcodeSizePrefix>> {
-        match cpu_type {
-            MooCpuType::Intel80386Ex => {
-                let mut iter_vec = vec![TestOpcodeSizePrefix::None];
-
-                let opcode_u16: u16 = opcode.into();
-                let use_operand_size = !disable_operand_size_opcodes.contains(&opcode_u16);
-                let use_address_size = !disable_address_size_opcodes.contains(&opcode_u16);
-
-                if use_operand_size {
-                    iter_vec.push(TestOpcodeSizePrefix::OperandSize);
-                }
-                if use_address_size {
-                    iter_vec.push(TestOpcodeSizePrefix::AddressSize);
-                }
-                if use_operand_size && use_address_size {
-                    iter_vec.push(TestOpcodeSizePrefix::OperandAndAddressSize);
-                }
-                Box::new(iter_vec.into_iter())
-            }
-            _ => Box::new(std::iter::empty()),
-        }
-    }
-
-    pub fn relative_opcode_size(&self, size: SegmentSize) -> InstructionSize {
-        match size {
-            SegmentSize::Sixteen => match self {
-                TestOpcodeSizePrefix::None => InstructionSize::Sixteen,
-                TestOpcodeSizePrefix::OperandSize => InstructionSize::ThirtyTwo,
-                TestOpcodeSizePrefix::AddressSize => InstructionSize::Sixteen,
-                TestOpcodeSizePrefix::OperandAndAddressSize => InstructionSize::ThirtyTwo,
-            },
-            SegmentSize::ThirtyTwo => match self {
-                TestOpcodeSizePrefix::None => InstructionSize::ThirtyTwo,
-                TestOpcodeSizePrefix::OperandSize => InstructionSize::Sixteen,
-                TestOpcodeSizePrefix::AddressSize => InstructionSize::ThirtyTwo,
-                TestOpcodeSizePrefix::OperandAndAddressSize => InstructionSize::Sixteen,
-            },
-        }
-    }
-
-    pub fn relative_address_size(&self, size: SegmentSize) -> AddressSize {
-        match size {
-            SegmentSize::Sixteen => match self {
-                TestOpcodeSizePrefix::None => AddressSize::Sixteen,
-                TestOpcodeSizePrefix::OperandSize => AddressSize::Sixteen,
-                TestOpcodeSizePrefix::AddressSize => AddressSize::ThirtyTwo,
-                TestOpcodeSizePrefix::OperandAndAddressSize => AddressSize::ThirtyTwo,
-            },
-            SegmentSize::ThirtyTwo => match self {
-                TestOpcodeSizePrefix::None => AddressSize::ThirtyTwo,
-                TestOpcodeSizePrefix::OperandSize => AddressSize::ThirtyTwo,
-                TestOpcodeSizePrefix::AddressSize => AddressSize::Sixteen,
-                TestOpcodeSizePrefix::OperandAndAddressSize => AddressSize::Sixteen,
-            },
-        }
-    }
-}
-
-impl From<TestOpcodeSizePrefix> for Vec<u8> {
-    fn from(prefix: TestOpcodeSizePrefix) -> Self {
-        match prefix {
-            TestOpcodeSizePrefix::None => vec![],
-            TestOpcodeSizePrefix::OperandSize => vec![0x66],
-            TestOpcodeSizePrefix::AddressSize => vec![0x67],
-            TestOpcodeSizePrefix::OperandAndAddressSize => vec![0x66, 0x67],
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Opcode {
-    extended: u16,
-}
-
-impl From<u8> for Opcode {
-    fn from(value: u8) -> Self {
-        Opcode { extended: value as u16 }
-    }
-}
-
-impl From<u16> for Opcode {
-    fn from(value: u16) -> Self {
-        Opcode { extended: value }
-    }
-}
-
-impl From<Opcode> for u16 {
-    fn from(opcode: Opcode) -> Self {
-        opcode.extended
-    }
-}
-
-impl From<Opcode> for u8 {
-    fn from(opcode: Opcode) -> Self {
-        opcode.extended as u8
-    }
-}
-
-impl Display for Opcode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.extended <= 0xFF {
-            write!(f, "{:02X}", self.extended)
-        }
-        else {
-            write!(f, "{:04X}", self.extended)
-        }
-    }
-}
-
-impl Opcode {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        if self.extended <= 0xFF {
-            vec![self.extended as u8]
-        }
-        else {
-            vec![(self.extended >> 8) as u8, (self.extended & 0xFF) as u8]
-        }
-    }
-
-    pub fn is_extended(&self) -> bool {
-        self.extended > 0xFF
-    }
-
-    pub fn base_opcode(&self) -> u8 {
-        (self.extended & 0xFF) as u8
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct OpcodeMetadata {
-    status: String,
-    arch: String,
-    flags: Option<String>,
-    flags_mask: Option<u32>,
-    reg: Option<HashMap<String, OpcodeMetadata>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct TestMetadata {
-    repo: String,
-    version: String,
-    syntax_version: u32,
-    cpu: String,
-    cpu_detail: String,
-    generator: String,
-    author: String,
-    date: String,
-    opcodes: HashMap<String, OpcodeMetadata>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct CountOverride {
-    count: usize,
-    opcode_range: [u16; 2],
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct GroupExtensionOverride {
-    opcode: u16,
-    group_extension_range: [u8; 2],
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct StackPointerOverride {
-    opcode: u16,
-    min:    u32,
-    max:    u32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ExceptionSieveEntry {
-    opcode: u16,
-    exception: u8,
-    exception_rate: f32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ModRmOverride {
-    opcode: u16,
-    allow_reg_form: bool,
-    mask: u8,
-    invalid_chance: f32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct Config {
-    test_gen:  TestGen,
-    test_exec: TestExec,
-    metadata:  TestMetadata,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct TestExec {
-    polling_sleep: u32,
-    validate_count: u32,
-    max_sieve: u32,
-    max_gen: u32,
-    test_retry: u32,
-    load_retry: u32,
-    test_timeout: u32,
-    print_instruction: bool,
-    print_initial_regs: bool,
-    print_final_regs: bool,
-    show_gen_time: bool,
-    serial_timeout: u32,
-    serial_debug_default: bool,
-    serial_debug_test: Option<usize>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct TestGen {
-    set_version_major: u8,
-    set_version_minor: u8,
-    cpu_type: MooCpuType,
-    cpu_mode: CpuMode,
-    base_seed: u64,
-    termination_condition: TerminationCondition,
-    test_output_dir: PathBuf,
-    trace_output_dir: PathBuf,
-    verify_trace_output_dir: PathBuf,
-    trace_file_suffix: PathBuf,
-    moo_version: u8,
-    moo_arch: String,
-    gen_widths: Vec<InstructionSize>,
-
-    address_mask: u32,
-    ip_mask: u16,
-    instruction_address_range: [u32; 2],
-
-    extended_opcode: bool,
-    opcode_range: [u16; 2],
-    opcode_override: Option<u16>,
-    group_extension_range: [u8; 2],
-    group_extension_overrides: Vec<GroupExtensionOverride>,
-
-    valid_opcodes: Vec<u16>,
-    excluded_opcodes: Vec<u16>,
-    exclude_esc_opcodes: bool,
-
-    test_count:  usize,
-    append_file: bool,
-
-    writeless_null_shifts: bool,
-    shift_mask: u16,
-
-    register_beta: [f64; 2],
-    max_prefixes:  usize,
-    prefix_beta:   [f64; 2],
-
-    lock_prefix_chance: f32,
-    lock_prefix_opcode: u8,
-    rep_prefix_chance:  f32,
-
-    reg_zero_chance: f32,
-    reg_ones_chance: f32,
-    reg_inject_chance: f32,
-    imm_zero_chance: f32,
-    imm_ones_chance: f32,
-    imm_inject_chance: f32,
-    imm8s_min_chance: f32,
-    imm8s_max_chance: f32,
-    imm8s_inject_chance: f32,
-
-    inject_values: Vec<u32>,
-
-    near_branch_ban: u16,
-
-    sp_odd_chance: f32,
-    sp_min_value: u32,
-    sp_max_value: u32,
-    mem_zero_chance: f32,
-    mem_ones_chance: f32,
-    mem_strategy_start: u32,
-    mem_strategy_end: u32,
-
-    extended_prefix: u16,
-    group_opcodes: Vec<u16>,
-    esc_opcodes: Vec<u16>,
-    flow_control_opcodes: Vec<u16>,
-    prefixes: Vec<u8>,
-    segment_prefixes: Vec<u8>,
-    disable_operand_size_prefix: Vec<u16>,
-    disable_address_size_prefix: Vec<u16>,
-    rep_prefixes: Vec<u8>,
-    rep_opcodes: Vec<u16>,
-    rep_cx_mask: u16,
-
-    disable_seg_overrides: Vec<u16>,
-    disable_lock_prefix:   Vec<u16>,
-
-    sp_overrides:    Vec<StackPointerOverride>,
-    modrm_overrides: Vec<ModRmOverride>,
-    count_overrides: Vec<CountOverride>,
-    exception_sieve: Vec<ExceptionSieveEntry>,
-
-    randomize_mem_interval: usize,
-}
+use iced_x86::DecoderOptions;
+use marty_isadb::IsaDB;
+use rand::distr::weighted::WeightedIndex;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -413,6 +72,12 @@ struct Cli {
     /// Path to the TOML config file
     #[arg(long, value_name = "FILE")]
     config_file: PathBuf,
+
+    #[arg(long, default_value = "1")]
+    num_boards: usize,
+
+    #[arg(long, default_value = "0")]
+    board_number: usize,
 
     #[arg(long)]
     com_port: Option<String>,
@@ -422,10 +87,24 @@ struct Cli {
 
     #[arg(long)]
     validate: bool,
+
+    #[arg(long)]
+    only_modrm_overrides: bool,
+}
+
+#[derive(Copy, Clone, Debug, Default, Hash, PartialEq, Eq)]
+pub struct ExceptionSeenEntry {
+    exception_number: u8,
+    sib: bool,
 }
 
 pub struct TestContext {
+    exec_mode: ExecMode,
     client: CpuClient,
+    cfg: Config,
+    job_ct: usize,
+    job_no: usize,
+    isa_db: IsaDB,
     load_register_buffer: Cursor<Vec<u8>>,
     store_register_buffer: Vec<u8>,
     server_cpu: ServerCpuType,
@@ -433,17 +112,24 @@ pub struct TestContext {
     test_opcode_size_prefix: TestOpcodeSizePrefix,
     code_segment_size: SegmentSize,
     file_seed: u64,
+    prefetch: bool,
     gen_start: Instant,
     gen_stop: Instant,
     gen_ct: usize,
+    gen_total: usize,
     file_gen_ct: usize,
+    output_path: PathBuf,
+    trace_path: PathBuf,
+    validate_output_path: PathBuf,
     trace_log: BufWriter<File>,
-    mnemonic_set: HashMap<String, usize>,
-
+    global_trace_log: BufWriter<File>,
+    global_error_log: BufWriter<File>,
+    iced_decoder_opts: u32,
     dry_run: bool,
     last_program_state: Option<ProgramState>,
-
-    exceptions: HashMap<u8, usize>,
+    weighted_index: WeightedIndex<f32>,
+    inject_values: Vec<u32>,
+    stats: GenerationStats,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -452,12 +138,51 @@ fn main() -> anyhow::Result<()> {
     // Parse command‐line args
     let cli = Cli::parse();
 
+    if cli.board_number >= cli.num_boards {
+        eprintln!("Error: board_number must be less than num_boards (0-offset)");
+        std::process::exit(1);
+    }
+
+    // Extract config dir from config file path
+    let config_dir = cli
+        .config_file
+        .parent()
+        .context("getting config file parent directory")?;
+
+    log::debug!("Using config dir: {}", config_dir.display());
+
     // Read the file into a string
     let text =
         fs::read_to_string(&cli.config_file).with_context(|| format!("reading {}", cli.config_file.display()))?;
 
     // Parse as TOML
     let mut config: Config = toml::from_str(&text).context("parsing TOML into Config")?;
+
+    // Load the ISA database if specified
+    let isa_db_path = if config.test_gen.isa_db.is_relative() {
+        config_dir.join(&config.test_gen.isa_db)
+    }
+    else {
+        config.test_gen.isa_db.clone()
+    };
+
+    if !isa_db_path.exists() {
+        eprintln!("Error: ISA DB file not found: {}", isa_db_path.display());
+        std::process::exit(1);
+    }
+
+    let marty_dasm_cpu = match config.test_gen.cpu_type {
+        MooCpuType::Intel8088 | MooCpuType::Intel8086 => marty_dasm::CpuType::Intel808x,
+        MooCpuType::Intel80188 | MooCpuType::Intel80186 => marty_dasm::CpuType::Intel8018x,
+        MooCpuType::Intel80286 => marty_dasm::CpuType::Intel80286,
+        MooCpuType::Intel80386Ex => marty_dasm::CpuType::Intel80386,
+        _ => {
+            eprintln!("Unsupported CPU type: {:?}", config.test_gen.cpu_type);
+            std::process::exit(1);
+        }
+    };
+    let isa_db = IsaDB::from_file(marty_dasm_cpu, &isa_db_path)
+        .with_context(|| format!("loading ISA DB from {}", isa_db_path.display()))?;
 
     // Initialize the random number generator
 
@@ -474,31 +199,91 @@ fn main() -> anyhow::Result<()> {
     };
 
     let server_cpu = ServerCpuType::from(config.test_gen.cpu_type);
+    let mode_suffix = config.test_gen.cpu_mode.to_path_suffix().to_string();
+
+    // Create the test output directory if it doesn't exist.
+    let output_dir_path = config.test_gen.test_output_dir.join(mode_suffix.clone());
+    if !output_dir_path.exists() {
+        log::warn!("Creating test output directory: {}", output_dir_path.display());
+        fs::create_dir_all(&output_dir_path)
+            .with_context(|| format!("Creating test output directory: {}", output_dir_path.display()))?;
+    }
 
     // Create the trace output directory if it doesn't exist.
-    if !config.test_gen.trace_output_dir.exists() {
-        fs::create_dir_all(&config.test_gen.trace_output_dir).with_context(|| {
+    let trace_dir_path = if cli.validate {
+        config
+            .test_gen
+            .test_output_dir
+            .join(mode_suffix.clone())
+            .join(config.test_gen.validate_output_dir.clone())
+            .join(config.test_gen.trace_output_dir.clone())
+    }
+    else {
+        config
+            .test_gen
+            .test_output_dir
+            .join(mode_suffix.clone())
+            .join(config.test_gen.trace_output_dir.clone())
+    };
+
+    if !trace_dir_path.exists() {
+        fs::create_dir_all(&trace_dir_path)
+            .with_context(|| format!("Creating trace output directory: {}", trace_dir_path.display()))?;
+    }
+
+    let validate_output_dir = config
+        .test_gen
+        .test_output_dir
+        .join(mode_suffix.clone())
+        .join(config.test_gen.validate_output_dir.clone());
+    if !validate_output_dir.exists() {
+        fs::create_dir_all(&validate_output_dir).with_context(|| {
             format!(
-                "Creating trace output directory: {}",
-                config.test_gen.trace_output_dir.display()
+                "Creating validation output directory: {}",
+                validate_output_dir.display()
             )
         })?;
     }
-    if !config.test_gen.verify_trace_output_dir.exists() {
-        fs::create_dir_all(&config.test_gen.verify_trace_output_dir).with_context(|| {
-            format!(
-                "Creating trace output directory: {}",
-                config.test_gen.verify_trace_output_dir.display()
-            )
-        })?;
-    }
+
     let trace_filename = PathBuf::from(format!("init{}", config.test_gen.trace_file_suffix.clone().display()));
 
     // Create a BufWriter using the trace log file.
-    let trace_log_path = config.test_gen.trace_output_dir.join(trace_filename);
+    let trace_log_path = trace_dir_path.join(trace_filename);
     let trace_log_file = File::create(&trace_log_path)
         .with_context(|| format!("Creating trace log file: {}", trace_log_path.display()))?;
     let trace_log = BufWriter::new(trace_log_file);
+
+    let global_trace_filename_prefix = format!("{}_", cli.board_number);
+    let global_trace_filename = timestamped_filename(
+        &global_trace_filename_prefix,
+        config
+            .test_gen
+            .trace_file_suffix
+            .clone()
+            .to_str()
+            .expect("Invalid trace file suffix"),
+    );
+
+    let global_trace_log_path = trace_dir_path.join(global_trace_filename);
+    let global_trace_log_file = File::create(&global_trace_log_path)
+        .with_context(|| format!("Creating global trace log file: {}", global_trace_log_path.display()))?;
+    let global_trace_log = BufWriter::new(global_trace_log_file);
+
+    let global_error_filename_prefix = format!("error_{}", cli.board_number);
+    let global_error_filename = timestamped_filename(
+        &global_error_filename_prefix,
+        config
+            .test_gen
+            .error_file_suffix
+            .clone()
+            .to_str()
+            .expect("Invalid error file suffix"),
+    );
+
+    let global_error_log_path = trace_dir_path.join(global_error_filename);
+    let global_error_log_file = File::create(&global_error_log_path)
+        .with_context(|| format!("Creating global error log file: {}", global_error_log_path.display()))?;
+    let global_error_log = BufWriter::new(global_error_log_file);
 
     let (load_register_buffer, store_register_buffer) = match config.test_gen.cpu_type {
         MooCpuType::Intel80286 => (Cursor::new(vec![0; 102]), vec![0; 102]),
@@ -509,25 +294,19 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut context = TestContext {
-        client: cpu_client,
-        load_register_buffer,
-        store_register_buffer,
-        server_cpu,
-        register_set_type: RegisterSetType::from(server_cpu),
-        test_opcode_size_prefix: TestOpcodeSizePrefix::None,
-        code_segment_size: SegmentSize::Sixteen,
-        file_seed: 0,
-        gen_start: Instant::now(),
-        gen_stop: Instant::now(),
-        gen_ct: 0,
-        file_gen_ct: 0,
-        trace_log,
-        mnemonic_set: Default::default(),
-        dry_run: cli.dry_run,
-        last_program_state: None,
-        exceptions: Default::default(),
-    };
+    // Set some iced-x86 decoder options. We want to decode invalid forms where possible,
+    // although iced-x86 is limited in the number of invalid forms it supports.
+    let mut iced_decoder_opts = DecoderOptions::NO_INVALID_CHECK;
+    // Enable CPU-specific decoding if needed.
+    match config.test_gen.cpu_type {
+        MooCpuType::Intel80286 => {
+            iced_decoder_opts |= DecoderOptions::LOADALL286;
+        }
+        MooCpuType::Intel80386Ex => {
+            iced_decoder_opts |= DecoderOptions::LOADALL386;
+        }
+        _ => {}
+    }
 
     if config.test_gen.exclude_esc_opcodes {
         config
@@ -536,11 +315,51 @@ fn main() -> anyhow::Result<()> {
             .extend(config.test_gen.esc_opcodes.clone());
     }
 
+    // Create the weighted index distribution
+    let weights: Vec<f32> = config.test_gen.inject_values.iter().map(|v| v.weight).collect();
+    let weighted_index = WeightedIndex::new(&weights)?;
+    let inject_values: Vec<u32> = config.test_gen.inject_values.iter().map(|v| v.value).collect();
+
+    let mut ctx = TestContext {
+        exec_mode: ExecMode::default(),
+        client: cpu_client,
+        cfg: config,
+        job_ct: cli.num_boards,
+        job_no: cli.board_number,
+        isa_db,
+        load_register_buffer,
+        store_register_buffer,
+        server_cpu,
+        register_set_type: RegisterSetType::from(server_cpu),
+        test_opcode_size_prefix: TestOpcodeSizePrefix::None,
+        code_segment_size: SegmentSize::Sixteen,
+        file_seed: 0,
+        prefetch: false,
+        gen_start: Instant::now(),
+        gen_stop: Instant::now(),
+        gen_ct: 0,
+        gen_total: 0,
+        file_gen_ct: 0,
+        output_path: output_dir_path,
+        trace_path: trace_dir_path,
+        validate_output_path: validate_output_dir,
+        trace_log,
+        global_trace_log,
+        global_error_log,
+        iced_decoder_opts,
+        dry_run: cli.dry_run,
+        last_program_state: None,
+        weighted_index,
+        inject_values,
+        stats: Default::default(),
+    };
+
     if cli.validate {
-        validate_tests::validate_tests(&mut context, &config)?;
+        ctx.exec_mode = ExecMode::Validate;
+        validate::validate_tests::validate_tests(&mut ctx)?;
     }
     else {
-        gen_tests::gen_tests(&mut context, &config)?;
+        generate::gen_tests::generate_tests(&mut ctx)?;
     }
 
     Ok(())

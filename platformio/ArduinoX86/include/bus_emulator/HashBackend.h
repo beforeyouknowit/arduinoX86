@@ -52,19 +52,36 @@ public:
     uint16_t word = 0;
     if (!mem_table_.find(addr16, word)) {
       // If the address is not found, generate a default value based on the strategy.
-      word = gen_default_u16(address);
+      word = gen_default_u16(addr16);
     }
     return (address & 1) ? (word >> 8) : (word & 0xFF);
   }
 
   uint16_t read_u16(uint32_t address) override {
-    const uint32_t addr16 = address >> 1;
-    uint16_t word = 0;
-    if (!mem_table_.find(addr16, word)) {
-      // If the address is not found, generate a default value based on the strategy.
-      word = gen_default_u16(address);
+    // Even reads
+    if ((address & 1) == 0) {
+      const uint32_t addr16 = address >> 1;
+      uint16_t word = 0;
+      if (!mem_table_.find(addr16, word)) {
+        // If the address is not found, generate a default value based on the strategy.
+        word = gen_default_u16(addr16);
+      }
+      return word;
     }
-    return word;
+    else {
+      // Odd reads: combine two adjacent words
+      const uint32_t addr16_low = address >> 1;
+      const uint32_t addr16_high = addr16_low + 1;
+      uint16_t word_low = 0;
+      uint16_t word_high = 0;
+      if (!mem_table_.find(addr16_low, word_low)) {
+        word_low = gen_default_u16(addr16_low);
+      }
+      if (!mem_table_.find(addr16_high, word_high)) {
+        word_high = gen_default_u16(addr16_high);
+      }
+      return (word_high << 8) | ((word_low >> 8) & 0x00FF);
+    }
   }
 
   uint16_t read_bus(uint32_t address, bool bhe) override {
@@ -72,7 +89,7 @@ public:
     uint16_t word = 0;
     if (!mem_table_.find(addr16, word)) {
       // If the address is not found, generate a default value based on the strategy.
-      word = gen_default_u16(address);
+      word = gen_default_u16(addr16);
     }
     return word;
   }
@@ -87,12 +104,12 @@ public:
     uint16_t word = 0;
     if (!mem_table_.find(addr16, word)) {
       // If the address is not found, generate a default value based on the strategy.
-      word = gen_default_u16(address);
+      word = gen_default_u16(addr16);
     }
     if (address & 1) {
-      word = (word & 0x00FF) | (value << 8); // write high byte
+      word = (word & 0x00FF) | (static_cast<uint16_t>(value) << 8); // write high byte
     } else {
-      word = (word & 0xFF00) | value;        // write low byte
+      word = (word & 0xFF00) | static_cast<uint16_t>(value);        // write low byte
     }
     mem_table_.insert(addr16, word);
   }
@@ -108,12 +125,12 @@ public:
     uint16_t word = 0;
     if (!mem_table_.find(addr16, word)) {
       // If the address is not found, generate a default value based on the strategy.      
-      word = gen_default_u16(address);
+      word = gen_default_u16(addr16);
     }
 
     if (a0 && bhe) {
       // Write high byte only
-      word = (word & 0x00FF) | ((value & 0x00FF) << 8);
+      word = (word & 0x00FF) | (value & 0xFF00);
     } else if (!a0 && bhe) {
       // Write full word
       word = value;
@@ -129,8 +146,26 @@ public:
   }
 
   void set_memory(uint32_t address, const uint8_t* buffer, size_t length) override {
-    for (size_t i = 0; i < length; ++i) {
-      write_u8(address + i, buffer[i]);
+
+    uint8_t *buf_ptr = (uint8_t *)buffer;
+    if ((address & 0x01) == 1) {
+      // Unaligned start address
+      write_u8(address, buf_ptr[0]);
+      address += 1;
+      buf_ptr += 1;
+      length -= 1;
+    }
+
+    // Write remaining buffer in 16-bit chunks
+    for (size_t i = 0; i + 1 < length; i += 2) {
+      uint16_t word = buf_ptr[i] | (static_cast<uint16_t>(buf_ptr[i + 1]) << 8);
+      write_u16(address, word);
+      address += 2;
+    }
+
+    // Write trailing byte if length is odd
+    if (length & 0x01) {
+      write_u8(address, buf_ptr[length - 1]);
     }
   }
 

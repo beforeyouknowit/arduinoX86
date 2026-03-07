@@ -5,21 +5,26 @@ cpu_type = "Intel80286"
 # Execution mode - Real, Unreal, Protected
 cpu_mode = "Real"
 base_seed = 0xDEADBEEF
+stop_on_error = true
 # Termination method - Queue, Halt
 termination_condition = "Halt"
 test_output_dir = "e:/test_output_286"
-trace_output_dir = "e:/test_output_286/trace/"
-verify_trace_output_dir = "e:/test_output_286/verify_trace/"
+trace_output_dir = "trace"
+validate_output_dir = "validate"
+skip_validated = true
 trace_file_suffix = "_trace.log"
-moo_version = 1
+error_file_suffix = "_error.log"
+moo_version_major = 1
+moo_version_minor = 1
 moo_arch = "C286"
 gen_widths = ["Sixteen"] # 16-bit only
 
 address_mask = 0xFFFFFF # 24-bit address mask for 286
 ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
+max_normal_cycles = 300 # Maximum normal instruction cycles (non-string op)
+max_normal_bus_ops = 16 # Maximum normal bus operations (non-string op)
 
-extended_opcode = false # Use extended opcodes (0x0F)
 opcode_range = [0x00, 0xFF]
 group_extension_range = [0, 7] # Range for group extensions
 
@@ -66,7 +71,15 @@ sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
 sp_max_value = 0xFFFF # Maximum value for SP
 
-near_branch_ban = 0x08 # Ban certain near branch immediate values
+instruction_pad = 6 # Number of padding bytes to add after each instruction. This should be able to account for SIB + 32bit displacement + 32bit immediate.
+
+# Ban certain near branch immediate values
+near_branch_ban = [
+    0x08, # On the 286, this branch value happens to land exactly where the next fetch would occur, making the jump undetectable.
+]
+
+# Ban certain IO ports (they have side effects on some CPUs)
+io_port_ban = []
 
 # Segment descriptor table strategies
 segment_limit_min = 0x000FFF # Minimum segment limit size
@@ -107,6 +120,21 @@ flow_control_opcodes = [
     0xE0, 0xE1, 0xE2, 0xE3, # LOOPNE, LOOPE, LOOP, JCXZ
     0xE8, 0xE9, 0xEA, 0xEB, # CALL, JMP, JMP FAR, JMP SHORT
     0xFE, 0xFF, # CALL, JMP,
+]
+
+# 268 doesn't have any bitfield opcodes
+bitfield_opcodes = []
+
+# These opcodes use the unique 'offset8/16' indirect addressing mode with no mod/rm.
+offset_opcodes = [
+    0xA0, 0xA1, # MOV AL/AX, offs
+    0xA2, 0xA3, # MOV offs, AL/AX
+]
+
+# These opcodes use the unique 'ptr16' addressing mode with no mod/rm.
+ptr_opcodes = [
+    0x9A, # CALL ptr
+    0xEA, # JMP ptr
 ]
 
 # These opcodes are prefixes and should not be generated as standalone instructions.
@@ -209,7 +237,6 @@ modrm_overrides = [
     { opcode = 0x8C, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
     { opcode = 0x8E, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
     { opcode = 0x62, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
-
 ]
 
 count_overrides = [
@@ -219,6 +246,22 @@ count_overrides = [
     { count = 1000, opcode_range = [0xF8, 0xFD] }, # CLC, STC, CLI, STI, CLD, STD
     { count = 1000, opcode_range = [0xD6, 0xD6] }, # SALC
     { count = 1000, opcode_range = [0xF4, 0xF4] }, # HALT
+]
+
+# For instructions that generate exceptions with no easy way to control the exception rate through simple masking,
+# we can sieve the generated instructions to achieve a target exception rate.
+# The exception rate is the probability that a test matching the opcode, extension and exception number will be accepted
+# if it generates an exception.
+exception_sieve = [
+    { opcode = 0x62, extension = 0, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+    { opcode = 0xF6, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m8, target exception rate is 20%
+    { opcode = 0xF6, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m8, target exception rate is 20%
+    { opcode = 0xF7, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m16/32, target exception rate is 20%
+    { opcode = 0xF7, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m16/32, target exception rate is 20%
+    { opcode = 0xF6, extension = 6, exception = 13, exception_rate = 0.10 },
+    { opcode = 0xF6, extension = 7, exception = 13, exception_rate = 0.10 },
+    { opcode = 0xF7, extension = 6, exception = 13, exception_rate = 0.10 },
+    { opcode = 0xF7, extension = 7, exception = 13, exception_rate = 0.10 },
 ]
 
 #{ count = 2000, opcode_range = [0x6C, 0x6F] }, # INS and OUTS instructions
@@ -470,6 +513,10 @@ print_instruction = true
 print_initial_regs = false
 print_final_regs = false
 show_gen_time = true
+
+[test_exec.validate_mode]
+attempts = 2 # Number of attempts to validate a test
+move_after_validate = true # Move test to validated directory after successful validation
 
 [metadata]
 repo = "https://github.com/SingleStepTests/80286"

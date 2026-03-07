@@ -54,10 +54,10 @@ impl From<MyServerCycleState> for MooCycleState {
                     pins0 |= MooCycleState::PIN_BHE; // Set the BHE bit
                 }
                 if state.pins & (MooCycleState::PIN_READY as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_READY; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_READY; // Set the READ& bit
                 }
                 if state.pins & (MooCycleState::PIN_LOCK as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_LOCK; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_LOCK; // Set the LOCK bit
                 }
 
                 let bhe = state.bus_command_bits & 0x80 != 0;
@@ -115,10 +115,10 @@ impl From<MyServerCycleState> for MooCycleState {
                     pins0 |= MooCycleState::PIN_BHE; // Set the BHE bit
                 }
                 if state.pins & (MooCycleState::PIN_READY as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_READY; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_READY; // Set the READY bit
                 }
                 if state.pins & (MooCycleState::PIN_LOCK as u16) != 0 {
-                    pins0 |= MooCycleState::PIN_LOCK; // Set the MRQ bit
+                    pins0 |= MooCycleState::PIN_LOCK; // Set the LOCK bit
                 }
 
                 let bhe = state.bus_command_bits & 0x80 != 0;
@@ -202,9 +202,6 @@ impl TryFrom<&MyServerCycleState> for BusOp {
                 let status_byte = BusStatusByte::V3(state.cpu_status_bits & 0x0F);
                 //log::trace!("Bus status byte: {:?}", status_byte);
 
-                if state.pins & 0x01 == 0 {
-                    return Err(());
-                }
                 if let Ok(op_type) = BusOpType::try_from(status_byte) {
                     let bus_op = BusOp {
                         idx: 0,
@@ -214,7 +211,19 @@ impl TryFrom<&MyServerCycleState> for BusOp {
                         data: state.data_bus,
                         flags: 0,
                     };
-                    return Ok(bus_op);
+                    // HALT can occur on a different cycle than ALE.
+                    // If BusOpType is not HALT, ensure ALE is high (pins & 0x01 != 0)
+                    return match op_type {
+                        BusOpType::Halt => Ok(bus_op),
+                        _ => {
+                            if state.pins & 0x01 == 0 {
+                                Err(())
+                            }
+                            else {
+                                Ok(bus_op)
+                            }
+                        }
+                    };
                 }
             }
         }

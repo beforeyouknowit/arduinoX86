@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+arduinox86_client = { path = "../arduinox86_client", features = ["use_moo", "use_iced"] }
+marty_dasm = { git = "https://github.com/dbalsom/marty_dasm" }
+marty_isadb = { git = "https://github.com/dbalsom/marty_dasm" }
 log.workspace = true
 env_logger.workspace = true
 clap = { workspace = true, features = ["derive"] }
@@ -17,7 +20,7 @@ rand.workspace = true
 rand_distr.workspace = true
 iced-x86.workspace = true
 indexmap.workspace = true
-arduinox86_client = { path = "../arduinox86_client", features = ["use_moo", "use_iced"] }
 moo-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+time = { version = "0.3", features = ["macros", "formatting", "local-offset"] }

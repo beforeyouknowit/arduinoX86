@@ -5,24 +5,32 @@ cpu_type = "Intel80386Ex"
 # Execution mode - Real, Unreal, Protected
 cpu_mode = "Real"
 base_seed = 0xDEADBEEF
+stop_on_error = true
 # Termination method - Queue, Halt
 termination_condition = "Halt"
 test_output_dir = "e:/test_output_386"
-trace_output_dir = "e:/test_output_386/trace/"
-verify_trace_output_dir = "e:/test_output_386/verify_trace/"
+trace_output_dir = "trace"
+validate_output_dir = "validate"
+skip_validated = true
 trace_file_suffix = "_trace.log"
-moo_version = 1
+error_file_suffix = "_error.log"
+moo_version_major = 1
+moo_version_minor = 1
 moo_arch = "386E"
 gen_widths = ["Sixteen"] # 386 has 16-bit and 32-bit modes
-
+skip_io = false
 address_mask = 0xFFFFFF # 24-bit address mask for 386EX
 ip_mask = 0xFFF8 # 16-bit mask for instruction pointer.
 instruction_address_range = [0x1024, 0xFFFFFF] # Allowed instruction address range
+max_normal_cycles = 300 # Maximum normal instruction cycles (non-string op)
+max_normal_bus_ops = 16 # Maximum normal bus operations (non-string op)
 
-extended_opcode = false # Use extended opcodes (0x0F)
-opcode_range = [0x00, 0x0FFF]
+opcode_range = [0xE0, 0xE2]
+
 #opcode_override = 0x5c
 group_extension_range = [0, 7] # Range for group extensions
+
+isa_db = "80386.csv" # Instruction set database file
 
 # Overrides for specific group opcodes. These groups may not be valid for the full 0-7 range.
 group_extension_overrides = [
@@ -139,13 +147,22 @@ valid_opcodes = [
 excluded_opcodes = [
     0xF1, # LOCK prefix
     0x63, # ARPL, not valid in real mode
-    0x0F22, # MOV to/from control registers
-    0x0F23, # MOV to/from debug registers
-
+    0x0F20, 0x0F22, # MOV to/from control registers
+    0x0F21, 0x0F23, # MOV to/from debug registers
 ]
+
+io_opcodes = [
+    0xE4, 0xE5, 0xE6, 0xE7,
+    0xEC,
+    0xED,
+    0xEE,
+    0xEF,
+    0x6C, 0x6D, 0x6E, 0x6F,
+]
+
 exclude_esc_opcodes = true
 
-test_count = 100
+test_count = 2500
 append_file = true
 
 # shift/rotate mask
@@ -160,24 +177,41 @@ lock_prefix_chance = 0.025 # Chance of LOCK prefix
 lock_prefix_opcode = 0xF0
 rep_prefix_chance = 0.25 # Chance of REP prefix
 
-reg_zero_chance = 0.05 # Chance of zeroed register
-reg_ones_chance = 0.00 # Chance of an all-bit-set register
-reg_inject_chance = 0.25 # Chance of injecting a special value into a register
+sib_chance = 0.20 # Chance of SIB byte reference in generated 32-bit mod/rm bytes
 
-imm_zero_chance = 0.05 # Chance of zeroed immediate value
-imm_ones_chance = 0.00 # Chance of an all-bit-set immediate value
-imm_inject_chance = 0.10 # Chance of injecting a special value into a register
+reg_zero_chance = 0.025 # Chance of zeroed register
+reg_ones_chance = 0.025 # Chance of an all-bit-set register
+reg_inject_chance = 0.10 # Chance of injecting a special value into a register
 
-imm8s_zero_chance = 0.05 # Chance of zeroed 8-bit immediate value
-imm8s_min_chance = 0.00 # Chance of minimum 8-bit signed immediate value
-imm8s_max_chance = 0.00 # Chance of maximum 8-bit signed immediate value
+imm_zero_chance = 0.025 # Chance of zeroed immediate value
+imm_ones_chance = 0.025 # Chance of an all-bit-set immediate value
+imm_inject_chance = 0.10 # Chance of injecting a special value into an immediate value
+
+imm8s_zero_chance = 0.025 # Chance of zeroed 8-bit immediate value
+imm8s_min_chance = 0.025 # Chance of minimum 8-bit signed immediate value
+imm8s_max_chance = 0.025 # Chance of maximum 8-bit signed immediate value
 imm8s_inject_chance = 0.10 # Chance of injecting a special value into an 8-bit signed immediate value
 
 sp_odd_chance = 0.1 # Chance of SP being odd
 sp_min_value = 0x0008 # Minimum value for SP
 sp_max_value = 0xFFFFFFFF # Maximum value for SP
+sp_min_address = 0x420 # Minimum SS:SP address
 
-near_branch_ban = 0x08 # Ban certain near branch immediate values
+instruction_pad = 9 # Number of padding bytes to add after each instruction. This should be able to account for SIB + 32bit displacement + 32bit immediate.
+
+near_branch_ban = [
+    0, # Infinite loop.
+    -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, # Overlaps jump instruction
+    8, 9, 10, 11, 12, 13 # Aligns with prefetch
+]
+
+io_port_ban = [
+    0x22, 0x23, # IO configuration register (386EX)
+    0x90, 0x91, 0x92, 0x93, # A20 gate and reset register (386EX)
+    0x5090, 0x5091, 0x5092, 0x5093, # A20 gate and reset register (386EX) (mirrors?)
+    0xF090, 0xF091, 0xF092, 0xF093, # A20 gate and reset register (386EX)
+    0xF890, 0xF891, 0xF892, 0xF893, # A20 gate and reset register (386EX) (mirrors?)
+]
 
 # Segment descriptor table strategies
 segment_limit_min = 0x00000FFF # Minimum segment limit size
@@ -191,6 +225,8 @@ mem_strategy_start = 0x1024
 mem_strategy_end = 0x1000000
 
 extended_prefix = 0x0F
+operand_size_prefix = 0x66
+address_size_prefix = 0x67
 
 group_opcodes = [
     0x80, 0x81, 0x82, 0x83, # Group 1: ADD, OR, ADC, SBB, AND, SUB, XOR, CMP
@@ -201,8 +237,11 @@ group_opcodes = [
     0x0F00, # Group 6: SLDT, STR, LLDT, LTR, VERR, VERW
     0x0F01, # Group 7: SGDT, SIDT, LGDT, LIDT, SMSW, LMSW
     0x0FBA, # Group 8: BT, BTS, BTR, BTC
+]
 
-
+protected_mode_opcodes = [
+    0x0F02, # LAR
+    0x0F03, # LSL
 ]
 
 esc_opcodes = [
@@ -219,13 +258,37 @@ flow_control_opcodes = [
     0xE8, 0xE9, 0xEA, 0xEB, # CALL, JMP, JMP FAR, JMP SHORT
     0xFE, 0xFF, # CALL, JMP,
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
+]
 
+# These opcodes use the unique 'offset8/16/32' indirect addressing mode with no mod/rm.
+offset_opcodes = [
+    0xA0, 0xA1, # MOV AL/AX/EAX, offs
+    0xA2, 0xA3, # MOV offs, AL/AX/EAX
+]
+
+# These opcodes can use a register value as a bit index into memory with arbitrary size
+# and must be masked appropriately.
+bitfield_opcodes = [
+    0x0FA3, # BT
+    0x0FAB, # BTS
+    0x0FB3, # BTR
+    0x0FBB, # BTC
+]
+
+# These opcodes use the unique 'ptr16/32' addressing mode with no mod/rm.
+ptr_opcodes = [
+    0x9A, # CALL ptr
+    0xEA, # JMP ptr
+]
+
+far_indirect_opcodes = [
+    0xFF, # CALL, JMP (group opcodes - must have secondary mnemonic check)
 ]
 
 # These opcodes are prefixes and should not be generated as standalone instructions.
 prefixes = [
     0x0F, # Opcode extension
-    0x26, 0x2E, 0x36, 0x3E, # Segment override prefixes
+    0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, # Segment override prefixes
     0xF0, # Lock prefix
     0xF1, # Undocumented ICE prefix
     0xF2, 0xF3, # Repeat prefixes
@@ -292,9 +355,11 @@ disable_seg_overrides = [
     0xF5, # CMC
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, # CLC, STC, CLI, STI, CLD, STD
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
+    0x0FA0, 0x0FA1, # PUSH/POP
+    0x0FA8, 0x0FA9, # PUSH/POP
 ]
 
-# Disable LOCK prefixes on instructions that can't access the bus
+# Disable LOCK prefixes on certain instructions
 disable_lock_prefix = [
     0x04, 0x05, 0x0C, 0x0D, 0x14, 0x15, 0x1C, 0x1D, 0x24, 0x25, 0x2C, 0x2D, 0x34, 0x35, 0x3C, 0x3D, # Reg, imm ALU forms
     0x27, 0x2F, 0x37, 0x3F, # DAA, DAS, AAA, AAS
@@ -306,325 +371,338 @@ disable_lock_prefix = [
     0x9E, 0x9F, # SAHF and LAHF
     0xA8, 0xA9, # Test imm8
     0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, # MOV imm8 to register
+    0xE0, 0xE1, 0xE2, 0xE3, # LOOP, JCXZ
+    0xE4, 0xE5, 0xE6, 0xE7, # IN and OUT
+    0xE8, 0xE9, 0xEA, 0xEB, # CALL & JMP rel
+    0xEC, 0xED, 0xEE, 0xEF, # IN and OUT
+    0xF1, # ICEBP
+    0xF4, # HLT
     0xF5, # CMC
     0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, # CLC, STC, CLI, STI, CLD, STD
     0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F, # Jcc
 ]
 
-disable_operand_size_prefix = [
-    0x00, 0x02, 0x04, 0x08, 0x0A, 0x0C, # Byte-size ALU operations
-    0x10, 0x12, 0x14, 0x18, 0x1A, 0x1C,
-    0x20, 0x22, 0x24, 0x27, 0x28, 0x2A, 0x2C, 0x2F,
-    0x30, 0x32, 0x34, 0x37, 0x38, 0x3A, 0x3C, 0x3F,
-    0x6C, 0x6E,
-    0x80, 0x82,
-    0x84, 0x86, 0x88, 0x8A,
-    0x9B, 0x9E, 0x9F,
-    0xA0, 0xA2,
-    0xA4, 0xA6,
-    0xA8,
-    0xAA, 0xAe,
-    0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7,
-    0xC0, 0xC6, 0xCC, 0xCD, 0xCE,
-    0xD2,
-    0xD4, 0xD5, 0xD6, 0xD7,
-    0xE4, 0xE6, 0xEC, 0xEE,
-    0xF1,
-    0xF4, 0xF5,
-    0xF6,
-    0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD,
-    0xFE,
-]
-
-disable_address_size_prefix = [
-    0x04, 0x05, 0x06, 0x07,
-    0x0C, 0x0D, 0x0E,
-    0x14, 0x15, 0x16, 0x17,
-    0x1C, 0x1D, 0x1E, 0x1F,
-    0x24, 0x25, 0x27,
-    0x2C, 0x2D, 0x2F,
-    0x34, 0x35, 0x37,
-    0x3C, 0x3D, 0x3F,
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
-    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
-    0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
-    0x60, 0x61, 0x62, 0x63,
-    0x68, 0x6A,
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
-    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
-    0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
-    0xA8, 0xA9,
-    0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
-    0xC2, 0xC3,
-    0xC8, 0xC9,
-    0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
-    0xD4, 0xD5, 0xD6,
-    0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
-    0xF1,
-    0xF4, 0xF5,
-    0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD,
-]
+disable_operand_size_prefix = []
+disable_address_size_prefix = []
 
 # Randomize memory after this many instructions have been generated.
 # Memory is always randomized at the start of a test run.
-randomize_mem_interval = 1000
+randomize_mem_interval = 100
 
 sp_overrides = [
-    { opcode = 0xCF, min = 0x0006, max = 0xFFFC }, # IRET - avoid int 13
+    { opcode = 0xCF, odd_chance = 0.1, min = 0x0006, max = 0xFFFC }, # IRET - avoid int 13
+    { opcode = 0x44, odd_chance = 0.5, min = 0x0000, max = 0xFFFFFFFF }, # INC eSP
+    { opcode = 0x4C, odd_chance = 0.5, min = 0x0000, max = 0xFFFFFFFF }, # DEC eSP
 ]
 
 modrm_overrides = [
-    { opcode = 0x8F, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC6, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0xC7, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
-    { opcode = 0x8C, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x8E, allow_reg_form = true, mask = 0xDF, invalid_chance = 0.05 }, # only /r 0-3 forms are valid.
-    { opcode = 0x62, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
+    { opcode = 0x8F, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC6, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0xC7, extension = 0, allow_reg_form = true, mask = 0xC7, invalid_chance = 0.05 }, # Only /r 0 form is valid.
+    { opcode = 0x8C, extension = 0, allow_reg_form = true, mask = 0xFF, invalid_chance = 0.05 }, # On 386, we have two more segment selectors, so don't mask
+    { opcode = 0x8E, extension = 0, allow_reg_form = true, mask = 0xFF, invalid_chance = 0.05 }, # On 386, we have two more segment selectors, so don't mask
+    { opcode = 0x62, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # BOUND - only memory form is valid
+    { opcode = 0xC4, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.0 }, # LES - reg form invalid
+    { opcode = 0xC5, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.0 }, # LDS - reg form invalid - weird stuff gets decoded too?
+    { opcode = 0x0FB2, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LSS - reg form invalid
+    { opcode = 0x0FB4, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LFS - reg form invalid
+    { opcode = 0x0FB5, extension = 0, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.05 }, # LGS - reg form invalid
+    { opcode = 0xFF, extension = 2, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # CALL (no register form)
+    { opcode = 0xFF, extension = 3, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # CALL FAR (no register form)
+    { opcode = 0xFF, extension = 4, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # JUMP (no register form)
+    { opcode = 0xFF, extension = 5, allow_reg_form = false, mask = 0xFF, invalid_chance = 0.025 }, # JUMP FAR (no register form)
 ]
 
 count_overrides = [
-    { count = 1000, opcode_range = [0x40, 0x4F] }, # INC and DEC are trivial
-    { count = 1000, opcode_range = [0x90, 0x99] }, # XCHG instructions are trivial, as are CBW and CWD
-    { count = 1000, opcode_range = [0xF5, 0xF5] }, # CMC
-    { count = 1000, opcode_range = [0xF8, 0xFD] }, # CLC, STC, CLI, STI, CLD, STD
-    { count = 1000, opcode_range = [0xD6, 0xD6] }, # SALC
-    { count = 1000, opcode_range = [0xF4, 0xF4] }, # HALT
+    { count = 500, opcode_range = [0x40, 0x4F] }, # INC and DEC are trivial, but set flags
+    { count = 100, opcode_range = [0x90, 0x97] }, # XCHG r, r
+    { count = 500, opcode_range = [0x98, 0x99] }, # CBW and CWD
+    { count = 500, opcode_range = [0xB0, 0xB7] }, # MOV imm8 to register
+    { count = 500, opcode_range = [0xB8, 0xBF] }, # MOV imm16 to register
+    { count = 100, opcode_range = [0xF5, 0xF5] }, # CMC
+    { count = 100, opcode_range = [0xF8, 0xFD] }, # CLC, STC, CLI, STI, CLD, STD
+    { count = 100, opcode_range = [0xD6, 0xD6] }, # SALC
+    { count = 100, opcode_range = [0xF4, 0xF4] }, # HALT
 ]
 
+allowed_exceptions = [
+    6, # Invalid Opcode
+    12, # Stack Fault
+    13, # General Protection Fault
+]
+
+exception_overrides = [
+    { opcode = 0xF6, extension = 6, allow_all = false, exceptions = [0] }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, allow_all = false, exceptions = [0] }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, allow_all = false, exceptions = [0] }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, allow_all = false, exceptions = [0] }, # IDIV r/m16/32
+    { opcode = 0xD4, extension = 0, allow_all = false, exceptions = [0] }, # AAM
+    { opcode = 0x62, extension = 0, allow_all = false, exceptions = [5] }, # BOUND
+    { opcode = 0xCC, extension = 0, allow_all = false, exceptions = [3] }, # INT3
+    { opcode = 0xCD, extension = 0, allow_all = true, exceptions = [] }, # INT n
+    { opcode = 0xCE, extension = 0, allow_all = false, exceptions = [4] }, # INTO
+]
+
+# For instructions that generate exceptions with no easy way to control the exception rate through simple masking,
+# we can sieve the generated instructions to achieve a target exception rate.
+# The exception rate is the probability that a test matching the opcode, extension and exception number will be accepted
+# if it generates an exception.
 exception_sieve = [
-    { opcode = 0x62, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+    { opcode = 0x62, extension = 0, exception = 5, exception_rate = 0.25 }, # BOUND, target exception rate is 50%
+    { opcode = 0xF6, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 0, exception_rate = 0.05 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 0, exception_rate = 0.05 }, # IDIV r/m16/32
+    { opcode = 0xF6, extension = 6, exception = 13, exception_rate = 0.25 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 13, exception_rate = 0.25 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 13, exception_rate = 0.25 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 13, exception_rate = 0.25 }, # IDIV r/m16/32
+    { opcode = 0xF6, extension = 6, exception = 6, exception_rate = 0.0 }, # DIV r/m8
+    { opcode = 0xF6, extension = 7, exception = 6, exception_rate = 0.0 }, # IDIV r/m8
+    { opcode = 0xF7, extension = 6, exception = 6, exception_rate = 0.0 }, # DIV r/m16/32
+    { opcode = 0xF7, extension = 7, exception = 6, exception_rate = 0.0 }, # IDIV r/m16/32
+    { opcode = 0x8C, extension = 0, exception = 6, exception_rate = 0.05 }, # MOV r/m16, Sreg
+    { opcode = 0x8E, extension = 0, exception = 6, exception_rate = 0.05 }, # MOV Sreg, r/m16
 ]
 
 inject_values = [
-    0x00000000,
-    0x00000001,
-    0x00000002,
-    0x00000003,
-    0x00000004,
-    0x00000005,
-    0x00000006,
-    0x00000007,
-    0x00000008,
-    0x00000009,
-    0x0000000A,
-    0x0000000B,
-    0x0000000C,
-    0x0000000D,
-    0x0000000E,
-    0x0000000F,
-    0x00000010,
-    0x00000011,
-    0x00000012,
-    0x00000013,
-    0x00000014,
-    0x00000015,
-    0x00000016,
-    0x00000017,
-    0x00000018,
-    0x00000019,
-    0x0000001A,
-    0x0000001B,
-    0x0000001C,
-    0x0000001D,
-    0x0000001E,
-    0x0000001F,
-    0x00000020,
-    0x00000021,
-    0x0000003F,
-    0x00000040,
-    0x00000041,
-    0x0000004F,
-    0x00000050,
-    0x00000051,
-    0x0000005F,
-    0x00000060,
-    0x00000061,
-    0x0000007F,
-    0x00000080,
-    0x00000081,
-    0x0000008F,
-    0x00000090,
-    0x00000091,
-    0x0000009F,
-    0x000000A0,
-    0x000000A1,
-    0x000000AF,
-    0x000000B0,
-    0x000000B1,
-    0x000000BF,
-    0x000000C0,
-    0x000000C1,
-    0x000000CF,
-    0x000000D0,
-    0x000000D1,
-    0x000000DF,
-    0x000000E0,
-    0x000000E1,
-    0x000000EF,
-    0x000000F0,
-    0x000000F1,
-    0x000000FE,
-    0x000000FF,
-    0x00000100,
-    0x00000101,
-    0x000001FF,
-    0x00000200,
-    0x00000201,
-    0x000003FF,
-    0x00000400,
-    0x00000401,
-    0x000007FF,
-    0x00000800,
-    0x00000801,
-    0x00000FFF,
-    0x00001000,
-    0x00001001,
-    0x00001FFF,
-    0x00002000,
-    0x00002001,
-    0x00003FFF,
-    0x00004000,
-    0x00004001,
-    0x00007F00,
-    0x00007FFE,
-    0x00007FFF,
-    0x00008000,
-    0x00008001,
-    0x00008080,
-    0x00008081,
-    0x0000FF00,
-    0x0000FFFE,
-    0x0000FFFF,
-    0x00010000,
-    0x00010001,
-    0x0001FFFF,
-    0x00020000,
-    0x00020001,
-    0x0003FFFF,
-    0x00040000,
-    0x00040001,
-    0x0007FFFF,
-    0x00080000,
-    0x00080001,
-    0x000FFFFF,
-    0x00100000,
-    0x00100001,
-    0x001FFFFF,
-    0x00200000,
-    0x00200001,
-    0x003FFFFF,
-    0x00400000,
-    0x00400001,
-    0x007F0000,
-    0x007FFFFE,
-    0x007FFFFF,
-    0x00800000,
-    0x00800001,
-    0x00FF0000,
-    0x00FF00FF,
-    0x00FFFFFE,
-    0x00FFFFFF,
-    0x01000000,
-    0x01000001,
-    0x01010101,
-    0x01FFFFFF,
-    0x02000000,
-    0x02000001,
-    0x03FFFFFF,
-    0x04000000,
-    0x04000001,
-    0x07FFFFFF,
-    0x08000000,
-    0x08000001,
-    0x0F0F0F0F,
-    0x0FFFFFFF,
-    0x10000000,
-    0x10000001,
-    0x1FFFFFFF,
-    0x20000000,
-    0x20000001,
-    0x3FFFFFFF,
-    0x40000000,
-    0x40000001,
-    0x7F000000,
-    0x7F7F7F7F,
-    0x7FFFFFFF,
-    0x80000000,
-    0x80000001,
-    0x80808080,
-    0xA5A5A5A5,
-    0x5A5A5A5A,
-    0xAFFFFFFF,
-    0xBFFFFFFF,
-    0xCFFFFFFF,
-    0xDFFFFFFF,
-    0xEFFFFFFF,
-    0xF0F0F0F0,
-    0xF7FFFFFF,
-    0xFBFFFFFF,
-    0xFDFFFFFF,
-    0xFEFEFEFE,
-    0xFEFFFFFF,
-    0xFF000000,
-    0xFF00FF00,
-    0xFF7FFFFF,
-    0xFFBFFFFF,
-    0xFFDFFFFF,
-    0xFFEFFFFF,
-    0xFFF7FFFF,
-    0xFF800000,
-    0xFFFBFFFF,
-    0xFFFC0000,
-    0xFFFDFFFF,
-    0xFFFE0000,
-    0xFFFEFFFF,
-    0xFFFF0000,
-    0xFFFF7FFF,
-    0xFFFFBFFF,
-    0xFFFFDFFF,
-    0xFFFFEFFF,
-    0xFFFFF7FF,
-    0xFFFFFBFF,
-    0xFFFFFDFF,
-    0xFFFFFEFF,
-    0xFFFFFF0F,
-    0xFFFFFF1F,
-    0xFFFFFF2F,
-    0xFFFFFF3F,
-    0xFFFFFF4F,
-    0xFFFFFF5F,
-    0xFFFFFF6F,
-    0xFFFFFF7F,
-    0xFFFFFF8F,
-    0xFFFFFF9F,
-    0xFFFFFFAF,
-    0xFFFFFFBF,
-    0xFFFFFFCF,
-    0xFFFFFFDF,
-    0xFFFFFFEF,
-    0xFFFFFFF0,
-    0xFFFFFFF1,
-    0xFFFFFFF2,
-    0xFFFFFFF3,
-    0xFFFFFFF4,
-    0xFFFFFFF5,
-    0xFFFFFFF6,
-    0xFFFFFFF7,
-    0xFFFFFFF8,
-    0xFFFFFFF9,
-    0xFFFFFFFA,
-    0xFFFFFFFB,
-    0xFFFFFFFC,
-    0xFFFFFFFD,
-    0xFFFFFFFE,
-    0xF0000000,
-    0x0F000000,
-    0x00F00000,
-    0x000F0000,
-    0x0000F000,
-    0x00000F00
+    { value = 0x00000001, weight = 50 }, # DEC zero flag boundary
+    { value = 0x00000002, weight = 1 },
+    { value = 0x00000003, weight = 1 },
+    { value = 0x00000004, weight = 1 },
+    { value = 0x00000005, weight = 1 },
+    { value = 0x00000006, weight = 1 },
+    { value = 0x00000007, weight = 1 },
+    { value = 0x00000008, weight = 1 },
+    { value = 0x00000009, weight = 1 },
+    { value = 0x0000000A, weight = 1 },
+    { value = 0x0000000B, weight = 1 },
+    { value = 0x0000000C, weight = 1 },
+    { value = 0x0000000D, weight = 1 },
+    { value = 0x0000000E, weight = 1 },
+    { value = 0x0000000F, weight = 1 },
+    { value = 0x00000010, weight = 1 },
+    { value = 0x00000011, weight = 1 },
+    { value = 0x00000012, weight = 1 },
+    { value = 0x00000013, weight = 1 },
+    { value = 0x00000014, weight = 1 },
+    { value = 0x00000015, weight = 1 },
+    { value = 0x00000016, weight = 1 },
+    { value = 0x00000017, weight = 1 },
+    { value = 0x00000018, weight = 1 },
+    { value = 0x00000019, weight = 1 },
+    { value = 0x0000001A, weight = 1 },
+    { value = 0x0000001B, weight = 1 },
+    { value = 0x0000001C, weight = 1 },
+    { value = 0x0000001D, weight = 1 },
+    { value = 0x0000001E, weight = 1 },
+    { value = 0x0000001F, weight = 1 },
+    { value = 0x00000020, weight = 1 },
+    { value = 0x00000021, weight = 1 },
+    { value = 0x0000003F, weight = 1 },
+    { value = 0x00000040, weight = 1 },
+    { value = 0x00000041, weight = 1 },
+    { value = 0x0000004F, weight = 1 },
+    { value = 0x00000050, weight = 1 },
+    { value = 0x00000051, weight = 1 },
+    { value = 0x0000005F, weight = 1 },
+    { value = 0x00000060, weight = 1 },
+    { value = 0x00000061, weight = 1 },
+    { value = 0x0000007F, weight = 1 },
+    { value = 0x00000080, weight = 1 },
+    { value = 0x00000081, weight = 1 },
+    { value = 0x0000008F, weight = 1 },
+    { value = 0x00000090, weight = 1 },
+    { value = 0x00000091, weight = 1 },
+    { value = 0x0000009F, weight = 1 },
+    { value = 0x000000A0, weight = 1 },
+    { value = 0x000000A1, weight = 1 },
+    { value = 0x000000AF, weight = 1 },
+    { value = 0x000000B0, weight = 1 },
+    { value = 0x000000B1, weight = 1 },
+    { value = 0x000000BF, weight = 1 },
+    { value = 0x000000C0, weight = 1 },
+    { value = 0x000000C1, weight = 1 },
+    { value = 0x000000CF, weight = 1 },
+    { value = 0x000000D0, weight = 1 },
+    { value = 0x000000D1, weight = 1 },
+    { value = 0x000000DF, weight = 1 },
+    { value = 0x000000E0, weight = 1 },
+    { value = 0x000000E1, weight = 1 },
+    { value = 0x000000EF, weight = 1 },
+    { value = 0x000000F0, weight = 1 },
+    { value = 0x000000F1, weight = 1 },
+    { value = 0x000000FE, weight = 1 },
+    { value = 0x000000FF, weight = 1 },
+    { value = 0x00000100, weight = 1 },
+    { value = 0x00000101, weight = 1 },
+    { value = 0x000001FF, weight = 1 },
+    { value = 0x00000200, weight = 1 },
+    { value = 0x00000201, weight = 1 },
+    { value = 0x000003FF, weight = 1 },
+    { value = 0x00000400, weight = 1 },
+    { value = 0x00000401, weight = 1 },
+    { value = 0x000007FF, weight = 1 },
+    { value = 0x00000800, weight = 1 },
+    { value = 0x00000801, weight = 1 },
+    { value = 0x00000FFF, weight = 1 },
+    { value = 0x00001000, weight = 1 },
+    { value = 0x00001001, weight = 1 },
+    { value = 0x00001FFF, weight = 1 },
+    { value = 0x00002000, weight = 1 },
+    { value = 0x00002001, weight = 1 },
+    { value = 0x00003FFF, weight = 1 },
+    { value = 0x00004000, weight = 1 },
+    { value = 0x00004001, weight = 1 },
+    { value = 0x00007F00, weight = 1 },
+    { value = 0x00007FFE, weight = 1 },
+    { value = 0x00007FFF, weight = 50 }, # 16-bit INC/DEC overflow boundary
+    { value = 0x00008000, weight = 50 }, # 16-bit INC/DEC overflow boundary
+    { value = 0x00008001, weight = 1 },
+    { value = 0x00008080, weight = 1 },
+    { value = 0x00008081, weight = 1 },
+    { value = 0x0000FF00, weight = 1 },
+    { value = 0x0000FFFE, weight = 1 },
+    { value = 0x0000FFFF, weight = 1 },
+    { value = 0x00010000, weight = 1 },
+    { value = 0x00010001, weight = 1 },
+    { value = 0x0001FFFF, weight = 1 },
+    { value = 0x00020000, weight = 1 },
+    { value = 0x00020001, weight = 1 },
+    { value = 0x0003FFFF, weight = 1 },
+    { value = 0x00040000, weight = 1 },
+    { value = 0x00040001, weight = 1 },
+    { value = 0x0007FFFF, weight = 1 },
+    { value = 0x00080000, weight = 1 },
+    { value = 0x00080001, weight = 1 },
+    { value = 0x000FFFFF, weight = 1 },
+    { value = 0x00100000, weight = 1 },
+    { value = 0x00100001, weight = 1 },
+    { value = 0x001FFFFF, weight = 1 },
+    { value = 0x00200000, weight = 1 },
+    { value = 0x00200001, weight = 1 },
+    { value = 0x003FFFFF, weight = 1 },
+    { value = 0x00400000, weight = 1 },
+    { value = 0x00400001, weight = 1 },
+    { value = 0x007F0000, weight = 1 },
+    { value = 0x007FFFFE, weight = 1 },
+    { value = 0x007FFFFF, weight = 1 },
+    { value = 0x00800000, weight = 1 },
+    { value = 0x00800001, weight = 1 },
+    { value = 0x00FF0000, weight = 1 },
+    { value = 0x00FF00FF, weight = 1 },
+    { value = 0x00FFFFFE, weight = 1 },
+    { value = 0x00FFFFFF, weight = 1 },
+    { value = 0x01000000, weight = 1 },
+    { value = 0x01000001, weight = 1 },
+    { value = 0x01010101, weight = 1 },
+    { value = 0x01FFFFFF, weight = 1 },
+    { value = 0x02000000, weight = 1 },
+    { value = 0x02000001, weight = 1 },
+    { value = 0x03FFFFFF, weight = 1 },
+    { value = 0x04000000, weight = 1 },
+    { value = 0x04000001, weight = 1 },
+    { value = 0x07FFFFFF, weight = 1 },
+    { value = 0x08000000, weight = 1 },
+    { value = 0x08000001, weight = 1 },
+    { value = 0x0F0F0F0F, weight = 1 },
+    { value = 0x0FFFFFFF, weight = 1 },
+    { value = 0x10000000, weight = 1 },
+    { value = 0x10000001, weight = 1 },
+    { value = 0x1FFFFFFF, weight = 1 },
+    { value = 0x20000000, weight = 1 },
+    { value = 0x20000001, weight = 1 },
+    { value = 0x3FFFFFFF, weight = 1 },
+    { value = 0x40000000, weight = 1 },
+    { value = 0x40000001, weight = 1 },
+    { value = 0x7F000000, weight = 1 },
+    { value = 0x7F7F7F7F, weight = 1 },
+    { value = 0x7FFFFFFF, weight = 50 }, # INC/DEC overflow boundary
+    { value = 0x80000000, weight = 50 }, # INC/DEC overflow boundary
+    { value = 0x80000001, weight = 1 },
+    { value = 0x80808080, weight = 1 },
+    { value = 0xA5A5A5A5, weight = 1 },
+    { value = 0x5A5A5A5A, weight = 1 },
+    { value = 0xAFFFFFFF, weight = 1 },
+    { value = 0xBFFFFFFF, weight = 1 },
+    { value = 0xCFFFFFFF, weight = 1 },
+    { value = 0xDFFFFFFF, weight = 1 },
+    { value = 0xEFFFFFFF, weight = 1 },
+    { value = 0xF0F0F0F0, weight = 1 },
+    { value = 0xF7FFFFFF, weight = 1 },
+    { value = 0xFBFFFFFF, weight = 1 },
+    { value = 0xFDFFFFFF, weight = 1 },
+    { value = 0xFEFEFEFE, weight = 1 },
+    { value = 0xFEFFFFFF, weight = 1 },
+    { value = 0xFF000000, weight = 1 },
+    { value = 0xFF00FF00, weight = 1 },
+    { value = 0xFF7FFFFF, weight = 1 },
+    { value = 0xFFBFFFFF, weight = 1 },
+    { value = 0xFFDFFFFF, weight = 1 },
+    { value = 0xFFEFFFFF, weight = 1 },
+    { value = 0xFFF7FFFF, weight = 1 },
+    { value = 0xFF800000, weight = 1 },
+    { value = 0xFFFBFFFF, weight = 1 },
+    { value = 0xFFFC0000, weight = 1 },
+    { value = 0xFFFDFFFF, weight = 1 },
+    { value = 0xFFFE0000, weight = 1 },
+    { value = 0xFFFEFFFF, weight = 1 },
+    { value = 0xFFFF0000, weight = 1 },
+    { value = 0xFFFF7FFF, weight = 1 },
+    { value = 0xFFFFBFFF, weight = 1 },
+    { value = 0xFFFFDFFF, weight = 1 },
+    { value = 0xFFFFEFFF, weight = 1 },
+    { value = 0xFFFFF7FF, weight = 1 },
+    { value = 0xFFFFFBFF, weight = 1 },
+    { value = 0xFFFFFDFF, weight = 1 },
+    { value = 0xFFFFFEFF, weight = 1 },
+    { value = 0xFFFFFF0F, weight = 1 },
+    { value = 0xFFFFFF1F, weight = 1 },
+    { value = 0xFFFFFF2F, weight = 1 },
+    { value = 0xFFFFFF3F, weight = 1 },
+    { value = 0xFFFFFF4F, weight = 1 },
+    { value = 0xFFFFFF5F, weight = 1 },
+    { value = 0xFFFFFF6F, weight = 1 },
+    { value = 0xFFFFFF7F, weight = 1 },
+    { value = 0xFFFFFF8F, weight = 1 },
+    { value = 0xFFFFFF9F, weight = 1 },
+    { value = 0xFFFFFFAF, weight = 1 },
+    { value = 0xFFFFFFBF, weight = 1 },
+    { value = 0xFFFFFFCF, weight = 1 },
+    { value = 0xFFFFFFDF, weight = 1 },
+    { value = 0xFFFFFFEF, weight = 1 },
+    { value = 0xFFFFFFF0, weight = 1 },
+    { value = 0xFFFFFFF1, weight = 1 },
+    { value = 0xFFFFFFF2, weight = 1 },
+    { value = 0xFFFFFFF3, weight = 1 },
+    { value = 0xFFFFFFF4, weight = 1 },
+    { value = 0xFFFFFFF5, weight = 1 },
+    { value = 0xFFFFFFF6, weight = 1 },
+    { value = 0xFFFFFFF7, weight = 1 },
+    { value = 0xFFFFFFF8, weight = 1 },
+    { value = 0xFFFFFFF9, weight = 1 },
+    { value = 0xFFFFFFFA, weight = 1 },
+    { value = 0xFFFFFFFB, weight = 1 },
+    { value = 0xFFFFFFFC, weight = 1 },
+    { value = 0xFFFFFFFD, weight = 1 },
+    { value = 0xFFFFFFFE, weight = 1 },
 ]
+
+#inject_values = [
+#    { value = 0x00000001, weight = 5 }, # DEC zero flag boundary
+#    { value = 0x0000007F, weight = 1 },
+#    { value = 0x00000080, weight = 1 }, # DIV edge case / 8-bit INC/DEC overflow boundary
+#    { value = 0x00000081, weight = 1 },
+#    { value = 0x000000FE, weight = 1 },
+#    { value = 0x000000FF, weight = 1 },
+#    { value = 0x00000100, weight = 1 },
+#    { value = 0x00007FFF, weight = 5 }, # 16-bit INC/DEC overflow boundary
+#    { value = 0x00008000, weight = 5 }, # 16-bit INC/DEC overflow boundary
+#    { value = 0x00008080, weight = 1 }, # DIV edge case
+#    { value = 0x7FFFFFFF, weight = 5 }, # INC/DEC overflow boundary
+#    { value = 0x80000000, weight = 5 }, # INC/DEC overflow boundary
+#    { value = 0xFFFFFFFE, weight = 1 },
+#]
 
 #{ count = 2000, opcode_range = [0x6C, 0x6F] }, # INS and OUTS instructions
 #{ count = 2000, opcode_range = [0xA4, 0xA7] }, # MOVS, CMPS
@@ -638,14 +716,19 @@ serial_debug_default = false
 validate_count = 2 # Number of identical tests required to accept test
 max_sieve = 100 # Maximum number of times to sieve a test before giving up.
 max_gen = 10 # Maximum number of times to regenerate a failed instruction.
-test_retry = 5 # Number of retries per single test generation.
-load_retry = 5 # Number of retries for LOADALL.
+test_retry = 2 # Number of retries per single test generation.
+load_retry = 2 # Number of retries for LOADALL.
 polling_sleep = 10 # Polling rate in milliseconds per poll
 test_timeout = 2000 # Timeout for a single test in milliseconds
 print_instruction = true
 print_initial_regs = false
 print_final_regs = false
 show_gen_time = true
+
+[test_exec.validate_mode]
+attempts = 2 # Number of attempts to validate a test
+move_after_validate = true # Move test to validated directory after successful validation
+stop_on_error = true
 
 [metadata]
 repo = "https://github.com/SingleStepTests/80386"
@@ -656,1865 +739,3 @@ cpu_detail = "Intel 80386EX KU80C386EX33 L213QB36E"
 generator = "arduinoX86"
 author = "Daniel Balsom"
 date = "2025/07/13"
-
-[metadata.opcodes.00]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.01]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.02]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.03]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.04]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.05]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.06]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.07]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.08]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.09]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.0A]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.0B]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.0C]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.0D]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.0E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.0F]
-status = "extension"
-arch = "v30"
-
-[metadata.opcodes.10]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.11]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.12]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.13]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.14]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.15]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.16]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.17]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.18]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.19]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.1F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.20]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.21]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.22]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.23]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.24]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.25]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.26]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.27]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.28]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.29]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.2A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.2B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.2C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.2D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.2E]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.2F]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.30]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.31]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.32]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.33]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.34]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.35]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.36]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.37]
-status = "normal"
-arch = "86"
-flags = "o..sz.p."
-flags-mask = 63291
-
-[metadata.opcodes.38]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.39]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.3A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.3B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.3C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.3D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.3E]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.3F]
-status = "normal"
-arch = "86"
-flags = "o..sz.p."
-flags-mask = 63291
-
-[metadata.opcodes.40]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.41]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.42]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.43]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.44]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.45]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.46]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.47]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.48]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.49]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.4F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.50]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.51]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.52]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.53]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.54]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.55]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.56]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.57]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.58]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.59]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.5F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.60]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.61]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.62]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.63]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.64]
-status = "undefined"
-arch = "286"
-
-[metadata.opcodes.65]
-status = "undefined"
-arch = "286"
-
-[metadata.opcodes.66]
-status = "undefined"
-arch = "286"
-
-[metadata.opcodes.67]
-status = "undefined"
-arch = "286"
-
-[metadata.opcodes.68]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.69]
-status = "normal"
-arch = "186"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.6A]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.6B]
-status = "normal"
-arch = "186"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.6C]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.6D]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.6E]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.6F]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.70]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.71]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.72]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.73]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.74]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.75]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.76]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.77]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.78]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.79]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.7F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.84]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.85]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.86]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.87]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.88]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.89]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.90]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.91]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.92]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.93]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.94]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.95]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.96]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.97]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.98]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.99]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9A]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9B]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9C]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9D]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9E]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.9F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.A8]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.A9]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.AA]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.AB]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.AC]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.AD]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.AE]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.AF]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B8]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.B9]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BA]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BB]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BC]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BD]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BE]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.BF]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C8]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C9]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.CA]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.CB]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.CC]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.CD]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.CE]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.CF]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D4]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D5]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D6]
-status = "undocumented"
-arch = "v30"
-
-[metadata.opcodes.D7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D8]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.D9]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DA]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DB]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DC]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DD]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DE]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.DF]
-status = "fpu"
-arch = "86"
-
-[metadata.opcodes.E0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E8]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.E9]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.EA]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.EB]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.EC]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.ED]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.EE]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.EF]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F0]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.F1]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.F2]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.F3]
-status = "prefix"
-arch = "86"
-
-[metadata.opcodes.F4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F8]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F9]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FA]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FB]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FC]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FD]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.0F00]
-status = "normal"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.0]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.1]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.2]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.3]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.4]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F00.reg.5]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01]
-status = "normal"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.0]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.1]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.2]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.3]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.4]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F01.reg.6]
-status = "normal"
-mode = "protected"
-arch = "286"
-
-[metadata.opcodes.0F02]
-status = "normal"
-mode = "protected"
-arch = "v30"
-
-[metadata.opcodes.0F03]
-status = "normal"
-mode = "protected"
-arch = "v30"
-
-[metadata.opcodes.0F04]
-status = "normal"
-mode = "protected"
-arch = "v30"
-
-[metadata.opcodes.0F05]
-status = "normal"
-mode = "protected"
-arch = "v30"
-
-[metadata.opcodes.0F06]
-status = "normal"
-mode = "protected"
-arch = "v30"
-
-[metadata.opcodes.0F0B]
-status = "undefined"
-arch = "v30"
-
-[metadata.opcodes.80]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.80.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.80.reg.1]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.80.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.80.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.80.reg.4]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.80.reg.5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.80.reg.6]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.80.reg.7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81.reg.1]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.81.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81.reg.4]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.81.reg.5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.81.reg.6]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.81.reg.7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.82]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.82.reg.0]
-status = "alias"
-arch = "86"
-
-[metadata.opcodes.82.reg.1]
-status = "alias"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.82.reg.2]
-status = "alias"
-arch = "86"
-
-[metadata.opcodes.82.reg.3]
-status = "alias"
-arch = "86"
-
-[metadata.opcodes.82.reg.4]
-status = "alias"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.82.reg.5]
-status = "alias"
-arch = "86"
-
-[metadata.opcodes.82.reg.6]
-status = "alias"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.82.reg.7]
-status = "alias"
-arch = "86"
-
-[metadata.opcodes.83]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.83.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.83.reg.1]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.83.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.83.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.83.reg.4]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.83.reg.5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.83.reg.6]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.83.reg.7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8F]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8F.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.8F.reg.1]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.2]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.3]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.4]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.5]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.6]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.8F.reg.7]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C0.reg.0]
-percentage = 50
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C0]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C0.reg.1]
-percentage = 50
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C0.reg.2]
-percentage = 50
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C0.reg.3]
-percentage = 50
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C0.reg.4]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.C0.reg.5]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.C0.reg.6]
-percentage = 50
-status = "undocumented"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.C0.reg.7]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.C1]
-status = "normal"
-arch = "186"
-
-[metadata.opcodes.C1.reg.0]
-percentage = 50
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.C1.reg.1]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.C1.reg.2]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.C1.reg.3]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.C1.reg.4]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o....a.."
-flags-mask = 63471
-
-[metadata.opcodes.C1.reg.5]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o....a.."
-flags-mask = 63471
-
-[metadata.opcodes.C1.reg.6]
-percentage = 50
-status = "undocumented"
-arch = "186"
-flags = "o....a.."
-flags-mask = 63471
-
-[metadata.opcodes.C1.reg.7]
-percentage = 50
-status = "normal"
-arch = "186"
-flags = "o....a.."
-flags-mask = 63471
-
-[metadata.opcodes.C6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C6.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C6.reg.1]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.2]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.3]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.4]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.5]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.6]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C6.reg.7]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C7.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.C7.reg.1]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.2]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.3]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.4]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.5]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.6]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.C7.reg.7]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.D0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D0.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D0.reg.1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D0.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D0.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D0.reg.4]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D0.reg.5]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D0.reg.6]
-status = "undocumented"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D0.reg.7]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D1.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D1.reg.1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D1.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D1.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D1.reg.4]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D1.reg.5]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D1.reg.6]
-status = "undocumented"
-arch = "186"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D1.reg.7]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.D2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D2.reg.0]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D2.reg.1]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D2.reg.2]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D2.reg.3]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D2.reg.4]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D2.reg.5]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D2.reg.6]
-status = "undocumented"
-arch = "186"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D2.reg.7]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.D3.reg.0]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D3.reg.1]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D3.reg.2]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D3.reg.3]
-status = "normal"
-arch = "86"
-flags = "o......."
-flags-mask = 63487
-
-[metadata.opcodes.D3.reg.4]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D3.reg.5]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D3.reg.6]
-status = "undocumented"
-arch = "186"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.D3.reg.7]
-status = "normal"
-arch = "86"
-flags = "o....a.c"
-flags-mask = 63470
-
-[metadata.opcodes.F6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F6.reg.0]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.F6.reg.1]
-status = "alias"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.F6.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F6.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F6.reg.4]
-status = "normal"
-arch = "86"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.F6.reg.5]
-status = "normal"
-arch = "86"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.F6.reg.6]
-status = "normal"
-arch = "86"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.F6.reg.7]
-status = "normal"
-arch = "86"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.F7]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F7.reg.0]
-status = "normal"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.F7.reg.1]
-status = "alias"
-arch = "86"
-flags = ".....a.."
-flags-mask = 65519
-
-[metadata.opcodes.F7.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F7.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.F7.reg.4]
-status = "normal"
-arch = "86"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.F7.reg.5]
-status = "normal"
-arch = "86"
-flags = "...szap."
-flags-mask = 65323
-
-[metadata.opcodes.F7.reg.6]
-status = "normal"
-arch = "86"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.F7.reg.7]
-status = "normal"
-arch = "86"
-flags = "o..szapc"
-flags-mask = 63274
-
-[metadata.opcodes.FE]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FE.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FE.reg.1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FE.reg.2]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FE.reg.3]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FE.reg.4]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FE.reg.5]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FE.reg.6]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FE.reg.7]
-status = "undefined"
-arch = "86"
-
-[metadata.opcodes.FF]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.0]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.1]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.2]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.3]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.4]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.5]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.6]
-status = "normal"
-arch = "86"
-
-[metadata.opcodes.FF.reg.7]
-status = "undefined"
-arch = "186"

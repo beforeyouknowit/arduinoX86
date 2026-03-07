@@ -10,12 +10,16 @@
     10 00000010 86C4                        xchg  al, ah
     11 00000012 E622                        out   22H, al       ; Knock on the port
     12 00000014 E722                        out   22H, ax       ; Knock again with 16-bits to set
-    13 00000016 BA38F4                      mov   dx, 0F438h
-    14 00000019 B88003                      mov   ax, 0380h
+    13 00000016 BA38F4                      mov   dx, 0F438h    ; UCSADL - Chip-select Low Address
+    14 00000019 B88003                      mov   ax, 0380h     ; 0000_0011_1000_0000: Address 0, SMM bit clear, Bus Size 16, Memory, Ready Enabled, 0 wait states
     15 0000001C EF                          out   dx, ax
-    16 0000001D BA3EF4                      mov   dx, 0F43Eh
+    16 0000001D BA3EF4                      mov   dx, 0F43Eh    ; UCSMSKH - Chip-select High Mask
     17 00000020 B80000                      mov   ax, 0
     18 00000023 EF                          out   dx, ax
-    19 00000024 B80100                      mov   ax, 1
-    20 00000027 BA3CF4                      mov   dx, 0F43Ch
+    19 00000024 B80100                      mov   ax, 1         ; Enable the chip select channel
+    20 00000027 BA3CF4                      mov   dx, 0F43Ch    ; UCSMSKL - Chip-select Low Mask
     21 0000002A EF                          out   dx, ax
+    22                                  
+    23 0000002B BA20F8                      mov   dx, 0F820H    ; P1CFG
+    24 0000002E B0FF                        mov   al, 0FFH      ; Connect all pins.
+    25 00000030 EE                          out   dx, al

@@ -68,108 +68,6 @@ void CommandServer<BoardType,ShieldType>::reset()
   commandState_ = CommandState::WaitingForCommand;
 }
 
-/// @brief Runs the command server, processing incoming commands and executing them.
-/// @tparam BoardType 
-/// @tparam ShieldType 
-template<typename BoardType, typename ShieldType>
-void CommandServer<BoardType,ShieldType>::run()
-{
-
-  switch (commandState_) {
-
-    case CommandState::WaitingForCommand:
-      if (proto_available() > 0) {
-        uint8_t cmd_byte = proto_read();
-
-        // DEBUG_SERIAL.print("Received opcode: 0x");
-        // DEBUG_SERIAL.println(cmd_byte, HEX);
-
-        if (cmd_byte >= static_cast<uint8_t>(ServerCommand::CmdInvalid)) {
-          send_fail();
-          break;
-        }
-
-        // Valid command, enter ReadingCommand state
-        cmd_ = static_cast<ServerCommand>(cmd_byte);
-        if (cmd_ != ServerCommand::CmdServerStatus) {
-          controller_.getBoard().debugPrintf(
-            DebugType::CMD, 
-            false, 
-            "## CMD: Received command byte: %02X (%s)\n\r", 
-            cmd_byte, 
-            get_command_name(cmd_)
-          );
-        }
-
-        size_t command_bytes = get_command_input_bytes(cmd_);
-
-        if (cmd_ == ServerCommand::CmdNone) {
-          // We ignore command byte 0 (null command)
-          break;
-        } else if (command_bytes > 0) {
-          // This command requires input bytes before it is executed.
-          commandByteN_ = 0;
-          commandBytesExpected_ = command_bytes;
-          commandStartTime_ = millis();  // Get start time for timeout calculation
-          commandState_ = CommandState::ReadingCommand;
-        } else {
-          // Command requires no input, so execute it immediately
-          bool result = dispatch_command(cmd_);
-          if (result) {
-            debug_proto("Command OK!");
-            send_ok();
-          } else {
-            debug_proto("Command FAIL!");
-            send_fail();
-          }
-        }
-      }
-      break;
-
-    case CommandState::ReadingCommand:
-      // The previously specified command requires parameter bytes, so read them in, or timeout
-      if (proto_available() > 0) {
-        // TODO: Read more than one byte at a time if available.
-        uint8_t param_byte = proto_read();
-
-        if (commandByteN_ < MAX_COMMAND_BYTES) {
-          commandBuffer_[commandByteN_++] = param_byte;
-
-          if (commandByteN_ == commandBytesExpected_) {
-            // We have received enough parameter bytes to execute the in-progress command.
-            bool result = dispatch_command(cmd_);
-            if (result) {
-              send_ok();
-            } else {
-              send_fail();
-            }
-
-            // Revert to listening for command
-            commandByteN_ = 0;
-            commandBytesExpected_ = 0;
-            commandState_ = CommandState::WaitingForCommand;
-          }
-        }
-      } else {
-        // No bytes received yet, so keep track of how long we've been waiting
-        uint32_t now = millis();
-        uint32_t elapsed = now - commandStartTime_;
-
-        if (elapsed >= CMD_TIMEOUT) {
-          // Timed out waiting for parameter bytes. Send failure and revert to listening for command
-          commandByteN_ = 0;
-          commandBytesExpected_ = 0;
-          commandState_ = CommandState::WaitingForCommand;
-          debug_proto("Command timeout!");
-          send_fail();
-        }
-      }
-      break;
-
-    case CommandState::ExecutingCommand:
-      break;
-  }
-}
 
 /// @brief Returns the name of the command based on the ServerCommand enum.
 /// This is useful for debugging and logging purposes.
@@ -221,6 +119,7 @@ const char* CommandServer<BoardType, ShieldType>::get_command_name(ServerCommand
       case ServerCommand::CmdServerStatus: return "CmdServerStatus";
       case ServerCommand::CmdClearCycleLog: return "CmdClearCycleLog";
       case ServerCommand::CmdSetProgramBounds: return "CmdSetProgramBounds";
+      case ServerCommand::CmdSetJumpHint: return "CmdSetJumpHint";
       case ServerCommand::CmdInvalid: return "CmdInvalid";
       default: return "Unknown";
   }
@@ -369,7 +268,9 @@ bool CommandServer<BoardType, ShieldType>::dispatch_command(ServerCommand cmd) {
     case ServerCommand::CmdClearCycleLog:
         return cmd_clear_cycle_log();
     case ServerCommand::CmdSetProgramBounds:
-        return cmd_set_program_bounds();        
+        return cmd_set_program_bounds();      
+    case ServerCommand::CmdSetJumpHint:
+        return cmd_set_jump_hint();  
     case ServerCommand::CmdInvalid:
     default:
         return cmd_invalid();
@@ -445,6 +346,7 @@ uint8_t CommandServer<BoardType, ShieldType>::get_command_input_bytes(ServerComm
         case ServerCommand::CmdServerStatus: return 0;
         case ServerCommand::CmdClearCycleLog: return 0; // No parameters needed to clear cycle log
         case ServerCommand::CmdSetProgramBounds: return 8; // Parameters: start_addr (4 bytes), end_addr (4 bytes).
+        case ServerCommand::CmdSetJumpHint: return 2; // Parameter. First byte: 0 (clear hint) (1) set hint. 2nd byte: 0 (even address), 1 (odd address)
         case ServerCommand::CmdInvalid: return 0;
         default: return 0;
     }
@@ -471,6 +373,8 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
     default:
       break;
   }
+
+  executing_ = false;
 
   // Enter new state.
   switch (new_state) {
@@ -552,6 +456,7 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         // Set v_pc to 4 to skip IVT segment:offset
         CPU.program->set_pc(4);
       }
+      executing_ = true;
       break;
     case ServerState::ExecuteFinalize:
       NMI_VECTOR.reset();
@@ -575,8 +480,10 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         CPU.program = &STORE_PROGRAM_INLINE;
       }
       CPU.program->reset();
+      executing_ = true;
       break;
     case ServerState::ExecuteDone:
+      executing_ = true;
       break;
     case ServerState::EmuExit:
       CPU.stack_r_op_ct = 0;
@@ -590,6 +497,7 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
       // so we can write raw incoming data over the struct. Faster than logic required to set
       // specific members.
       CPU.readback_p = (uint8_t *)&CPU.post_regs;
+      executing_ = true;
       break;
     case ServerState::StoreAll:
       CPU.wait_states = 2;
@@ -601,24 +509,31 @@ void CommandServer<BoardType, ShieldType>::change_state(ServerState new_state) {
         CPU.program = &STOREALL_PROGRAM;
       }
       CPU.program->reset();
+      executing_ = true;
       break;
     case ServerState::StoreDone:
+      executing_ = false;
       break;  
     case ServerState::StoreDoneSmm:
+      executing_ = false;
       break;
     case ServerState::Done:
+      executing_ = false;
       break;
     case ServerState::Shutdown:
       CPU.error_cycle_ct = 0;
       controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering shutdown state. Please reset the CPU.");
+      executing_ = false;
       break;
     case ServerState::Error:
       CPU.error_cycle_ct = 0;
       controller_.getBoard().debugPrintln(DebugType::ERROR, "Entering error state. Please reset the CPU.");
+      executing_ = false;
       break;
     default:
       controller_.getBoard().debugPrint(DebugType::ERROR, "Unhandled state change to: ");
       controller_.getBoard().debugPrintln(DebugType::ERROR, get_state_string(new_state));
+      executing_ = false;
       // Unhandled state.
       break;
   }
@@ -1666,24 +1581,61 @@ bool CommandServer<BoardType, ShieldType>::cmd_read_memory() {
       mem_size
     );
     set_error("Invalid address range: %08lX - %08lX", address, address + size);
-    return false;
+    //return false;
   }
 
-  uint8_t *ptr = ArduinoX86::Bus->get_ptr(address);
+  // Special-case 1, 2, and 4 bytes.
+  switch (size) {
+    case 1:
+    {
+      uint8_t value = ArduinoX86::Bus->mem_read_u8(address, false);
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 1 byte from address: %08lX to client: %02X\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write(&value, 1);
+      break;
+    }
+    case 2:
+    {
+      uint16_t value = ArduinoX86::Bus->mem_read_u16(address, false);
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 2 bytes from address: %08lX to client: %04X\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write((uint8_t *)&value, 2);
+      break;
+    }
+    case 4:
+    {
+      uint32_t value0 = ArduinoX86::Bus->mem_read_u16(address, false);
+      uint32_t value1 = ArduinoX86::Bus->mem_read_u16(address + 2, false);
+      uint32_t value = (value1 << 16) | value0;
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending 4 bytes from address: %08lX to client: %08lX\n\r", address, value);
+      set_error("No error");
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write((uint8_t *)&value, 4);
+      break;
+    }
+    default:
+    {
+      uint8_t *ptr = ArduinoX86::Bus->get_ptr(address);
 
-  if (ptr == nullptr) {
-    controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_read_memory(): Invalid address: %08lX\n\r", address);
-    set_error("Invalid address: %08lX", address);
-    return false;
+      if (ptr == nullptr) {
+        controller_.getBoard().debugPrintf(DebugType::ERROR, false, "## cmd_read_memory(): Invalid address: %08lX\n\r", address);
+        set_error("Invalid address: %08lX", address);
+        return false;
+      }
+
+      controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
+      set_error("No error");
+
+      // Send an initial success byte, so that the client knows we are sending data.
+      // Otherwise it doesn't know if the command failed and will have to time out.
+      proto_write((uint8_t *)"\x01", 1);
+      proto_write(ptr, size);
+      break;
+    }
   }
 
-  controller_.getBoard().debugPrintf(DebugType::CMD, false, "## cmd_read_memory(): Sending %lu bytes from address: %08lX to client...\n\r", size, address);
-  set_error("No error");
-
-  // Send an initial success byte, so that the client knows we are sending data.
-  // Otherwise it doesn't know if the command failed and will have to time out.
-  proto_write((uint8_t *)"\x01", 1);
-  proto_write(ptr, size);
   return true;
 }
 
@@ -1729,6 +1681,22 @@ bool CommandServer<BoardType, ShieldType>::cmd_set_program_bounds() {
   controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_program_bounds(): Setting bounds from start: %08lX to end: %08lX\n\r", start, end);
 
   CPU.set_program_bounds(start, end);
+  return true;
+}
+
+template<typename BoardType, typename ShieldType>
+bool CommandServer<BoardType, ShieldType>::cmd_set_jump_hint() {
+  bool enabled = static_cast<bool>(commandBuffer_[0]);
+  bool odd_address = static_cast<bool>(commandBuffer_[1]);
+
+  if (enabled) {
+    CPU.set_jump_hint(true, odd_address);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_jump_hint(): Enabling jump hint. Odd address: %d\n\r", odd_address ? 1 : 0);
+  } else {
+    CPU.set_jump_hint(false, false);
+    controller_.getBoard().debugPrintf(DebugType::CMD, false, "cmd_set_jump_hint(): Disabling jump hint.\n\r");
+  }
+
   return true;
 }
 

@@ -457,7 +457,6 @@ impl ModRmByte16 {
     /// Read the modrm byte and look up the appropriate value from the modrm table.
     /// Load any displacement, then return modrm struct and size of modrm + displacement.
     pub fn read(byte: u8) -> &'static ModRmByte16 {
-        log::debug!("ModRmByte16::read({:#02x})", byte);
         &MODRM16_TABLE[byte as usize]
     }
 

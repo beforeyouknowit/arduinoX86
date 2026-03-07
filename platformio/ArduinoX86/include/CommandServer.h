@@ -114,6 +114,7 @@ public:
     CmdServerStatus    = 0x26,
     CmdClearCycleLog   = 0x27,
     CmdSetProgramBounds = 0x28,
+    CmdSetJumpHint     = 0x29,
     CmdInvalid
   };
 
@@ -124,7 +125,7 @@ public:
   };
 
   void reset();
-  void run();
+  inline void run() __attribute__((always_inline));
   void change_state(ServerState new_state);
   ServerState state() const { return state_; }
   const char* get_last_error() const;
@@ -132,11 +133,16 @@ public:
   const char* get_command_name(ServerCommand cmd);
   const char* get_state_string(ServerState state);
   char get_state_char(ServerState state);
-  ServerState get_state() const {
+  
+  inline ServerState get_state() const __attribute__((always_inline)) {
     return state_;
   }
   uint32_t get_flags() const {
     return flags_;
+  }
+
+  inline bool is_executing() const __attribute__((always_inline)) {
+    return executing_;
   }
 
   bool is_execute_automatic() const {
@@ -173,6 +179,8 @@ private:
   unsigned long stateBeginTime_ = 0;
   uint32_t flags_ = 0; 
   bool ale_interrupt_enabled_ = false;
+  bool executing_ = false;
+  uint32_t serverTicks_ = 0;
 
   // Error handling
   static constexpr size_t MAX_ERROR_LEN = 256;
@@ -199,7 +207,7 @@ private:
     FLUSH;
   }
 
-  int proto_available() {
+  inline int proto_available() __attribute__((always_inline)) {
     return INBAND_SERIAL.available();
   }
 
@@ -273,5 +281,117 @@ private:
   bool cmd_server_status(void);
   bool cmd_clear_cycle_log(void);
   bool cmd_set_program_bounds(void);
+  bool cmd_set_jump_hint(void);
   bool cmd_null(void);
 };
+
+
+/// @brief Runs the command server, processing incoming commands and executing them.
+/// @tparam BoardType 
+/// @tparam ShieldType 
+template<typename BoardType, typename ShieldType>
+void CommandServer<BoardType,ShieldType>::run()
+{
+
+  serverTicks_++;
+
+  // Only process commands every 64 ticks
+  if ((serverTicks_ & 0x3F) != 0) {
+    return;
+  }
+
+  switch (commandState_) {
+
+    case CommandState::WaitingForCommand:
+      if (proto_available() > 0) {
+        uint8_t cmd_byte = proto_read();
+
+        // DEBUG_SERIAL.print("Received opcode: 0x");
+        // DEBUG_SERIAL.println(cmd_byte, HEX);
+
+        if (cmd_byte >= static_cast<uint8_t>(ServerCommand::CmdInvalid)) {
+          send_fail();
+          break;
+        }
+
+        // Valid command, enter ReadingCommand state
+        cmd_ = static_cast<ServerCommand>(cmd_byte);
+        if (cmd_ != ServerCommand::CmdServerStatus) {
+          controller_.getBoard().debugPrintf(
+            DebugType::CMD, 
+            false, 
+            "## CMD: Received command byte: %02X (%s)\n\r", 
+            cmd_byte, 
+            get_command_name(cmd_)
+          );
+        }
+
+        size_t command_bytes = get_command_input_bytes(cmd_);
+
+        if (cmd_ == ServerCommand::CmdNone) {
+          // We ignore command byte 0 (null command)
+          break;
+        } else if (command_bytes > 0) {
+          // This command requires input bytes before it is executed.
+          commandByteN_ = 0;
+          commandBytesExpected_ = command_bytes;
+          commandStartTime_ = millis();  // Get start time for timeout calculation
+          commandState_ = CommandState::ReadingCommand;
+        } else {
+          // Command requires no input, so execute it immediately
+          bool result = dispatch_command(cmd_);
+          if (result) {
+            debug_proto("Command OK!");
+            send_ok();
+          } else {
+            debug_proto("Command FAIL!");
+            send_fail();
+          }
+        }
+      }
+      break;
+
+    case CommandState::ReadingCommand:
+      // The previously specified command requires parameter bytes, so read them in, or timeout
+      if (proto_available() > 0) {
+        // TODO: Read more than one byte at a time if available.
+        uint8_t param_byte = proto_read();
+
+        if (commandByteN_ < MAX_COMMAND_BYTES) {
+          commandBuffer_[commandByteN_++] = param_byte;
+
+          if (commandByteN_ == commandBytesExpected_) {
+            // We have received enough parameter bytes to execute the in-progress command.
+            bool result = dispatch_command(cmd_);
+            if (result) {
+              send_ok();
+            } else {
+              send_fail();
+            }
+
+            // Revert to listening for command
+            commandByteN_ = 0;
+            commandBytesExpected_ = 0;
+            commandState_ = CommandState::WaitingForCommand;
+          }
+        }
+      } else {
+        // No bytes received yet, so keep track of how long we've been waiting
+        uint32_t now = millis();
+        uint32_t elapsed = now - commandStartTime_;
+
+        if (elapsed >= CMD_TIMEOUT) {
+          // Timed out waiting for parameter bytes. Send failure and revert to listening for command
+          commandByteN_ = 0;
+          commandBytesExpected_ = 0;
+          commandState_ = CommandState::WaitingForCommand;
+          debug_proto("Command timeout!");
+          send_fail();
+        }
+      }
+      break;
+
+    case CommandState::ExecutingCommand:
+      break;
+  }
+}

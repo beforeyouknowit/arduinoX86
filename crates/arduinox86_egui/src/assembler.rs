@@ -46,11 +46,14 @@ impl Default for Assembler {
 impl Assembler {
     pub fn new<S: Into<String>>(format: S) -> Self {
         let nasm_path = if let Ok(p) = env::var("NASM_PATH") {
-            PathBuf::from(p)
+            let nasm_dir = PathBuf::from(p);
+            nasm_dir.join("nasm")
         }
         else {
             PathBuf::from("./nasm")
         };
+
+        log::debug!("Using nasm at path: {}", nasm_path.display());
 
         Assembler {
             nasm_path,

@@ -216,6 +216,31 @@ void cycle();
 #define READ_ABUS_22 READ_PIN_D00
 #define READ_ABUS_23 READ_PIN_D01
 
+#define ABUS_00 ((GPIOJ->IDR & BIT07) >> 7)  // 7 - 7 = 0
+#define ABUS_01 ((GPIOI->IDR & BIT14) >> 13) // 14 - 13 = 1
+#define ABUS_02 ((GPIOE->IDR & BIT06) >> 4)  // 6 - 4 = 2
+#define ABUS_03 ((GPIOK->IDR & BIT07) >> 4)  // 7 - 4 = 3 
+#define ABUS_04 ((GPIOI->IDR & BIT15) >> 11) // 15 - 11 = 4
+#define ABUS_05 ((GPIOI->IDR & BIT10) >> 5)  // 10 - 5 = 5
+#define ABUS_06 ((GPIOG->IDR & BIT10) >> 4)  // 10 - 4 = 6
+#define ABUS_07 ((GPIOI->IDR & BIT13) >> 6)  // 13 - 6 = 7
+#define ABUS_08 ((GPIOH->IDR & BIT15) >> 7)  // 15 - 7 = 8
+#define ABUS_09 ((GPIOB->IDR & BIT02) << 7)  // 2 + 7 = 9
+#define ABUS_10 ((GPIOK->IDR & BIT00) << 10) // 0 + 10 = 10
+#define ABUS_11 ((GPIOE->IDR & BIT04) << 7)  // 4 + 7 = 11
+#define ABUS_12 ((GPIOI->IDR & BIT11) << 1)  // 11 + 1 = 12
+#define ABUS_13 ((GPIOE->IDR & BIT05) << 8)  // 5 + 8 = 13
+#define ABUS_14 ((GPIOK->IDR & BIT02) << 12) // 2 + 12 = 14
+#define ABUS_15 ((GPIOG->IDR & BIT07) << 8)  // 7 + 8 = 15
+#define ABUS_16 ((GPIOH->IDR & BIT04) << 12) // 4 + 12 = 16
+#define ABUS_17 ((GPIOB->IDR & BIT11) << 6) // 11 + 6 = 17 
+#define ABUS_18 ((GPIOI->IDR & BIT09) << 9) // 9 + 9 = 18
+#define ABUS_19 ((GPIOH->IDR & BIT13) << 6) // 13 + 6 = 19
+#define ABUS_20 ((GPIOC->IDR & BIT07) << 13) // 7 + 13 = 20
+#define ABUS_21 ((GPIOG->IDR & BIT14) << 7) // 14 + 7 = 21
+#define ABUS_22 ((GPIOB->IDR & BIT07) << 15) // 7 + 15 = 22
+#define ABUS_23 ((GPIOA->IDR & BIT09) << 14) // 9 + 14 = 23
+
 #define PRE_RESET_CYCLE_COUNT 5 // How many cycles to wait before asserting RESET. This gives time for pins to settle.
 
 // How many cycles to hold the RESET signal high. Intel says "greater than 4" although 4 seems to work.
@@ -512,41 +537,8 @@ public:
     #endif
   }
 
-    /// Read the multiplexed address bus. Returns a 20-bit value.
-  uint32_t readAddressBusImpl(bool peek = true) {
-    // If we're not peeking, set the bus direction to input
-    if (!peek) {
-      //setBusDirection(BusDirection::Input, ActiveBusWidth::Sixteen);
-    }
-
-    uint32_t address = 0;
-    // Read the address bus pins
-    if (READ_ABUS_00) address |= 0x00000001;
-    if (READ_ABUS_01) address |= 0x00000002;
-    if (READ_ABUS_02) address |= 0x00000004;
-    if (READ_ABUS_03) address |= 0x00000008;
-    if (READ_ABUS_04) address |= 0x00000010;
-    if (READ_ABUS_05) address |= 0x00000020;
-    if (READ_ABUS_06) address |= 0x00000040;
-    if (READ_ABUS_07) address |= 0x00000080;
-    if (READ_ABUS_08) address |= 0x00000100;
-    if (READ_ABUS_09) address |= 0x00000200;
-    if (READ_ABUS_10) address |= 0x00000400;
-    if (READ_ABUS_11) address |= 0x00000800;
-    if (READ_ABUS_12) address |= 0x00001000;
-    if (READ_ABUS_13) address |= 0x00002000;
-    if (READ_ABUS_14) address |= 0x00004000;
-    if (READ_ABUS_15) address |= 0x00008000;
-    if (READ_ABUS_16) address |= 0x00010000;
-    if (READ_ABUS_17) address |= 0x00020000;
-    if (READ_ABUS_18) address |= 0x00040000;
-    if (READ_ABUS_19) address |= 0x00080000;
-    if (READ_ABUS_20) address |= 0x00100000;
-    if (READ_ABUS_21) address |= 0x00200000;
-    if (READ_ABUS_22) address |= 0x00400000;
-    if (READ_ABUS_23) address |= 0x00800000;
-    return address;
-  }
+    
+  inline uint32_t readAddressBusImpl(bool peek = true) __attribute__((always_inline));
 
   static bool readPinImpl(OutputPin pin) {
     switch (pin) {
@@ -794,3 +786,56 @@ public:
     board.debugPrintf(DebugType::EMIT, false, "P2:%c%c%c%c%c ", ready_chr, readyo_chr, error_chr, pereq_chr, busy_chr);
   }
 };
+
+uint32_t Shield80386::readAddressBusImpl(bool peek) {
+  // uint32_t address = 0;
+  // // Read the address bus pins
+  // if (READ_ABUS_00) address |= 0x00000001;
+  // if (READ_ABUS_01) address |= 0x00000002;
+  // if (READ_ABUS_02) address |= 0x00000004;
+  // if (READ_ABUS_03) address |= 0x00000008;
+  // if (READ_ABUS_04) address |= 0x00000010;
+  // if (READ_ABUS_05) address |= 0x00000020;
+  // if (READ_ABUS_06) address |= 0x00000040;
+  // if (READ_ABUS_07) address |= 0x00000080;
+  // if (READ_ABUS_08) address |= 0x00000100;
+  // if (READ_ABUS_09) address |= 0x00000200;
+  // if (READ_ABUS_10) address |= 0x00000400;
+  // if (READ_ABUS_11) address |= 0x00000800;
+  // if (READ_ABUS_12) address |= 0x00001000;
+  // if (READ_ABUS_13) address |= 0x00002000;
+  // if (READ_ABUS_14) address |= 0x00004000;
+  // if (READ_ABUS_15) address |= 0x00008000;
+  // if (READ_ABUS_16) address |= 0x00010000;
+  // if (READ_ABUS_17) address |= 0x00020000;
+  // if (READ_ABUS_18) address |= 0x00040000;
+  // if (READ_ABUS_19) address |= 0x00080000;
+  // if (READ_ABUS_20) address |= 0x00100000;
+  // if (READ_ABUS_21) address |= 0x00200000;
+  // if (READ_ABUS_22) address |= 0x00400000;
+  // if (READ_ABUS_23) address |= 0x00800000;
+  return ABUS_00 | 
+          ABUS_01 | 
+          ABUS_02 |
+          ABUS_03 |
+          ABUS_04 |
+          ABUS_05 |
+          ABUS_06 |
+          ABUS_07 |
+          ABUS_08 |
+          ABUS_09 |
+          ABUS_10 |
+          ABUS_11 |
+          ABUS_12 |
+          ABUS_13 |
+          ABUS_14 |
+          ABUS_15 |
+          ABUS_16 |
+          ABUS_17 |
+          ABUS_18 |
+          ABUS_19 |
+          ABUS_20 |
+          ABUS_21 |
+          ABUS_22 |
+          ABUS_23;
+}
